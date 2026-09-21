@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+
+{% block title %}Barcode Generator & Label Printer — AutoVolt Pro{% endblock %}
+{% block header_title %}Barcode Label Generator & Sticker Printer{% endblock %}
+
+{% block content %}
+<div class="space-y-6 max-w-7xl mx-auto">
+    <!-- Top Configuration Card (No-print) -->
+    <div class="no-print bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-4">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-2xl bg-slate-900 text-amber-400 flex items-center justify-center font-bold text-lg">
+                    🏷️
+                </div>
+                <div>
+                    <h2 class="font-extrabold text-slate-900 text-base">Generate Inventory Box Stickers</h2>
+                    <p class="text-xs text-slate-500">Print barcode stickers to paste on spare parts boxes, battery warranty tags & bins</p>
+                </div>
+            </div>
+
+            <button onclick="window.print()" class="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-lg transition flex items-center gap-2">
+                <i data-lucide="printer" class="w-4 h-4 text-amber-400"></i>
+                <span>Print Barcode Stickers (Ctrl+P)</span>
+            </button>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+            <div>
+                <label class="block font-bold text-slate-800 mb-1">Select Spare Part Item</label>
+                <select id="label-part-select" onchange="updateStickerPreview()" class="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none">
+                    {% for p in inventory_items %}
+                    <option value="{{ p.id }}" data-name="{{ p.part_name }}" data-barcode="{{ p.barcode }}" data-price="{{ p.selling_price }}">{{ p.part_name }} ({{ p.barcode }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="block font-bold text-slate-800 mb-1">Number of Sticker Copies</label>
+                <input type="number" id="label-count" value="12" min="1" max="100" oninput="updateStickerPreview()" class="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none">
+            </div>
+            <div>
+                <label class="block font-bold text-slate-800 mb-1">Sticker Format</label>
+                <select id="label-format" class="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none">
+                    <option value="50x25">Standard Box Label (50mm x 25mm)</option>
+                    <option value="a4_sheet">A4 Sheet (24 Labels per page)</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- Printable Area (Formatted for Sticker Paper) -->
+    <div class="print-area bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
+        <h3 class="no-print font-bold text-xs text-slate-400 uppercase tracking-wider mb-4">Print Preview Sheet:</h3>
+        
+        <div id="stickers-container" class="barcode-sticker-grid grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+            <!-- Stickers populated by JavaScript -->
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    async function updateStickerPreview() {
+        const select = document.getElementById('label-part-select');
+        const selected = select.options[select.selectedIndex];
+        if (!selected) return;
+
+        const name = selected.getAttribute('data-name');
+        const barcode = selected.getAttribute('data-barcode');
+        const price = selected.getAttribute('data-price');
+        const count = parseInt(document.getElementById('label-count').value) || 12;
+
+        const container = document.getElementById('stickers-container');
+        container.innerHTML = "<div class='col-span-full py-4 text-center text-xs text-slate-400'>Loading barcode SVG...</div>";
+
+        try {
+            const resp = await fetch(`/api/inventory/barcode-svg/${encodeURIComponent(barcode)}`);
+            const data = await resp.json();
+            const svgContent = data.svg;
+
+            let html = "";
+            for (let i = 0; i < count; i++) {
+                html += `
+                    <div class="barcode-sticker-item bg-white border border-slate-300 rounded-xl p-2.5 text-center flex flex-col justify-between shadow-xs">
+                        <div class="text-[9px] font-bold text-slate-900 tracking-tight leading-tight line-clamp-1">
+                            ${name}
+                        </div>
+                        <div class="my-1 flex items-center justify-center max-h-12 overflow-hidden">
+                            ${svgContent}
+                        </div>
+                        <div class="flex items-center justify-between text-[9px] font-bold text-slate-800 border-t border-slate-100 pt-0.5">
+                            <span class="text-slate-500 font-mono text-[8px]">SPARK AUTO</span>
+                            <span class="text-primary-700">MRP: ₹${parseFloat(price).toFixed(2)}</span>
+                        </div>
+                    </div>
+                `;
+            }
+            container.innerHTML = html;
+        } catch (e) {
+            container.innerHTML = `<div class='col-span-full text-rose-500 text-xs text-center'>Error rendering barcode: ${e}</div>`;
+        }
+    }
+
+    // Run on page load
+    document.addEventListener("DOMContentLoaded", updateStickerPreview);
+</script>
+{% endblock %}

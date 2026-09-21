@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+
+{% block title %}Workshop Settings — AutoVolt Pro{% endblock %}
+{% block header_title %}Workshop & System Settings{% endblock %}
+
+{% block content %}
+<div class="space-y-6 max-w-4xl mx-auto">
+    <!-- Profile & Bank Info Form -->
+    <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-6">
+        <div class="flex items-center gap-3 border-b border-slate-100 pb-4">
+            <div class="w-10 h-10 rounded-2xl bg-slate-900 text-amber-400 flex items-center justify-center font-bold text-lg">
+                ⚙️
+            </div>
+            <div>
+                <h2 class="font-extrabold text-slate-900 text-base">Workshop Profile & Bank Details</h2>
+                <p class="text-xs text-slate-500">Configure your garage branding, GSTIN, UPI ID, and bank account for invoices</p>
+            </div>
+        </div>
+
+        <form action="/api/settings/profile" method="POST" class="space-y-4 text-xs font-medium text-slate-700">
+            <!-- Garage Name & Subtitle -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">Workshop Name *</label>
+                    <input type="text" name="name" value="{{ profile.name }}" required class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500">
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">Subtitle / Tagline</label>
+                    <input type="text" name="subtitle" value="{{ profile.subtitle }}" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500">
+                </div>
+            </div>
+
+            <!-- Phone, Email, GSTIN -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">Workshop Phone *</label>
+                    <input type="text" name="phone" value="{{ profile.phone }}" required class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500">
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">Email</label>
+                    <input type="email" name="email" value="{{ profile.email or '' }}" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500">
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">GSTIN Number</label>
+                    <input type="text" name="gstin" value="{{ profile.gstin or '' }}" class="w-full uppercase font-mono px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500">
+                </div>
+            </div>
+
+            <!-- Workshop Address -->
+            <div>
+                <label class="block font-bold text-slate-900 mb-1">Workshop Address *</label>
+                <input type="text" name="address" value="{{ profile.address }}" required class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500">
+            </div>
+
+            <!-- Primary UPI & Bank Account Info -->
+            <div class="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
+                <h3 class="font-bold text-slate-900 text-xs uppercase tracking-wider flex items-center gap-1.5">
+                    <i data-lucide="landmark" class="w-4 h-4 text-primary-600"></i>
+                    <span>Primary Bank Account & UPI ID (Appears on Invoices & WhatsApp Pay Links)</span>
+                </h3>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                        <label class="block font-bold text-slate-800 mb-1">Workshop UPI ID (VPA) *</label>
+                        <input type="text" name="upi_id" value="{{ profile.upi_id }}" required placeholder="e.g. sparkautoworkshop@okaxis" class="w-full font-mono font-bold text-primary-700 px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500">
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-800 mb-1">Bank Name</label>
+                        <input type="text" name="bank_name" value="{{ profile.bank_name }}" class="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                        <label class="block font-bold text-slate-800 mb-1">Account Number</label>
+                        <input type="text" name="bank_account_no" value="{{ profile.bank_account_no }}" class="w-full font-mono px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-800 mb-1">IFSC Code</label>
+                        <input type="text" name="bank_ifsc" value="{{ profile.bank_ifsc }}" class="w-full uppercase font-mono px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-800 mb-1">Branch</label>
+                        <input type="text" name="bank_branch" value="{{ profile.bank_branch }}" class="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Terms & Conditions -->
+            <div>
+                <label class="block font-bold text-slate-900 mb-1">Invoice Terms & Conditions</label>
+                <textarea name="terms" rows="3" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500">{{ profile.terms }}</textarea>
+            </div>
+
+            <div class="flex items-center justify-end pt-3 border-t border-slate-100">
+                <button type="submit" class="px-6 py-2.5 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl shadow-lg transition">
+                    Save Workshop Profile
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Cloud Database (Supabase) Connection Status -->
+    <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-3">
+        <div class="flex items-center gap-2 border-b border-slate-100 pb-3">
+            <i data-lucide="database" class="w-5 h-5 text-emerald-600"></i>
+            <h3 class="font-bold text-slate-900 text-sm">Database & Supabase Cloud Status</h3>
+        </div>
+        <p class="text-xs text-slate-600">
+            {% if is_supabase_connected %}
+            <span class="text-emerald-700 font-bold bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">🟢 Connected to Supabase Cloud Database</span>
+            {% else %}
+            <span class="text-slate-700 font-bold bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200">⚡ Local SQLite Hybrid Database Active (Instant & Offline Ready)</span>
+            <span class="block text-slate-400 mt-2">To connect to your Supabase free tier account on cloud, add `SUPABASE_URL` and `SUPABASE_KEY` in your `.env` file or Render environment variables.</span>
+            {% endif %}
+        </p>
+    </div>
+</div>
+{% endblock %}

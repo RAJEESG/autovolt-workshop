@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Job Status #{{ job.job_number }} — {{ workshop.name }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="/static/css/custom.css">
+</head>
+<body class="bg-slate-100 text-slate-800 antialiased min-h-screen py-6 px-4 flex flex-col items-center justify-center">
+
+    <div class="max-w-md w-full bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden">
+        <!-- Header -->
+        <div class="bg-gradient-to-r from-slate-900 to-slate-800 text-white p-6 text-center space-y-2">
+            <div class="w-12 h-12 rounded-2xl bg-amber-500 text-slate-950 font-black text-2xl mx-auto flex items-center justify-center shadow-lg">
+                ⚡
+            </div>
+            <h1 class="text-xl font-black">{{ workshop.name }}</h1>
+            <p class="text-xs text-amber-300">Live Vehicle Service Status Tracker</p>
+        </div>
+
+        <div class="p-6 space-y-5">
+            <!-- Vehicle Info -->
+            <div class="bg-slate-50 p-4 rounded-2xl border border-slate-200 text-center">
+                <span class="text-xs text-slate-400 font-bold uppercase tracking-wider block">Vehicle Registration</span>
+                <span class="text-2xl font-black text-primary-700 font-mono block mt-0.5">{{ job.vehicle_reg_no }}</span>
+                <span class="text-xs text-slate-600 font-medium">{{ job.vehicle_make_model }}</span>
+            </div>
+
+            <!-- Live Status Progress Steps -->
+            <div class="space-y-3">
+                <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider">Service Progress</h3>
+                
+                <div class="p-4 rounded-2xl {% if job.status == 'COMPLETED' %}bg-emerald-50 border-emerald-200 text-emerald-900{% elif job.status == 'IN_PROGRESS' %}bg-amber-50 border-amber-200 text-amber-900{% else %}bg-blue-50 border-blue-200 text-blue-900{% endif %} border">
+                    <div class="flex items-center gap-2 font-bold text-sm">
+                        <span class="w-2.5 h-2.5 rounded-full {% if job.status == 'COMPLETED' %}bg-emerald-500{% elif job.status == 'IN_PROGRESS' %}bg-amber-500 animate-ping{% else %}bg-blue-500{% endif %}"></span>
+                        <span>Current Status: {{ job.status }}</span>
+                    </div>
+                    {% if job.diagnosis_notes %}
+                    <p class="text-xs mt-2 text-slate-700"><b>Tech Notes:</b> {{ job.diagnosis_notes }}</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Complaints Reported -->
+            <div class="space-y-2">
+                <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider">Reported Complaints</h3>
+                <div class="flex flex-wrap gap-1.5">
+                    {% for comp in complaints_list %}
+                    <span class="px-2.5 py-1 bg-slate-100 text-slate-800 rounded-lg text-xs font-semibold">
+                        ⚡ {{ comp }}
+                    </span>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- Contact Workshop -->
+            <div class="pt-3 border-t border-slate-100 text-center">
+                <a href="tel:{{ workshop.phone }}" class="inline-flex items-center gap-2 text-xs font-bold text-primary-700 hover:underline">
+                    <i data-lucide="phone" class="w-4 h-4"></i>
+                    <span>Call Workshop: {{ workshop.phone }}</span>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        lucide.createIcons();
+    </script>
+</body>
+</html>

@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+
+{% block title %}Bank & Cash Accounts — AutoVolt Pro{% endblock %}
+{% block header_title %}Bank Accounts & Cash Register{% endblock %}
+
+{% block content %}
+<div class="space-y-6 max-w-7xl mx-auto">
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-lg">
+                🏦
+            </div>
+            <div>
+                <h2 class="font-extrabold text-slate-900 text-base">Workshop Bank & Cash Registers</h2>
+                <p class="text-xs text-slate-500">Track collections across Bank, UPI QR, and Cash in hand</p>
+            </div>
+        </div>
+
+        <button onclick="openModal('add-bank-modal')" class="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white font-bold text-xs rounded-xl shadow transition flex items-center gap-1.5">
+            <i data-lucide="plus" class="w-4 h-4"></i>
+            <span>+ Add Bank Account</span>
+        </button>
+    </div>
+
+    <!-- Accounts Cards Grid -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+        {% for acc in accounts %}
+        <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-4 hover:border-primary-400 transition">
+            <div class="flex items-start justify-between">
+                <div class="flex items-center gap-3">
+                    <div class="w-12 h-12 rounded-2xl bg-slate-900 text-primary-400 flex items-center justify-center font-black text-lg">
+                        {% if acc.account_type == 'BANK' %}🏛️{% elif acc.account_type == 'CASH' %}💵{% else %}📱{% endif %}
+                    </div>
+                    <div>
+                        <h3 class="font-extrabold text-slate-900 text-sm">{{ acc.account_name }}</h3>
+                        <span class="text-xs text-slate-500">{{ acc.bank_name or acc.account_type }}</span>
+                    </div>
+                </div>
+                {% if acc.is_primary %}
+                <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary-100 text-primary-700">Primary</span>
+                {% endif %}
+            </div>
+
+            <div class="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-xs space-y-2 text-slate-700">
+                {% if acc.account_number and acc.account_number != '-' %}
+                <p class="flex items-center justify-between">
+                    <span class="text-slate-500">A/c Number:</span>
+                    <span class="font-mono font-bold">{{ acc.account_number }}</span>
+                </p>
+                <p class="flex items-center justify-between">
+                    <span class="text-slate-500">IFSC Code:</span>
+                    <span class="font-mono font-semibold">{{ acc.ifsc_code }}</span>
+                </p>
+                {% endif %}
+                {% if acc.upi_vpa and acc.upi_vpa != '-' %}
+                <p class="flex items-center justify-between">
+                    <span class="text-slate-500">UPI VPA:</span>
+                    <span class="font-bold text-primary-700">{{ acc.upi_vpa }}</span>
+                </p>
+                {% endif %}
+            </div>
+
+            <div class="pt-2 border-t border-slate-100 flex items-center justify-between">
+                <span class="text-xs text-slate-500 font-medium">Current Balance:</span>
+                <span class="text-xl font-black text-emerald-600">₹{{ "{:,.2f}".format(acc.current_balance) }}</span>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Modal: Add Bank Account -->
+<div id="add-bank-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+            <h3 class="font-bold text-slate-900 text-base">🏦 Add Workshop Account</h3>
+            <button onclick="closeModal('add-bank-modal')" class="text-slate-400 hover:text-slate-700 text-xl font-bold">✕</button>
+        </div>
+
+        <form action="/api/bank-accounts" method="POST" class="mt-4 space-y-3 text-xs font-medium text-slate-700">
+            <div>
+                <label class="block font-bold text-slate-900 mb-1">Account Display Name *</label>
+                <input type="text" name="account_name" required placeholder="e.g. Federal Bank Current A/c" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500">
+            </div>
+
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">Bank Name</label>
+                    <input type="text" name="bank_name" placeholder="e.g. Federal Bank" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">Account Type</label>
+                    <select name="account_type" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                        <option value="BANK">Bank Account</option>
+                        <option value="CASH">Cash Drawer</option>
+                        <option value="UPI_WALLET">UPI Wallet / QR</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">Account Number</label>
+                    <input type="text" name="account_number" placeholder="1234567890" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">IFSC Code</label>
+                    <input type="text" name="ifsc_code" placeholder="FDRL0001234" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                </div>
+            </div>
+
+            <div>
+                <label class="block font-bold text-slate-900 mb-1">UPI ID (VPA)</label>
+                <input type="text" name="upi_vpa" placeholder="workshop@upi" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+            </div>
+
+            <div>
+                <label class="block font-bold text-slate-900 mb-1">Opening Balance (₹)</label>
+                <input type="number" step="0.01" name="current_balance" value="0.0" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+            </div>
+
+            <div class="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+                <button type="button" onclick="closeModal('add-bank-modal')" class="px-4 py-2 text-slate-600 font-bold">Cancel</button>
+                <button type="submit" class="px-5 py-2.5 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl shadow">Save Account</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

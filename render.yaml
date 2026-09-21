@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: autovolt-workshop-manager
+    env: python
+    region: singapore
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: WORKSHOP_NAME
+        value: SPARK AUTO ELECTRICALS
+      - key: WORKSHOP_UPI_ID
+        value: sparkautoworkshop@okaxis

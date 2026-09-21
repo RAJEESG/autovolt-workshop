@@ -1,0 +1,31 @@
+<div class="bg-white p-3.5 rounded-xl border border-slate-200/80 shadow-sm hover:shadow-md transition space-y-2.5">
+    <div class="flex items-start justify-between gap-1">
+        <div>
+            <span class="text-[10px] font-mono text-slate-400 font-semibold">#{{ job.job_number }}</span>
+            <h4 class="font-extrabold text-slate-900 text-sm leading-tight">{{ job.vehicle_reg_no }}</h4>
+            <p class="text-[11px] text-slate-500 font-medium">{{ job.vehicle_make_model }}</p>
+        </div>
+        <a href="/job-cards/{{ job.id }}" class="text-primary-600 hover:text-primary-800 p-1 rounded-lg bg-primary-50">
+            <i data-lucide="arrow-up-right" class="w-4 h-4"></i>
+        </a>
+    </div>
+
+    <!-- Customer & Technician -->
+    <div class="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-600">
+        <span class="truncate max-w-[110px]">👤 {{ job.customer_name }}</span>
+        <span class="font-medium text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded text-[10px]">🔧 {{ job.assigned_technician_name or 'No Tech' }}</span>
+    </div>
+
+    <!-- Quick Status Update Dropdown & Action -->
+    <div class="pt-1 flex items-center justify-between gap-2">
+        <form action="/api/job-cards/{{ job.id }}/status" method="POST" class="w-full">
+            <select name="status" onchange="this.form.submit()" class="w-full text-[11px] font-semibold py-1 px-2 rounded-lg border border-slate-200 bg-slate-50 text-slate-700 focus:outline-none">
+                <option value="RECEIVED" {% if job.status == 'RECEIVED' %}selected{% endif %}>Received</option>
+                <option value="INSPECTION" {% if job.status == 'INSPECTION' %}selected{% endif %}>Inspection</option>
+                <option value="IN_PROGRESS" {% if job.status == 'IN_PROGRESS' %}selected{% endif %}>In Progress</option>
+                <option value="COMPLETED" {% if job.status == 'COMPLETED' %}selected{% endif %}>Completed</option>
+                <option value="DELIVERED" {% if job.status == 'DELIVERED' %}selected{% endif %}>Delivered</option>
+            </select>
+        </form>
+    </div>
+</div>

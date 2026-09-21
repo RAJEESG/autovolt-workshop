@@ -1,0 +1,452 @@
+{% extends "base.html" %}
+
+{% block title %}Billing & Barcode POS — AutoVolt Pro{% endblock %}
+{% block header_title %}Billing & Rapid Barcode POS{% endblock %}
+
+{% block content %}
+<div class="space-y-6 max-w-7xl mx-auto">
+    <!-- POS Screen Layout: 2 Columns (Billing Grid + Invoices List) -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Main POS Bill Builder (2 Columns) -->
+        <div class="lg:col-span-2 bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-6">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-2xl bg-primary-600 text-white flex items-center justify-center font-bold text-lg shadow-md shadow-primary-500/20">
+                        ⚡
+                    </div>
+                    <div>
+                        <h2 class="font-extrabold text-slate-900 text-lg">Create New Invoice</h2>
+                        <p class="text-xs text-slate-500">Scan spare parts barcode or add service labor charges</p>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-2">
+                    <span class="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-100 flex items-center gap-1.5">
+                        <span class="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                        Scanner Ready
+                    </span>
+                </div>
+            </div>
+
+            <!-- Fast Barcode Input Banner -->
+            <div class="p-4 bg-gradient-to-r from-amber-50 to-orange-50 rounded-2xl border border-amber-200/80 flex flex-col sm:flex-row items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center font-black text-xl shrink-0">
+                    <i data-lucide="barcode" class="w-5 h-5"></i>
+                </div>
+                <div class="flex-1 w-full">
+                    <label class="block text-xs font-bold text-amber-950 mb-1">Scan Inventory Box Barcode (or Type & Enter):</label>
+                    <input type="text" id="pos-barcode-input" autofocus placeholder="Point scanner at box barcode or type SKU (e.g. 89012340001)..." class="barcode-input-field barcode-scanner-target w-full px-4 py-2.5 rounded-xl border border-amber-300 bg-white font-mono text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 shadow-inner">
+                </div>
+                <button type="button" onclick="triggerManualScan()" class="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs rounded-xl shadow transition self-stretch sm:self-auto flex items-center justify-center gap-1">
+                    <span>Add Item</span>
+                </button>
+            </div>
+
+            <!-- Customer & Vehicle Info Inputs -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50 p-4 rounded-2xl border border-slate-100 text-xs">
+                <div>
+                    <label class="block font-bold text-slate-800 mb-1">Customer Name *</label>
+                    <input type="text" id="bill-cust-name" placeholder="Customer Name" class="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500">
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-800 mb-1">WhatsApp Phone *</label>
+                    <input type="tel" id="bill-cust-phone" placeholder="e.g. 9847012345" class="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500">
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-800 mb-1">Vehicle Reg Number</label>
+                    <input type="text" id="bill-veh-no" placeholder="KL-07-XX-XXXX" class="w-full uppercase font-mono px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500">
+                </div>
+            </div>
+
+            <!-- POS Live Bill Items Table -->
+            <div class="space-y-3">
+                <div class="flex items-center justify-between">
+                    <h3 class="font-bold text-slate-900 text-xs uppercase tracking-wider">Bill Items (Labor & Parts)</h3>
+                    <div class="flex items-center gap-2">
+                        <button type="button" onclick="addCustomLaborRow()" class="px-2.5 py-1 bg-amber-100 hover:bg-amber-200 text-amber-900 font-bold text-xs rounded-lg transition">
+                            + Add Labor
+                        </button>
+                        <button type="button" onclick="openModal('select-part-pos-modal')" class="px-2.5 py-1 bg-blue-100 hover:bg-blue-200 text-blue-900 font-bold text-xs rounded-lg transition">
+                            + Pick Part from List
+                        </button>
+                    </div>
+                </div>
+
+                <div class="overflow-x-auto border border-slate-200 rounded-2xl">
+                    <table class="w-full text-left text-xs" id="pos-items-table">
+                        <thead class="bg-slate-100 text-slate-600 uppercase font-semibold text-[11px]">
+                            <tr>
+                                <th class="py-2.5 px-3">Type</th>
+                                <th class="py-2.5 px-3">Item / Service Description</th>
+                                <th class="py-2.5 px-3">HSN</th>
+                                <th class="py-2.5 px-3 w-16">Qty</th>
+                                <th class="py-2.5 px-3 w-24">Rate (₹)</th>
+                                <th class="py-2.5 px-3 w-16">Tax %</th>
+                                <th class="py-2.5 px-3 text-right w-24">Total (₹)</th>
+                                <th class="py-2.5 px-3 text-center w-10">✕</th>
+                            </tr>
+                        </thead>
+                        <tbody id="pos-table-body" class="divide-y divide-slate-100 font-medium text-slate-800">
+                            <!-- Dynamic Rows Inserted Here -->
+                            <tr id="empty-table-row">
+                                <td colspan="8" class="text-center py-8 text-slate-400">
+                                    <i data-lucide="scan-line" class="w-8 h-8 mx-auto text-slate-300 mb-2"></i>
+                                    Scan box barcode or click buttons above to add items to bill.
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Billing Calculations & Submit Section -->
+            <div class="bg-slate-900 text-white p-5 rounded-3xl space-y-4 shadow-lg">
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
+                    <div>
+                        <label class="block text-slate-400 mb-1">Labor Total</label>
+                        <span class="text-lg font-bold text-amber-400" id="pos-labor-total">₹0.00</span>
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 mb-1">Parts Total</label>
+                        <span class="text-lg font-bold text-blue-400" id="pos-parts-total">₹0.00</span>
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 mb-1">GST Tax Total</label>
+                        <span class="text-lg font-bold text-slate-300" id="pos-tax-total">₹0.00</span>
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 mb-1">Discount (₹)</label>
+                        <input type="number" id="pos-discount" value="0" min="0" oninput="recalculateTotals()" class="w-full px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-700 text-white focus:outline-none text-xs">
+                    </div>
+                </div>
+
+                <div class="pt-4 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4">
+                    <div class="flex items-center gap-3">
+                        <div>
+                            <span class="text-xs text-slate-400 block">Payment Mode:</span>
+                            <select id="pos-payment-mode" class="text-xs font-bold px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none">
+                                <option value="UPI">📱 UPI / GPay / PhonePe</option>
+                                <option value="CASH">💵 Cash In Hand</option>
+                                <option value="BANK_TRANSFER">🏦 Bank Transfer</option>
+                                <option value="CARD">💳 Card</option>
+                                <option value="KHATA_CREDIT">⏳ Credit / Khata Due</option>
+                            </select>
+                        </div>
+                        <div>
+                            <span class="text-xs text-slate-400 block">Amount Paid (₹):</span>
+                            <input type="number" id="pos-amount-paid" placeholder="Full" class="w-28 text-xs font-bold px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none">
+                        </div>
+                    </div>
+
+                    <div class="text-right flex items-center gap-4">
+                        <div>
+                            <span class="text-xs text-slate-400 block">Grand Total:</span>
+                            <span class="text-3xl font-black text-emerald-400" id="pos-grand-total">₹0.00</span>
+                        </div>
+                        <button type="button" onclick="submitPOSInvoice()" class="px-6 py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-sm rounded-2xl shadow-lg transition flex items-center gap-2">
+                            <span>SUBMIT & BILL ⚡</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Invoices List Sidebar (1 Column) -->
+        <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-5 space-y-4 flex flex-col">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+                <h3 class="font-bold text-slate-900 text-sm">Recent Bills & Receipts</h3>
+                <span class="text-xs text-slate-400">{{ invoices|length }} total</span>
+            </div>
+
+            <div class="space-y-3 flex-1 overflow-y-auto max-h-[620px] pr-1">
+                {% for inv in invoices %}
+                <div class="p-3 rounded-2xl bg-slate-50 border border-slate-100 hover:border-slate-300 transition space-y-2">
+                    <div class="flex items-start justify-between">
+                        <div>
+                            <span class="font-bold text-slate-900 text-xs">{{ inv.invoice_number }}</span>
+                            <p class="text-[11px] text-slate-600 font-semibold">{{ inv.customer_name }}</p>
+                            <span class="text-[10px] text-slate-400 block">{{ inv.vehicle_reg_no or 'Counter Sale' }}</span>
+                        </div>
+                        <div class="text-right">
+                            <span class="font-black text-xs text-slate-900">₹{{ "{:,.2f}".format(inv.grand_total) }}</span>
+                            <span class="block text-[10px] font-bold {% if inv.payment_status == 'PAID' %}text-emerald-600{% elif inv.payment_status == 'PARTIAL' %}text-amber-600{% else %}text-rose-600{% endif %}">
+                                {{ inv.payment_status }}
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="pt-2 border-t border-slate-200/60 flex items-center justify-between text-xs">
+                        <span class="text-[10px] text-slate-400">{{ inv.invoice_date }}</span>
+                        <div class="flex items-center gap-1">
+                            <button onclick="shareInvoiceWhatsApp('{{ inv.id }}')" class="p-1 rounded bg-emerald-100 text-emerald-700 hover:bg-emerald-200" title="WhatsApp Share">
+                                💬
+                            </button>
+                            <button onclick="printA4Invoice('{{ inv.id }}')" class="p-1 rounded bg-slate-200 text-slate-700 hover:bg-slate-300" title="A4 Print">
+                                🖨️
+                            </button>
+                            <a href="/api/invoices/{{ inv.id }}/pdf" target="_blank" class="p-1 rounded bg-blue-100 text-blue-700 hover:bg-blue-200" title="PDF">
+                                📄
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Select Part from List -->
+<div id="select-part-pos-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-100">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+            <h3 class="font-bold text-slate-900">📦 Pick Spare Part from Inventory</h3>
+            <button onclick="closeModal('select-part-pos-modal')" class="text-slate-400 hover:text-slate-700 text-lg font-bold">✕</button>
+        </div>
+        <div class="mt-4 space-y-3">
+            <input type="text" id="pos-part-search" placeholder="Search part name or category..." oninput="filterPartsList()" class="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500">
+            <div class="max-h-60 overflow-y-auto divide-y divide-slate-100 text-xs" id="parts-picker-list">
+                {% for p in inventory_items %}
+                <div class="py-2.5 px-3 flex items-center justify-between hover:bg-slate-50 cursor-pointer rounded-lg part-row" onclick="addPartToPOS('{{ p.id }}', '{{ p.part_name }}', '{{ p.barcode }}', '{{ p.hsn_code }}', {{ p.selling_price }}, {{ p.tax_rate }})">
+                    <div>
+                        <span class="font-bold text-slate-900">{{ p.part_name }}</span>
+                        <span class="block text-[10px] text-slate-400 font-mono">{{ p.barcode }} • Stock: {{ p.stock_qty }}</span>
+                    </div>
+                    <span class="font-bold text-primary-700">₹{{ p.selling_price }}</span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let posItems = [];
+
+    // Trigger manual barcode scan input
+    function triggerManualScan() {
+        const val = document.getElementById('pos-barcode-input').value.trim();
+        if (val) {
+            window.barcodeScanner.triggerScan(val);
+            document.getElementById('pos-barcode-input').value = "";
+        }
+    }
+
+    // Barcode scanner auto-callback
+    window.barcodeScanner.setScanCallback((item) => {
+        addPartToPOS(item.id, item.part_name, item.barcode, item.hsn_code, item.selling_price, item.tax_rate);
+    });
+
+    function addPartToPOS(id, name, barcode, hsn, price, tax) {
+        // Check if item exists in bill already
+        const existing = posItems.find(i => i.item_id === id && i.item_type === 'PART');
+        if (existing) {
+            existing.quantity += 1;
+        } else {
+            posItems.push({
+                item_type: 'PART',
+                item_id: id,
+                name: name,
+                barcode: barcode,
+                hsn_sac: hsn || '8536',
+                quantity: 1,
+                unit_price: parseFloat(price) || 0,
+                tax_rate: parseFloat(tax) || 18.0
+            });
+        }
+        renderPOSTable();
+        closeModal('select-part-pos-modal');
+    }
+
+    function addCustomLaborRow() {
+        const desc = prompt("Enter Labor / Service Description:", "Starter Motor Repair Labor");
+        if (!desc) return;
+        const rate = parseFloat(prompt("Enter Labor Charge (₹):", "350.00")) || 0;
+        
+        posItems.push({
+            item_type: 'LABOR',
+            item_id: null,
+            name: desc,
+            barcode: null,
+            hsn_sac: '9987',
+            quantity: 1,
+            unit_price: rate,
+            tax_rate: 0.0
+        });
+        renderPOSTable();
+    }
+
+    function removePOSItem(index) {
+        posItems.splice(index, 1);
+        renderPOSTable();
+    }
+
+    function renderPOSTable() {
+        const tbody = document.getElementById('pos-table-body');
+        if (posItems.length === 0) {
+            tbody.innerHTML = `
+                <tr id="empty-table-row">
+                    <td colspan="8" class="text-center py-8 text-slate-400">
+                        Scan box barcode or click buttons above to add items to bill.
+                    </td>
+                </tr>
+            `;
+            recalculateTotals();
+            return;
+        }
+
+        tbody.innerHTML = posItems.map((item, idx) => {
+            const lineTotal = item.quantity * item.unit_price;
+            const badgeClass = item.item_type === 'LABOR' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800';
+            return `
+                <tr class="hover:bg-slate-50 transition">
+                    <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded text-[10px] font-bold ${badgeClass}">${item.item_type}</span></td>
+                    <td class="py-2.5 px-3 font-semibold text-slate-900">${item.name}</td>
+                    <td class="py-2.5 px-3 text-slate-400 font-mono">${item.hsn_sac}</td>
+                    <td class="py-2.5 px-3">
+                        <input type="number" min="1" value="${item.quantity}" onchange="updateQty(${idx}, this.value)" class="w-14 px-1.5 py-1 rounded border border-slate-200 text-center font-bold">
+                    </td>
+                    <td class="py-2.5 px-3">
+                        <input type="number" step="0.01" value="${item.unit_price}" onchange="updatePrice(${idx}, this.value)" class="w-20 px-1.5 py-1 rounded border border-slate-200 font-bold">
+                    </td>
+                    <td class="py-2.5 px-3 text-slate-500">${item.tax_rate}%</td>
+                    <td class="py-2.5 px-3 text-right font-bold text-slate-900">₹${lineTotal.toFixed(2)}</td>
+                    <td class="py-2.5 px-3 text-center">
+                        <button onclick="removePOSItem(${idx})" class="text-rose-500 hover:text-rose-700 font-bold">✕</button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        recalculateTotals();
+    }
+
+    function updateQty(idx, val) {
+        posItems[idx].quantity = parseInt(val) || 1;
+        renderPOSTable();
+    }
+
+    function updatePrice(idx, val) {
+        posItems[idx].unit_price = parseFloat(val) || 0;
+        renderPOSTable();
+    }
+
+    function recalculateTotals() {
+        let laborTotal = 0;
+        let partsTotal = 0;
+        let taxTotal = 0;
+
+        posItems.forEach(i => {
+            const rowTotal = i.quantity * i.unit_price;
+            if (i.item_type === 'LABOR') {
+                laborTotal += rowTotal;
+            } else {
+                partsTotal += rowTotal;
+                taxTotal += (rowTotal * (i.tax_rate / 100));
+            }
+        });
+
+        const discount = parseFloat(document.getElementById('pos-discount').value) || 0;
+        const grandTotal = Math.max(0, (laborTotal + partsTotal + taxTotal) - discount);
+
+        document.getElementById('pos-labor-total').innerText = `₹${laborTotal.toFixed(2)}`;
+        document.getElementById('pos-parts-total').innerText = `₹${partsTotal.toFixed(2)}`;
+        document.getElementById('pos-tax-total').innerText = `₹${taxTotal.toFixed(2)}`;
+        document.getElementById('pos-grand-total').innerText = `₹${grandTotal.toFixed(2)}`;
+
+        // Default amount paid to grand total if empty
+        const paidField = document.getElementById('pos-amount-paid');
+        if (!paidField.value || paidField.value === "0") {
+            paidField.placeholder = grandTotal.toFixed(2);
+        }
+    }
+
+    async function submitPOSInvoice() {
+        if (posItems.length === 0) {
+            showToast("Please add at least one item to the bill", "warning");
+            return;
+        }
+
+        const customerName = document.getElementById('bill-cust-name').value.trim() || "Walk-in Customer";
+        const customerPhone = document.getElementById('bill-cust-phone').value.trim() || "9876543210";
+        const vehicleReg = document.getElementById('bill-veh-no').value.trim();
+        const paymentMode = document.getElementById('pos-payment-mode').value;
+        const discount = parseFloat(document.getElementById('pos-discount').value) || 0;
+        
+        let laborTotal = 0, partsTotal = 0, taxTotal = 0;
+        posItems.forEach(i => {
+            const rowTotal = i.quantity * i.unit_price;
+            if (i.item_type === 'LABOR') laborTotal += rowTotal;
+            else {
+                partsTotal += rowTotal;
+                taxTotal += (rowTotal * (i.tax_rate / 100));
+            }
+        });
+        const grandTotal = Math.max(0, (laborTotal + partsTotal + taxTotal) - discount);
+        const amountPaidInput = document.getElementById('pos-amount-paid').value.trim();
+        const amountPaid = amountPaidInput ? parseFloat(amountPaidInput) : grandTotal;
+
+        const payload = {
+            customer_name: customerName,
+            customer_phone: customerPhone,
+            vehicle_reg_no: vehicleReg,
+            invoice_type: "COUNTER_SALE",
+            payment_mode: paymentMode,
+            discount_amount: discount,
+            amount_paid: amountPaid,
+            items: posItems.map(i => ({
+                item_type: i.item_type,
+                item_id: i.item_id,
+                name: i.name,
+                barcode: i.barcode,
+                hsn_sac: i.hsn_sac,
+                quantity: i.quantity,
+                unit_price: i.unit_price,
+                tax_rate: i.tax_rate,
+                taxable_amount: i.quantity * i.unit_price,
+                total_price: i.quantity * i.unit_price
+            }))
+        };
+
+        try {
+            const res = await fetch('/api/invoices', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (res.ok) {
+                showToast(`✅ Invoice #${data.invoice_number} created successfully!`, "success");
+                setTimeout(() => {
+                    window.location.reload();
+                }, 800);
+            } else {
+                showToast("Invoice creation failed: " + (data.detail || "Error"), "error");
+            }
+        } catch (e) {
+            showToast("Network error: " + e, "error");
+        }
+    }
+
+    function filterPartsList() {
+        const q = document.getElementById('pos-part-search').value.toLowerCase();
+        document.querySelectorAll('.part-row').forEach(row => {
+            row.style.display = row.innerText.toLowerCase().includes(q) ? 'flex' : 'none';
+        });
+    }
+
+    async function shareInvoiceWhatsApp(invoiceId) {
+        try {
+            const resp = await fetch(`/api/invoices/${invoiceId}/whatsapp-link`);
+            const data = await resp.json();
+            if (data.whatsapp_url) {
+                window.open(data.whatsapp_url, '_blank');
+            }
+        } catch (e) {
+            showToast("WhatsApp error: " + e, "error");
+        }
+    }
+</script>
+{% endblock %}

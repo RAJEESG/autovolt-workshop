@@ -1,0 +1,108 @@
+/* Custom UI & Print Styles for AutoVolt Pro */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+body {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+::-webkit-scrollbar-track {
+    background: #f1f5f9;
+}
+::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+}
+
+/* Kanban Board Styling */
+.kanban-col {
+    min-height: 480px;
+    transition: all 0.2s ease-in-out;
+}
+.kanban-col.drag-over {
+    background-color: #f0fdf4;
+    border-color: #22c55e;
+}
+
+/* Barcode Sticker Sheet Print Media */
+@media print {
+    body * {
+        visibility: hidden;
+    }
+    .print-area, .print-area * {
+        visibility: visible;
+    }
+    .print-area {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        margin: 0;
+        padding: 0;
+    }
+    .no-print {
+        display: none !important;
+    }
+    
+    /* Thermal 80mm Receipt Formatting */
+    .thermal-receipt {
+        width: 78mm !important;
+        max-width: 78mm !important;
+        font-family: 'Courier New', monospace !important;
+        font-size: 11px !important;
+        line-height: 1.2 !important;
+        padding: 4px !important;
+        margin: 0 auto !important;
+    }
+    
+    /* Barcode Sticker 50mm x 25mm Grid */
+    .barcode-sticker-grid {
+        display: grid !important;
+        grid-template-columns: repeat(auto-fill, 50mm) !important;
+        gap: 4mm !important;
+        page-break-inside: avoid !important;
+    }
+    .barcode-sticker-item {
+        width: 50mm !important;
+        height: 25mm !important;
+        border: 1px dashed #ccc !important;
+        padding: 2mm !important;
+        text-align: center !important;
+        page-break-inside: avoid !important;
+    }
+}
+
+/* Pulse animation for active electrical repair indicator */
+@keyframes sparkPulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.6; transform: scale(1.08); }
+}
+.spark-pulse {
+    animation: sparkPulse 2s infinite;
+}
+
+/* Toast notifications */
+.toast-container {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.toast {
+    animation: slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes slideIn {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}

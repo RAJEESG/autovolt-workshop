@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+
+{% block title %}Vehicles & Customers — AutoVolt Pro{% endblock %}
+{% block header_title %}Vehicles & Customer History{% endblock %}
+
+{% block content %}
+<div class="space-y-6 max-w-7xl mx-auto">
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold text-lg">
+                🚘
+            </div>
+            <div>
+                <h2 class="font-extrabold text-slate-900 text-base">Vehicle Service Directory</h2>
+                <p class="text-xs text-slate-500">Lookup electrical service history and past repairs by vehicle number</p>
+            </div>
+        </div>
+
+        <input type="text" id="cust-search-input" oninput="filterCustomerTable()" placeholder="Search vehicle reg no or phone..." class="px-4 py-2 rounded-xl border border-slate-200 text-xs w-full sm:w-72 focus:outline-none focus:ring-2 focus:ring-primary-500">
+    </div>
+
+    <!-- Vehicles & Customers List Table -->
+    <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-5 space-y-4">
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs" id="cust-table">
+                <thead>
+                    <tr class="text-slate-400 uppercase tracking-wider font-semibold border-b border-slate-100 bg-slate-50">
+                        <th class="py-2.5 px-3">Vehicle Reg Number</th>
+                        <th class="py-2.5 px-3">Make & Model</th>
+                        <th class="py-2.5 px-3">Customer Name</th>
+                        <th class="py-2.5 px-3">WhatsApp Phone</th>
+                        <th class="py-2.5 px-3">Odometer</th>
+                        <th class="py-2.5 px-3">Khata Balance</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 font-medium text-slate-700">
+                    {% for v in vehicles %}
+                    <tr class="hover:bg-slate-50 transition vehicle-row">
+                        <td class="py-3 px-3">
+                            <span class="font-mono font-bold text-primary-700 text-sm block">{{ v.reg_number }}</span>
+                        </td>
+                        <td class="py-3 px-3 font-semibold text-slate-900">{{ v.make_model }} ({{ v.fuel_type }})</td>
+                        <td class="py-3 px-3">{{ v.customer_name }}</td>
+                        <td class="py-3 px-3">
+                            <a href="https://wa.me/{{ v.customer_phone }}" target="_blank" class="text-emerald-700 font-bold hover:underline flex items-center gap-1">
+                                <span>💬 {{ v.customer_phone }}</span>
+                            </a>
+                        </td>
+                        <td class="py-3 px-3 text-slate-500">{{ "{:,}".format(v.odometer or 0) }} km</td>
+                        <td class="py-3 px-3">
+                            <span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700">
+                                Clear
+                            </span>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function filterCustomerTable() {
+        const q = document.getElementById('cust-search-input').value.toLowerCase();
+        document.querySelectorAll('.vehicle-row').forEach(row => {
+            row.style.display = row.innerText.toLowerCase().includes(q) ? '' : 'none';
+        });
+    }
+</script>
+{% endblock %}

@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+
+{% block title %}Workshop Expenses — AutoVolt Pro{% endblock %}
+{% block header_title %}Workshop Operational Expenses{% endblock %}
+
+{% block content %}
+<div class="space-y-6 max-w-7xl mx-auto">
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center font-bold text-lg">
+                💸
+            </div>
+            <div>
+                <h2 class="font-extrabold text-slate-900 text-base">Workshop Operating Expenses</h2>
+                <p class="text-xs text-slate-500">Record shop rent, power bills, staff wages, consumables & tools</p>
+            </div>
+        </div>
+
+        <button onclick="openModal('add-expense-modal')" class="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow transition flex items-center gap-1.5">
+            <i data-lucide="plus" class="w-4 h-4"></i>
+            <span>+ Record Expense</span>
+        </button>
+    </div>
+
+    <!-- Expenses Table -->
+    <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-5 space-y-4">
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+                <thead>
+                    <tr class="text-slate-400 uppercase tracking-wider font-semibold border-b border-slate-100 bg-slate-50">
+                        <th class="py-2.5 px-3">Date</th>
+                        <th class="py-2.5 px-3">Expense Title / Description</th>
+                        <th class="py-2.5 px-3">Category</th>
+                        <th class="py-2.5 px-3">Payment Mode</th>
+                        <th class="py-2.5 px-3">Paid To</th>
+                        <th class="py-2.5 px-3 text-right">Amount (₹)</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 font-medium text-slate-700">
+                    {% for exp in expenses %}
+                    <tr class="hover:bg-slate-50 transition">
+                        <td class="py-3 px-3 text-slate-500">{{ exp.expense_date }}</td>
+                        <td class="py-3 px-3">
+                            <span class="font-bold text-slate-900 block">{{ exp.title }}</span>
+                            {% if exp.notes %}<span class="text-[11px] text-slate-400 italic">{{ exp.notes }}</span>{% endif %}
+                        </td>
+                        <td class="py-3 px-3">
+                            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700">
+                                {{ exp.category }}
+                            </span>
+                        </td>
+                        <td class="py-3 px-3 font-semibold text-slate-800">{{ exp.payment_mode }}</td>
+                        <td class="py-3 px-3 text-slate-500">{{ exp.paid_to or '-' }}</td>
+                        <td class="py-3 px-3 text-right font-black text-rose-600 text-sm">₹{{ "{:,.2f}".format(exp.amount) }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Record Expense -->
+<div id="add-expense-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+            <h3 class="font-bold text-slate-900 text-base">💸 Record Workshop Expense</h3>
+            <button onclick="closeModal('add-expense-modal')" class="text-slate-400 hover:text-slate-700 text-xl font-bold">✕</button>
+        </div>
+
+        <form action="/api/expenses" method="POST" class="mt-4 space-y-3 text-xs font-medium text-slate-700">
+            <div>
+                <label class="block font-bold text-slate-900 mb-1">Expense Title *</label>
+                <input type="text" name="title" required placeholder="e.g. Monthly Workshop Electricity Bill" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500">
+            </div>
+
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">Category</label>
+                    <select name="category" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                        <option value="Electricity Bill">Electricity Bill</option>
+                        <option value="Workshop Rent">Workshop Rent</option>
+                        <option value="Staff Wages">Staff Wages</option>
+                        <option value="Consumables & Tools">Consumables & Tools</option>
+                        <option value="Tea & Refreshments">Tea & Refreshments</option>
+                        <option value="Spare Purchases">Spare Purchases</option>
+                        <option value="General Maintenance">General Maintenance</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">Amount (₹) *</label>
+                    <input type="number" step="0.01" name="amount" required placeholder="1500.00" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500">
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">Payment Mode</label>
+                    <select name="payment_mode" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                        <option value="CASH">Cash</option>
+                        <option value="UPI">UPI / GPay</option>
+                        <option value="BANK_TRANSFER">Bank Transfer</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">Expense Date</label>
+                    <input type="date" name="expense_date" value="{{ today_date }}" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">Paid To / Vendor</label>
+                    <input type="text" name="paid_to" placeholder="e.g. KSEB / Landlord" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">Reference / Bill No</label>
+                    <input type="text" name="reference_no" placeholder="EB-12345" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                </div>
+            </div>
+
+            <div class="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+                <button type="button" onclick="closeModal('add-expense-modal')" class="px-4 py-2 text-slate-600 font-bold">Cancel</button>
+                <button type="submit" class="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow">Record Expense</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

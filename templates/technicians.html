@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+
+{% block title %}Technicians & Mechanics — AutoVolt Pro{% endblock %}
+{% block header_title %}Workshop Staff & Electricians{% endblock %}
+
+{% block content %}
+<div class="space-y-6 max-w-7xl mx-auto">
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-2xl bg-amber-500/10 text-amber-600 flex items-center justify-center font-bold text-lg">
+                👨‍🔧
+            </div>
+            <div>
+                <h2 class="font-extrabold text-slate-900 text-base">Electricians & Mechanics (5-6 Staff)</h2>
+                <p class="text-xs text-slate-500">Track worker assignments, completed vehicle jobs & labor commissions</p>
+            </div>
+        </div>
+
+        <button onclick="openModal('add-tech-modal')" class="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs rounded-xl shadow transition flex items-center gap-1.5">
+            <i data-lucide="user-plus" class="w-4 h-4"></i>
+            <span>+ Add New Technician</span>
+        </button>
+    </div>
+
+    <!-- Technicians Roster Cards Grid -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        {% for tech in technicians %}
+        <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-5 space-y-4 hover:border-amber-400 transition">
+            <div class="flex items-start justify-between">
+                <div class="flex items-center gap-3">
+                    <div class="w-12 h-12 rounded-2xl bg-slate-900 text-amber-400 flex items-center justify-center font-black text-lg">
+                        🔧
+                    </div>
+                    <div>
+                        <h3 class="font-extrabold text-slate-900 text-sm">{{ tech.name }}</h3>
+                        <span class="text-xs text-amber-700 font-semibold bg-amber-50 px-2 py-0.5 rounded-full">{{ tech.role }}</span>
+                    </div>
+                </div>
+                <span class="px-2 py-0.5 rounded-full text-[10px] font-bold {% if tech.status == 'Active' %}bg-emerald-100 text-emerald-700{% else %}bg-slate-100 text-slate-600{% endif %}">
+                    {{ tech.status }}
+                </span>
+            </div>
+
+            <div class="bg-slate-50 p-3 rounded-2xl border border-slate-100 text-xs space-y-1.5 text-slate-700">
+                <p class="flex items-center justify-between">
+                    <span class="text-slate-500">Phone:</span>
+                    <a href="tel:{{ tech.phone }}" class="font-bold text-primary-700 underline">{{ tech.phone }}</a>
+                </p>
+                <p class="flex items-center justify-between">
+                    <span class="text-slate-500">Completed Jobs:</span>
+                    <span class="font-extrabold text-slate-900 bg-white px-2 py-0.5 rounded-lg border border-slate-200">{{ tech.total_jobs }} vehicles</span>
+                </p>
+                <p class="flex items-center justify-between">
+                    <span class="text-slate-500">Labor Commission:</span>
+                    <span class="font-bold text-emerald-700">{{ tech.commission_pct }}%</span>
+                </p>
+            </div>
+
+            {% if tech.notes %}
+            <p class="text-[11px] text-slate-500 italic">"{{ tech.notes }}"</p>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Modal: Add New Technician -->
+<div id="add-tech-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+            <h3 class="font-bold text-slate-900 text-base">👨‍🔧 Add Workshop Technician</h3>
+            <button onclick="closeModal('add-tech-modal')" class="text-slate-400 hover:text-slate-700 text-xl font-bold">✕</button>
+        </div>
+
+        <form action="/api/technicians" method="POST" class="mt-4 space-y-3 text-xs font-medium text-slate-700">
+            <div>
+                <label class="block font-bold text-slate-900 mb-1">Technician Name *</label>
+                <input type="text" name="name" required placeholder="Full Name" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500">
+            </div>
+
+            <div>
+                <label class="block font-bold text-slate-900 mb-1">Phone Number *</label>
+                <input type="tel" name="phone" required placeholder="e.g. +91 98470 12345" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500">
+            </div>
+
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">Specialization / Role</label>
+                    <select name="role" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                        <option value="Senior Auto Electrician">Senior Auto Electrician</option>
+                        <option value="Wiring Specialist">Wiring Specialist</option>
+                        <option value="AC & Cooling Specialist">AC & Cooling Specialist</option>
+                        <option value="Battery & Diagnostic Tech">Battery & Diagnostics</option>
+                        <option value="Lighting & Accessories">Lighting & Accessories</option>
+                        <option value="Junior Electrician / Trainee">Junior / Trainee</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">Labor Commission (%)</label>
+                    <input type="number" step="0.5" name="commission_pct" value="10.0" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                </div>
+            </div>
+
+            <div>
+                <label class="block font-bold text-slate-900 mb-1">Notes / Skills</label>
+                <input type="text" name="notes" placeholder="e.g. Expert in starter overhaul & scanner diagnostics" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+            </div>
+
+            <div class="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+                <button type="button" onclick="closeModal('add-tech-modal')" class="px-4 py-2 text-slate-600 font-bold">Cancel</button>
+                <button type="submit" class="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded-xl shadow">Save Technician</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
