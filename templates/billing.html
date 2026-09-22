@@ -584,10 +584,11 @@
 
     // Auto-populate items if loaded from Job Card
     window.addEventListener('DOMContentLoaded', () => {
-        {% if prefill_job and prefill_job.items %}
+        {% if prefill_job and prefill_items_json %}
         try {
-            const rawItems = {{ prefill_job.items|tojson }};
+            const rawItems = {{ prefill_items_json|safe }};
             if (rawItems && rawItems.length > 0) {
+                posItems = [];
                 rawItems.forEach(i => {
                     posItems.push({
                         id: 'pos_' + Math.random().toString(36).substr(2, 9),

@@ -46,6 +46,14 @@ from tz_helper import (
     elapsed_time_ist
 )
 
+def to_json_filter(obj):
+    try:
+        from markupsafe import Markup
+        return Markup(json.dumps(obj, default=str))
+    except Exception:
+        return json.dumps(obj, default=str)
+
+templates.env.filters["tojson"] = to_json_filter
 templates.env.filters["to_ist"] = format_dt_to_ist
 templates.env.filters["elapsed_ist"] = elapsed_time_ist
 
@@ -684,6 +692,7 @@ async def billing_page(request: Request, from_job: Optional[str] = Query(None)):
     cursor = conn.cursor()
     
     prefill_job = None
+    prefill_items_json = "[]"
     if from_job:
         cursor.execute("SELECT * FROM job_cards WHERE id = ?", (from_job,))
         job_row = cursor.fetchone()
@@ -694,6 +703,7 @@ async def billing_page(request: Request, from_job: Optional[str] = Query(None)):
                 "job": dict(job_row),
                 "items": job_items
             }
+            prefill_items_json = json.dumps(job_items, default=str)
 
     cursor.execute("SELECT * FROM inventory_items ORDER BY part_name")
     inventory_items = [dict(row) for row in cursor.fetchall()]
@@ -730,6 +740,7 @@ async def billing_page(request: Request, from_job: Optional[str] = Query(None)):
             "customers": customers,
             "gst_slabs_list": gst_slabs_list,
             "prefill_job": prefill_job,
+            "prefill_items_json": prefill_items_json,
             "from_job": from_job
         }
     )
@@ -747,8 +758,8 @@ async def create_pos_invoice(payload: Dict[str, Any]):
     now_ist = get_ist_now_str()
     
     items = payload.get("items", [])
-    subtotal_labor = sum(i["unit_price"] * i["quantity"] for i in items if i.get("item_type") == "LABOR")
-    subtotal_parts = sum(i["unit_price"] * i["quantity"] for i in items if i.get("item_type") == "PART")
+    subtotal_labor = sum((float(i.get("unit_price") or 0.0)) * (int(i.get("quantity") or 1)) for i in items if i.get("item_type") == "LABOR")
+    subtotal_parts = sum((float(i.get("unit_price") or 0.0)) * (int(i.get("quantity") or 1)) for i in items if i.get("item_type") == "PART")
     discount = float(payload.get("discount_amount", 0.0))
     grand_total = max(0.0, (subtotal_labor + subtotal_parts) - discount)
     amount_paid = float(payload.get("amount_paid", grand_total))
@@ -783,7 +794,10 @@ async def create_pos_invoice(payload: Dict[str, Any]):
     
     for i in items:
         inv_item_id = f"ii_{uuid.uuid4().hex[:8]}"
-        line_total = i["unit_price"] * i["quantity"]
+        u_price = float(i.get("unit_price") or 0.0)
+        u_qty = int(i.get("quantity") or 1)
+        line_total = u_price * u_qty
+        t_rate = float(i.get("tax_rate") or 18.0)
         cursor.execute("""
         INSERT INTO invoice_items (
             id, invoice_id, item_type, item_id, barcode, name, hsn_sac,
@@ -792,18 +806,18 @@ async def create_pos_invoice(payload: Dict[str, Any]):
         """, (
             inv_item_id, invoice_id, i.get("item_type", "PART"), i.get("item_id"),
             i.get("barcode"), i.get("name", "Item"), i.get("hsn_sac", "8536"),
-            i["quantity"], i["unit_price"], i.get("tax_rate", 18.0),
+            u_qty, u_price, t_rate,
             line_total, line_total
         ))
         
         # Only deduct inventory stock if it wasn't already deducted when added to the job card!
         if i.get("item_id") and not i.get("already_deducted"):
-            cursor.execute("UPDATE inventory_items SET stock_qty = MAX(0, stock_qty - ?) WHERE id = ?", (i["quantity"], i["item_id"]))
+            cursor.execute("UPDATE inventory_items SET stock_qty = MAX(0, stock_qty - ?) WHERE id = ?", (u_qty, i["item_id"]))
             log_id = f"stk_{uuid.uuid4().hex[:8]}"
             cursor.execute("""
             INSERT INTO stock_logs (id, item_id, part_name, barcode, change_qty, new_stock_qty, action_type, reference_id, notes, created_at)
             VALUES (?, ?, ?, ?, ?, (SELECT stock_qty FROM inventory_items WHERE id = ?), 'SALE_OUT', ?, ?, ?)
-            """, (log_id, i["item_id"], i.get("name"), i.get("barcode"), -int(i["quantity"]), i["item_id"], invoice_number, f"Billed in Invoice {invoice_number}", now_ist))
+            """, (log_id, i["item_id"], i.get("name"), i.get("barcode"), -u_qty, i["item_id"], invoice_number, f"Billed in Invoice {invoice_number}", now_ist))
             
     # If linked to job card, mark job card as COMPLETED
     if job_card_id:
