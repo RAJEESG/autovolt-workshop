@@ -1,23 +1,23 @@
 {% extends "base.html" %}
 
-{% block title %}Vehicles & Customers — AutoVolt Pro{% endblock %}
-{% block header_title %}Vehicles & Customer History{% endblock %}
+{% block title %}Vehicles & Customers Directory — AutoVolt Pro{% endblock %}
+{% block header_title %}Vehicles & Customer Service History{% endblock %}
 
 {% block content %}
 <div class="space-y-6 max-w-7xl mx-auto">
     <!-- Header -->
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
         <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold text-lg">
+            <div class="w-10 h-10 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold text-lg shadow-sm">
                 🚘
             </div>
             <div>
-                <h2 class="font-extrabold text-slate-900 text-base">Vehicle Service Directory</h2>
-                <p class="text-xs text-slate-500">Lookup electrical service history and past repairs by vehicle number</p>
+                <h2 class="font-extrabold text-slate-900 text-base">Vehicle Service Directory & Customer History</h2>
+                <p class="text-xs text-slate-500">Lookup service records, past job cards, bills, and lifetime workshop spend by vehicle</p>
             </div>
         </div>
 
-        <input type="text" id="cust-search-input" oninput="filterCustomerTable()" placeholder="Search vehicle reg no or phone..." class="px-4 py-2 rounded-xl border border-slate-200 text-xs w-full sm:w-72 focus:outline-none focus:ring-2 focus:ring-primary-500">
+        <input type="text" id="cust-search-input" oninput="filterCustomerTable()" placeholder="🔍 Search vehicle #, customer, phone..." class="px-4 py-2 rounded-xl border border-slate-200 text-xs w-full sm:w-80 focus:outline-none focus:ring-2 focus:ring-primary-500 shadow-inner">
     </div>
 
     <!-- Vehicles & Customers List Table -->
@@ -25,33 +25,51 @@
         <div class="overflow-x-auto">
             <table class="w-full text-left text-xs" id="cust-table">
                 <thead>
-                    <tr class="text-slate-400 uppercase tracking-wider font-semibold border-b border-slate-100 bg-slate-50">
-                        <th class="py-2.5 px-3">Vehicle Reg Number</th>
-                        <th class="py-2.5 px-3">Make & Model</th>
-                        <th class="py-2.5 px-3">Customer Name</th>
-                        <th class="py-2.5 px-3">WhatsApp Phone</th>
-                        <th class="py-2.5 px-3">Odometer</th>
-                        <th class="py-2.5 px-3">Khata Balance</th>
+                    <tr class="text-slate-500 uppercase tracking-wider font-semibold border-b border-slate-100 bg-slate-50/80">
+                        <th class="py-3 px-3">Vehicle Reg Number</th>
+                        <th class="py-3 px-3">Make & Model</th>
+                        <th class="py-3 px-3">Customer Name</th>
+                        <th class="py-3 px-3">WhatsApp Phone</th>
+                        <th class="py-3 px-3">Odometer</th>
+                        <th class="py-3 px-3">Khata Balance</th>
+                        <th class="py-3 px-3 text-right">Service History</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100 font-medium text-slate-700">
                     {% for v in vehicles %}
-                    <tr class="hover:bg-slate-50 transition vehicle-row">
-                        <td class="py-3 px-3">
-                            <span class="font-mono font-bold text-primary-700 text-sm block">{{ v.reg_number }}</span>
+                    <tr class="hover:bg-slate-50/80 transition vehicle-row" data-search="{{ v.reg_number|lower }} {{ v.customer_name|lower }} {{ v.customer_phone }} {{ v.make_model|lower }}">
+                        <td class="py-3.5 px-3">
+                            <span class="font-mono font-black text-primary-700 text-sm block">{{ v.reg_number }}</span>
                         </td>
-                        <td class="py-3 px-3 font-semibold text-slate-900">{{ v.make_model }} ({{ v.fuel_type }})</td>
-                        <td class="py-3 px-3">{{ v.customer_name }}</td>
-                        <td class="py-3 px-3">
+                        <td class="py-3.5 px-3 font-semibold text-slate-900">{{ v.make_model }} {% if v.fuel_type %}<span class="text-slate-400 text-[11px]">({{ v.fuel_type }})</span>{% endif %}</td>
+                        <td class="py-3.5 px-3 font-semibold text-slate-800">{{ v.customer_name }}</td>
+                        <td class="py-3.5 px-3">
                             <a href="https://wa.me/{{ v.customer_phone }}" target="_blank" class="text-emerald-700 font-bold hover:underline flex items-center gap-1">
                                 <span>💬 {{ v.customer_phone }}</span>
                             </a>
                         </td>
-                        <td class="py-3 px-3 text-slate-500">{{ "{:,}".format(v.odometer or 0) }} km</td>
-                        <td class="py-3 px-3">
-                            <span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700">
-                                Clear
+                        <td class="py-3.5 px-3 text-slate-500">{{ "{:,}".format(v.odometer or 0) }} km</td>
+                        <td class="py-3.5 px-3">
+                            {% if v.khata_balance and v.khata_balance > 0 %}
+                            <span class="px-2.5 py-1 rounded-full text-[11px] font-black bg-rose-50 text-rose-700 border border-rose-200">
+                                Due: ₹{{ "{:,.2f}".format(v.khata_balance) }}
                             </span>
+                            {% else %}
+                            <span class="px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-100">
+                                Clear (₹0.00)
+                            </span>
+                            {% endif %}
+                        </td>
+                        <td class="py-3.5 px-3 text-right">
+                            <button onclick="viewCustomerHistory('{{ v.reg_number }}')" class="px-3.5 py-1.5 bg-primary-50 hover:bg-primary-100 text-primary-700 font-bold text-xs rounded-xl border border-primary-200 transition shadow-sm inline-flex items-center gap-1.5">
+                                <span>📜 View History</span>
+                            </button>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="7" class="text-center py-10 text-slate-400 text-xs">
+                            No vehicles or customers registered yet.
                         </td>
                     </tr>
                     {% endfor %}
@@ -60,15 +78,196 @@
         </div>
     </div>
 </div>
+
+<!-- Modal: Comprehensive Customer & Vehicle Service History -->
+<div id="customer-history-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden items-center justify-center p-4 overflow-y-auto">
+    <div class="bg-white rounded-3xl max-w-4xl w-full p-6 shadow-2xl border border-slate-100 my-8 space-y-5">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-2xl bg-primary-100 text-primary-700 flex items-center justify-center text-lg font-bold">
+                    📜
+                </div>
+                <div>
+                    <h3 class="font-black text-slate-900 text-base" id="hist-modal-title">Vehicle & Customer History</h3>
+                    <p class="text-xs text-slate-500" id="hist-modal-subtitle">Full workshop service record</p>
+                </div>
+            </div>
+            <button onclick="closeModal('customer-history-modal')" class="text-slate-400 hover:text-slate-700 text-xl font-bold">✕</button>
+        </div>
+
+        <!-- Summary Stats Cards -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+            <div class="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80">
+                <span class="text-slate-400 block font-bold">Total Visits</span>
+                <span class="text-lg font-black text-slate-900" id="hist-stat-visits">0</span>
+            </div>
+            <div class="p-3.5 rounded-2xl bg-blue-50 border border-blue-100">
+                <span class="text-blue-600 block font-bold">Total Invoices</span>
+                <span class="text-lg font-black text-blue-900" id="hist-stat-invoices">0</span>
+            </div>
+            <div class="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-100">
+                <span class="text-emerald-700 block font-bold">Total Spent</span>
+                <span class="text-lg font-black text-emerald-800" id="hist-stat-spent">₹0.00</span>
+            </div>
+            <div class="p-3.5 rounded-2xl bg-rose-50 border border-rose-100">
+                <span class="text-rose-700 block font-bold">Outstanding Due</span>
+                <span class="text-lg font-black text-rose-800" id="hist-stat-due">₹0.00</span>
+            </div>
+        </div>
+
+        <!-- History Content Split: Past Job Cards & Invoices -->
+        <div class="space-y-4">
+            <!-- Job Cards Section -->
+            <div>
+                <h4 class="font-bold text-xs uppercase tracking-wider text-slate-700 mb-2 flex items-center gap-1.5">
+                    <span>⚡ Service Job Cards</span>
+                    <span class="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-bold" id="hist-jobs-count">0</span>
+                </h4>
+                <div class="border border-slate-200 rounded-2xl overflow-hidden max-h-56 overflow-y-auto">
+                    <table class="w-full text-left text-xs">
+                        <thead class="bg-slate-50 text-slate-500 font-semibold text-[11px]">
+                            <tr>
+                                <th class="py-2 px-3">Job #</th>
+                                <th class="py-2 px-3">Date (IST)</th>
+                                <th class="py-2 px-3">Faults & Complaints</th>
+                                <th class="py-2 px-3">Status</th>
+                                <th class="py-2 px-3 text-right">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="hist-jobs-table-body" class="divide-y divide-slate-100 font-medium text-slate-700">
+                            <!-- Injected dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Invoices Section -->
+            <div>
+                <h4 class="font-bold text-xs uppercase tracking-wider text-slate-700 mb-2 flex items-center gap-1.5">
+                    <span>📄 Invoices & Receipts</span>
+                    <span class="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-bold" id="hist-invoices-count">0</span>
+                </h4>
+                <div class="border border-slate-200 rounded-2xl overflow-hidden max-h-56 overflow-y-auto">
+                    <table class="w-full text-left text-xs">
+                        <thead class="bg-slate-50 text-slate-500 font-semibold text-[11px]">
+                            <tr>
+                                <th class="py-2 px-3">Invoice #</th>
+                                <th class="py-2 px-3">Date (IST)</th>
+                                <th class="py-2 px-3">Payment Status</th>
+                                <th class="py-2 px-3 text-right">Amount (₹)</th>
+                                <th class="py-2 px-3 text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="hist-invoices-table-body" class="divide-y divide-slate-100 font-medium text-slate-700">
+                            <!-- Injected dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
     function filterCustomerTable() {
-        const q = document.getElementById('cust-search-input').value.toLowerCase();
+        const q = document.getElementById('cust-search-input').value.toLowerCase().trim();
         document.querySelectorAll('.vehicle-row').forEach(row => {
-            row.style.display = row.innerText.toLowerCase().includes(q) ? '' : 'none';
+            const data = (row.getAttribute('data-search') || row.innerText).toLowerCase();
+            row.style.display = data.includes(q) ? '' : 'none';
         });
+    }
+
+    async function viewCustomerHistory(regNumber) {
+        try {
+            const resp = await fetch(`/api/customers/${encodeURIComponent(regNumber)}/history`);
+            const data = await resp.json();
+            if (!resp.ok || !data.success) {
+                showToast("Could not load vehicle history", "error");
+                return;
+            }
+
+            const cust = data.customer || {};
+            const stats = data.stats || {};
+            const jobs = data.job_cards || [];
+            const invoices = data.invoices || [];
+
+            // Title & Subtitle
+            document.getElementById('hist-modal-title').innerText = `${regNumber} — ${cust.name || 'Customer'}`;
+            document.getElementById('hist-modal-subtitle').innerText = `Phone: ${cust.phone || '-'} • Khata Balance: ₹${(cust.khata_balance || 0).toFixed(2)}`;
+
+            // Stats
+            document.getElementById('hist-stat-visits').innerText = stats.total_visits || 0;
+            document.getElementById('hist-stat-invoices').innerText = stats.total_invoices || 0;
+            document.getElementById('hist-stat-spent').innerText = `₹${(stats.total_spent || 0).toFixed(2)}`;
+            document.getElementById('hist-stat-due').innerText = `₹${(stats.total_due || 0).toFixed(2)}`;
+
+            // Counts
+            document.getElementById('hist-jobs-count').innerText = jobs.length;
+            document.getElementById('hist-invoices-count').innerText = invoices.length;
+
+            // Jobs Table
+            const jobTbody = document.getElementById('hist-jobs-table-body');
+            jobTbody.innerHTML = '';
+            if (jobs.length === 0) {
+                jobTbody.innerHTML = `<tr><td colspan="5" class="py-6 text-center text-slate-400">No job cards found for this vehicle.</td></tr>`;
+            } else {
+                jobs.forEach(j => {
+                    const complaints = j.complaints_list && j.complaints_list.length > 0 ? j.complaints_list.join(', ') : (j.custom_complaint_notes || 'General Checkup');
+                    const tr = document.createElement('tr');
+                    tr.className = 'hover:bg-slate-50 transition';
+                    tr.innerHTML = `
+                        <td class="py-2.5 px-3 font-bold font-mono text-slate-900">#${j.job_number}</td>
+                        <td class="py-2.5 px-3 text-slate-500 font-mono text-[11px]">${j.created_at_ist || '-'}</td>
+                        <td class="py-2.5 px-3 max-w-xs truncate text-[11px] text-slate-700" title="${complaints}">${complaints}</td>
+                        <td class="py-2.5 px-3">
+                            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${j.status === 'COMPLETED' || j.status === 'DELIVERED' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}">
+                                ${j.status}
+                            </span>
+                        </td>
+                        <td class="py-2.5 px-3 text-right">
+                            <a href="/job-cards/${j.id}" class="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-bold text-[11px] transition">
+                                Open ➔
+                            </a>
+                        </td>
+                    `;
+                    jobTbody.appendChild(tr);
+                });
+            }
+
+            // Invoices Table
+            const invTbody = document.getElementById('hist-invoices-table-body');
+            invTbody.innerHTML = '';
+            if (invoices.length === 0) {
+                invTbody.innerHTML = `<tr><td colspan="5" class="py-6 text-center text-slate-400">No invoices recorded for this vehicle.</td></tr>`;
+            } else {
+                invoices.forEach(inv => {
+                    const tr = document.createElement('tr');
+                    tr.className = 'hover:bg-slate-50 transition';
+                    tr.innerHTML = `
+                        <td class="py-2.5 px-3 font-bold font-mono text-slate-900">${inv.invoice_number}</td>
+                        <td class="py-2.5 px-3 text-slate-500 font-mono text-[11px]">${inv.created_at_ist || inv.invoice_date_ist || '-'}</td>
+                        <td class="py-2.5 px-3">
+                            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${inv.payment_status === 'PAID' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}">
+                                ${inv.payment_status} (${inv.payment_mode || 'UPI'})
+                            </span>
+                        </td>
+                        <td class="py-2.5 px-3 text-right font-black text-slate-900">₹${(inv.grand_total || 0).toFixed(2)}</td>
+                        <td class="py-2.5 px-3 text-right space-x-1">
+                            <a href="/invoice/${inv.id}/print" target="_blank" class="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-bold text-[11px] transition" title="Print Invoice">
+                                🖨️ Print
+                            </a>
+                        </td>
+                    `;
+                    invTbody.appendChild(tr);
+                });
+            }
+
+            openModal('customer-history-modal');
+        } catch (e) {
+            showToast("Failed to fetch history: " + e, "error");
+        }
     }
 </script>
 {% endblock %}

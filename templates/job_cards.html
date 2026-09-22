@@ -148,29 +148,34 @@
                 <div class="w-8 h-8 rounded-lg bg-amber-500 text-slate-950 font-bold flex items-center justify-center">⚡</div>
                 <h3 class="text-lg font-bold text-slate-900">New Vehicle Inward (Job Card)</h3>
             </div>
-            <button onclick="closeModal('new-job-modal')" class="text-slate-400 hover:text-slate-700 text-xl font-bold">✕</button>
+            <div class="flex items-center gap-2">
+                <button type="button" onclick="openModal('select-customer-job-modal')" class="text-primary-700 hover:text-primary-800 font-bold flex items-center gap-1.5 text-xs bg-primary-50 hover:bg-primary-100 px-3 py-1.5 rounded-xl border border-primary-200 transition shadow-sm">
+                    🔍 Select Existing Customer / Vehicle
+                </button>
+                <button onclick="closeModal('new-job-modal')" class="text-slate-400 hover:text-slate-700 text-xl font-bold">✕</button>
+            </div>
         </div>
 
         <form action="/api/job-cards" method="POST" class="mt-4 space-y-4 text-xs font-medium text-slate-700">
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                     <label class="block font-bold text-slate-900 mb-1">Vehicle Reg Number *</label>
-                    <input type="text" name="vehicle_reg_no" required placeholder="e.g. KL-07-CD-1234" class="w-full uppercase font-mono px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-amber-500 focus:outline-none">
+                    <input type="text" id="job-veh-no" name="vehicle_reg_no" required placeholder="e.g. KL-07-CD-1234" class="w-full uppercase font-mono px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-amber-500 focus:outline-none">
                 </div>
                 <div>
                     <label class="block font-bold text-slate-900 mb-1">Make & Model *</label>
-                    <input type="text" name="vehicle_make_model" required placeholder="e.g. Maruti Swift DDiS / Tata Ace" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-amber-500 focus:outline-none">
+                    <input type="text" id="job-make-model" name="vehicle_make_model" required placeholder="e.g. Maruti Swift DDiS / Tata Ace" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-amber-500 focus:outline-none">
                 </div>
             </div>
 
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                     <label class="block font-bold text-slate-900 mb-1">Customer Name *</label>
-                    <input type="text" name="customer_name" required placeholder="Full Name" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-amber-500 focus:outline-none">
+                    <input type="text" id="job-cust-name" name="customer_name" required placeholder="Full Name" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-amber-500 focus:outline-none">
                 </div>
                 <div>
                     <label class="block font-bold text-slate-900 mb-1">Customer WhatsApp Phone *</label>
-                    <input type="tel" name="customer_phone" required placeholder="e.g. 9847012345" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-amber-500 focus:outline-none">
+                    <input type="tel" id="job-cust-phone" name="customer_phone" required placeholder="e.g. 9847012345" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-amber-500 focus:outline-none">
                 </div>
             </div>
 
@@ -189,9 +194,10 @@
                 </div>
                 <div>
                     <label class="block font-bold text-slate-900 mb-1">Odometer (km)</label>
-                    <input type="number" name="odometer" placeholder="e.g. 65000" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-amber-500 focus:outline-none">
+                    <input type="number" id="job-odometer" name="odometer" placeholder="e.g. 65000" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-amber-500 focus:outline-none">
                 </div>
             </div>
+
 
             <!-- Auto Electrical Complaints Checklist -->
             <div>
@@ -240,10 +246,54 @@
         </form>
     </div>
 </div>
+
+<!-- Modal: Select Existing Customer / Vehicle for Job Card -->
+<div id="select-customer-job-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-100">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+            <h3 class="font-bold text-slate-900">🔍 Select Registered Vehicle / Customer</h3>
+            <button onclick="closeModal('select-customer-job-modal')" class="text-slate-400 hover:text-slate-700 text-lg font-bold">✕</button>
+        </div>
+        <div class="mt-4 space-y-3">
+            <input type="text" id="job-customer-search" placeholder="Search vehicle reg #, customer name, phone..." oninput="filterJobCustomerList()" class="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500">
+            <div class="max-h-64 overflow-y-auto divide-y divide-slate-100 text-xs" id="job-customer-picker-list">
+                {% if registered_customers %}
+                    {% for c in registered_customers %}
+                    <div class="py-2.5 px-3 flex items-center justify-between hover:bg-slate-50 cursor-pointer rounded-lg job-cust-row" onclick="selectJobCustomer('{{ c.customer_name }}', '{{ c.customer_phone }}', '{{ c.vehicle_reg_no or '' }}', '{{ c.vehicle_make_model or '' }}', '{{ c.odometer or 0 }}')">
+                        <div>
+                            <span class="font-bold text-slate-900">{{ c.customer_name }}</span>
+                            <span class="block text-[10px] text-slate-500">{{ c.customer_phone }} {% if c.vehicle_reg_no %}• <b class="font-mono text-primary-700">{{ c.vehicle_reg_no }}</b> ({{ c.vehicle_make_model or '' }}){% endif %}</span>
+                        </div>
+                        <span class="text-amber-700 font-bold text-[11px] bg-amber-50 px-2.5 py-1 rounded-lg">Select ➔</span>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <p class="text-slate-400 py-6 text-center">No existing customers registered yet.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
+    function selectJobCustomer(name, phone, vehNo, makeModel, odo) {
+        if (vehNo) document.getElementById('job-veh-no').value = vehNo;
+        if (makeModel) document.getElementById('job-make-model').value = makeModel;
+        if (name) document.getElementById('job-cust-name').value = name;
+        if (phone) document.getElementById('job-cust-phone').value = phone;
+        if (odo && parseInt(odo) > 0) document.getElementById('job-odometer').value = odo;
+        closeModal('select-customer-job-modal');
+    }
+
+    function filterJobCustomerList() {
+        const q = document.getElementById('job-customer-search').value.toLowerCase();
+        document.querySelectorAll('.job-cust-row').forEach(row => {
+            row.style.display = row.innerText.toLowerCase().includes(q) ? '' : 'none';
+        });
+    }
+
     function filterJobTable() {
         const q = document.getElementById('job-search-input').value.toLowerCase();
         document.querySelectorAll('.job-row').forEach(row => {
@@ -274,3 +324,4 @@
     }
 </script>
 {% endblock %}
+

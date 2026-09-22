@@ -37,25 +37,36 @@
         </div>
     </div>
 
-    <!-- Category Filter Tabs -->
-    <div class="flex items-center gap-2 overflow-x-auto pb-2 text-xs font-semibold">
-        <a href="/inventory" class="px-3.5 py-1.5 rounded-xl transition whitespace-nowrap {% if not selected_category and not is_low_filter %}bg-slate-900 text-white font-bold{% else %}bg-white border border-slate-200 text-slate-600 hover:bg-slate-50{% endif %}">
-            All Parts ({{ items|length }})
+    <!-- Category Dropdown, Search & Low Stock Toolbar -->
+    <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3">
+        <!-- Low Stock Alert Button (Preserved) -->
+        <a href="/inventory?filter=low" class="px-4 py-2 rounded-xl transition whitespace-nowrap text-xs font-bold flex items-center gap-2 shrink-0 {% if is_low_filter %}bg-rose-600 text-white shadow-md shadow-rose-600/20{% else %}bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100{% endif %}">
+            <span>⚠️ Low Stock Alert</span>
+            <span class="px-2 py-0.5 rounded-full text-[10px] {% if is_low_filter %}bg-white text-rose-700 font-black{% else %}bg-rose-200 text-rose-900 font-bold{% endif %}">{{ low_stock_count }}</span>
         </a>
-        <a href="/inventory?filter=low" class="px-3.5 py-1.5 rounded-xl transition whitespace-nowrap {% if is_low_filter %}bg-rose-600 text-white font-bold{% else %}bg-white border border-slate-200 text-rose-600 hover:bg-rose-50{% endif %}">
-            ⚠️ Low Stock Alert ({{ low_stock_count }})
-        </a>
-        {% for cat in categories %}
-        <a href="/inventory?category={{ cat }}" class="px-3.5 py-1.5 rounded-xl transition whitespace-nowrap {% if selected_category == cat %}bg-slate-900 text-white font-bold{% else %}bg-white border border-slate-200 text-slate-600 hover:bg-slate-50{% endif %}">
-            {{ cat }}
-        </a>
-        {% endfor %}
+
+        <div class="flex flex-1 flex-col sm:flex-row items-center gap-2.5 w-full sm:w-auto">
+            <!-- Category Dropdown with Searchable / Direct Options -->
+            <div class="w-full sm:w-56 shrink-0">
+                <select id="inv-category-select" onchange="filterInventoryTable()" class="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-xs font-bold text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 shadow-sm">
+                    <option value="">📂 All Categories ({{ items|length }})</option>
+                    {% for cat in categories %}
+                    <option value="{{ cat }}" {% if selected_category == cat %}selected{% endif %}>{{ cat }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Instant Search Input -->
+            <div class="relative w-full flex-1">
+                <input type="text" id="inv-search-input" oninput="filterInventoryTable()" placeholder="🔍 Instant search by part name, SKU, barcode, rack..." class="w-full px-4 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500 bg-slate-50 focus:bg-white shadow-inner">
+            </div>
+        </div>
     </div>
 
     <!-- Inventory Table -->
     <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-5 space-y-4">
         <div class="overflow-x-auto">
-            <table class="w-full text-left text-xs">
+            <table class="w-full text-left text-xs" id="inv-table">
                 <thead>
                     <tr class="text-slate-400 uppercase tracking-wider font-semibold border-b border-slate-100 bg-slate-50">
                         <th class="py-2.5 px-3">Part Details</th>
@@ -70,7 +81,7 @@
                 </thead>
                 <tbody class="divide-y divide-slate-100 font-medium text-slate-700">
                     {% for item in items %}
-                    <tr class="hover:bg-slate-50 transition">
+                    <tr class="hover:bg-slate-50 transition inv-row" data-category="{{ item.category|lower }}" data-search="{{ item.part_name|lower }} {{ item.barcode }} {{ item.sku|lower or '' }} {{ item.category|lower }} {{ item.location_rack|lower or '' }}">
                         <td class="py-3 px-3">
                             <span class="font-bold text-slate-900 block text-sm">{{ item.part_name }}</span>
                             <span class="text-[11px] text-slate-400">Rack: {{ item.location_rack or 'Main' }} • Warranty: {{ item.warranty_months }}M</span>
@@ -78,6 +89,7 @@
                         <td class="py-3 px-3 font-mono font-bold text-primary-700">
                             {{ item.barcode }}
                         </td>
+
                         <td class="py-3 px-3">
                             <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700">
                                 {{ item.category }}
@@ -253,6 +265,25 @@
 
 {% block scripts %}
 <script>
+    function filterInventoryTable() {
+        const selectedCat = (document.getElementById('inv-category-select')?.value || '').toLowerCase().trim();
+        const searchQuery = (document.getElementById('inv-search-input')?.value || '').toLowerCase().trim();
+
+        document.querySelectorAll('.inv-row').forEach(row => {
+            const rowCat = (row.getAttribute('data-category') || '').toLowerCase();
+            const rowSearch = (row.getAttribute('data-search') || row.innerText).toLowerCase();
+
+            const matchesCat = !selectedCat || rowCat === selectedCat;
+            const matchesSearch = !searchQuery || rowSearch.includes(searchQuery);
+
+            if (matchesCat && matchesSearch) {
+                row.style.display = '';
+            } else {
+                row.style.display = 'none';
+            }
+        });
+    }
+
     function openAdjustStockModal(id, name, currentQty) {
         document.getElementById('adjust-item-id').value = id;
         document.getElementById('adjust-part-name').innerText = `${name} (Current: ${currentQty} in stock)`;
@@ -260,3 +291,4 @@
     }
 </script>
 {% endblock %}
+

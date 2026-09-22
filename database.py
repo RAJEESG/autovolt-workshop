@@ -6,6 +6,7 @@ from datetime import datetime, date, timedelta
 from typing import Optional, List, Dict, Any
 from dotenv import load_dotenv
 from auth_helper import hash_password
+from tz_helper import get_ist_now_str
 
 load_dotenv()
 
@@ -600,6 +601,7 @@ def run_schema_migrations(cursor, conn):
         ("activity_logs", "entity_type", "TEXT"),
         ("activity_logs", "entity_id", "TEXT"),
         ("activity_logs", "details", "TEXT"),
+        ("purchase_bills", "status", "TEXT DEFAULT 'CONFIRMED'"),
     ]
 
     for table, col, col_type in migrations:
@@ -779,12 +781,13 @@ def seed_initial_data(cursor, conn):
 def log_activity_event(username: str, action: str, entity_type: str = "", entity_id: str = "", details: str = "", cursor: Any = None):
     """Record audit trail log"""
     log_id = f"act_{uuid.uuid4().hex[:8]}"
+    now_ist = get_ist_now_str()
     if cursor:
         try:
             cursor.execute("""
             INSERT INTO activity_logs (id, username, action, entity_type, entity_id, details, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-            """, (log_id, username or "Admin", action, entity_type, entity_id, details))
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (log_id, username or "Admin", action, entity_type, entity_id, details, now_ist))
         except Exception as e:
             print(f"[Audit Log Error] {e}")
         return
@@ -794,8 +797,8 @@ def log_activity_event(username: str, action: str, entity_type: str = "", entity
         c = conn.cursor()
         c.execute("""
         INSERT INTO activity_logs (id, username, action, entity_type, entity_id, details, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-        """, (log_id, username or "Admin", action, entity_type, entity_id, details))
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (log_id, username or "Admin", action, entity_type, entity_id, details, now_ist))
         conn.commit()
         conn.close()
     except Exception as e:

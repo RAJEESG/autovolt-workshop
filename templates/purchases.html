@@ -1,29 +1,29 @@
 {% extends "base.html" %}
 
-{% block title %}Purchases & Debit Notes — AutoVolt Pro{% endblock %}
-{% block header_title %}Spare Parts Purchases & Returns{% endblock %}
+{% block title %}Purchases & Auto-Inventory — AutoVolt Pro{% endblock %}
+{% block header_title %}Spare Parts Purchases & Stock In{% endblock %}
 
 {% block content %}
 <div class="space-y-6 max-w-7xl mx-auto">
     <!-- Header -->
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
         <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-lg">
+            <div class="w-10 h-10 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-lg shadow-sm">
                 📥
             </div>
             <div>
-                <h2 class="font-extrabold text-slate-900 text-base">Supplier Purchase Register & Returns</h2>
-                <p class="text-xs text-slate-500">Record distributor spare parts bills and supplier returns (Debit Notes)</p>
+                <h2 class="font-extrabold text-slate-900 text-base">Supplier Purchase Register & Auto-Inventory</h2>
+                <p class="text-xs text-slate-500">Record supplier bills with spare parts, auto-increment inventory stock, and track debit notes</p>
             </div>
         </div>
 
         <div class="flex items-center gap-2">
-            <button onclick="openModal('add-purchase-return-modal')" class="px-3.5 py-2 bg-rose-100 hover:bg-rose-200 text-rose-800 font-bold text-xs rounded-xl transition">
+            <button onclick="openModal('add-purchase-return-modal')" class="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-800 font-bold text-xs rounded-xl border border-rose-200 transition">
                 + Purchase Return (Debit Note)
             </button>
             <button onclick="openModal('add-purchase-modal')" class="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white font-bold text-xs rounded-xl shadow transition flex items-center gap-1.5">
                 <i data-lucide="plus" class="w-4 h-4"></i>
-                <span>+ Record Supplier Bill</span>
+                <span>+ Record Supplier Bill (Stock IN)</span>
             </button>
         </div>
     </div>
@@ -32,7 +32,10 @@
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <!-- Purchase Bills Table (2 Columns) -->
         <div class="lg:col-span-2 bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-4">
-            <h3 class="font-extrabold text-slate-900 text-sm border-b border-slate-100 pb-3">Supplier Purchase Bills</h3>
+            <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+                <h3 class="font-extrabold text-slate-900 text-sm">Supplier Purchase Bills</h3>
+                <span class="text-xs text-slate-400 font-mono">{{ purchases|length }} bills</span>
+            </div>
 
             <div class="overflow-x-auto">
                 <table class="w-full text-left text-xs">
@@ -40,7 +43,8 @@
                         <tr class="text-slate-400 uppercase tracking-wider font-semibold border-b border-slate-100 bg-slate-50">
                             <th class="py-2.5 px-3">Bill # & Date</th>
                             <th class="py-2.5 px-3">Supplier Name</th>
-                            <th class="py-2.5 px-3">Payment Mode</th>
+                            <th class="py-2.5 px-3">Payment</th>
+                            <th class="py-2.5 px-3">Status / Stock</th>
                             <th class="py-2.5 px-3 text-right">Total Amount (₹)</th>
                         </tr>
                     </thead>
@@ -48,15 +52,31 @@
                         {% for p in purchases %}
                         <tr class="hover:bg-slate-50 transition">
                             <td class="py-3 px-3">
-                                <span class="font-bold text-slate-900 block">{{ p.bill_number }}</span>
+                                <span class="font-bold text-slate-900 block font-mono">{{ p.bill_number }}</span>
                                 <span class="text-[11px] text-slate-400">{{ p.bill_date }}</span>
                             </td>
                             <td class="py-3 px-3 font-semibold text-slate-900">{{ p.supplier_name }}</td>
                             <td class="py-3 px-3"><span class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100">{{ p.payment_mode }}</span></td>
+                            <td class="py-3 px-3">
+                                {% if p.status == 'DRAFT' %}
+                                <div class="flex items-center gap-1.5">
+                                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">Draft</span>
+                                    <form action="/api/purchases/{{ p.id }}/confirm" method="POST" class="inline">
+                                        <button type="submit" class="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[10px] font-bold">
+                                            Confirm ➔
+                                        </button>
+                                    </form>
+                                </div>
+                                {% else %}
+                                <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 flex items-center gap-1 w-max">
+                                    <span>✓ Stock Updated</span>
+                                </span>
+                                {% endif %}
+                            </td>
                             <td class="py-3 px-3 text-right font-black text-slate-900 text-sm">₹{{ "{:,.2f}".format(p.total_amount) }}</td>
                         </tr>
                         {% else %}
-                        <tr><td colspan="4" class="text-center py-6 text-slate-400 text-xs">No purchase bills recorded yet.</td></tr>
+                        <tr><td colspan="5" class="text-center py-6 text-slate-400 text-xs">No purchase bills recorded yet.</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
@@ -71,7 +91,7 @@
                 {% for r in purchase_returns %}
                 <div class="p-3 bg-rose-50/60 rounded-2xl border border-rose-100 text-xs space-y-1">
                     <div class="flex items-center justify-between">
-                        <span class="font-bold text-slate-900">{{ r.return_number }}</span>
+                        <span class="font-bold text-slate-900 font-mono">{{ r.return_number }}</span>
                         <span class="font-black text-rose-700">₹{{ "{:,.2f}".format(r.return_amount) }}</span>
                     </div>
                     <p class="text-slate-700 font-medium">{{ r.part_name }} ({{ r.quantity }} pcs)</p>
@@ -85,54 +105,96 @@
     </div>
 </div>
 
-<!-- Modal: Record Supplier Purchase -->
-<div id="add-purchase-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
-    <div class="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100">
+<!-- Modal: Record Supplier Purchase with Auto-Inventory -->
+<div id="add-purchase-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden items-center justify-center p-4 overflow-y-auto">
+    <div class="bg-white rounded-3xl max-w-2xl w-full p-6 shadow-2xl border border-slate-100 my-8 space-y-4">
         <div class="flex items-center justify-between pb-3 border-b border-slate-100">
-            <h3 class="font-bold text-slate-900 text-base">📥 Record Supplier Purchase Bill</h3>
+            <div>
+                <h3 class="font-bold text-slate-900 text-base">📥 Record Supplier Purchase Bill & Update Stock</h3>
+                <p class="text-[11px] text-slate-500">Confirming this purchase will automatically increment stock quantities in inventory.</p>
+            </div>
             <button onclick="closeModal('add-purchase-modal')" class="text-slate-400 hover:text-slate-700 text-xl font-bold">✕</button>
         </div>
 
-        <form action="/api/purchases" method="POST" class="mt-4 space-y-3 text-xs font-medium text-slate-700">
-            <div>
-                <label class="block font-bold text-slate-900 mb-1">Supplier / Distributor Name *</label>
-                <input type="text" name="supplier_name" required placeholder="e.g. Lucas TVS Agency" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500">
-            </div>
+        <form id="purchase-bill-form" action="/api/purchases" method="POST" onsubmit="preparePurchaseSubmit(event)" class="space-y-4 text-xs font-medium text-slate-700">
+            <input type="hidden" name="status" id="pur-status-input" value="CONFIRMED">
+            <input type="hidden" name="items_json" id="pur-items-json" value="[]">
 
-            <div class="grid grid-cols-2 gap-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">Supplier / Distributor Name *</label>
+                    <input type="text" name="supplier_name" required placeholder="e.g. Lucas TVS Kerala Agency" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500">
+                </div>
                 <div>
                     <label class="block font-bold text-slate-900 mb-1">Supplier Bill / Invoice # *</label>
-                    <input type="text" name="bill_number" required placeholder="INV-9812" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
-                </div>
-                <div>
-                    <label class="block font-bold text-slate-900 mb-1">Bill Date</label>
-                    <input type="date" name="bill_date" value="{{ today_date }}" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                    <input type="text" name="bill_number" required placeholder="PB-2026-9812" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500 font-mono">
                 </div>
             </div>
 
-            <div class="grid grid-cols-2 gap-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                    <label class="block font-bold text-slate-900 mb-1">Total Bill Amount (₹) *</label>
-                    <input type="number" step="0.01" name="total_amount" required placeholder="12500.00" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                    <label class="block font-bold text-slate-900 mb-1">Bill Date *</label>
+                    <input type="date" name="bill_date" value="{{ today_date or '' }}" required class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
                 </div>
                 <div>
                     <label class="block font-bold text-slate-900 mb-1">Payment Mode</label>
                     <select name="payment_mode" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
-                        <option value="BANK_TRANSFER">Bank Transfer</option>
-                        <option value="UPI">UPI / GPay</option>
-                        <option value="CASH">Cash</option>
+                        <option value="BANK_TRANSFER">Bank Transfer (NEFT/RTGS)</option>
+                        <option value="UPI">UPI / GPay / PhonePe</option>
+                        <option value="CASH">Cash In Hand</option>
+                        <option value="CREDIT">Supplier Credit (Payable Later)</option>
                     </select>
                 </div>
             </div>
 
-            <div>
-                <label class="block font-bold text-slate-900 mb-1">Notes / Spare Parts Summary</label>
-                <input type="text" name="notes" placeholder="e.g. 50 pcs Lucas Relays, 10 Headlight kits" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+            <!-- Parts Line Items Section -->
+            <div class="space-y-2 border border-slate-200 rounded-2xl p-4 bg-slate-50">
+                <div class="flex items-center justify-between">
+                    <span class="font-bold text-slate-900 uppercase text-[11px] tracking-wider">📦 Purchased Spare Parts (Auto Stock IN)</span>
+                    <button type="button" onclick="addPurchaseLineItem()" class="px-2.5 py-1 bg-primary-100 hover:bg-primary-200 text-primary-800 font-bold text-xs rounded-lg transition">
+                        + Add Part Item
+                    </button>
+                </div>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs">
+                        <thead class="text-slate-500 font-semibold text-[11px] border-b border-slate-200">
+                            <tr>
+                                <th class="py-1.5 px-2">Spare Part</th>
+                                <th class="py-1.5 px-2 w-20">Qty (+)</th>
+                                <th class="py-1.5 px-2 w-28">Purchase Cost (₹)</th>
+                                <th class="py-1.5 px-2 text-right w-24">Total (₹)</th>
+                                <th class="py-1.5 px-2 text-center w-8">✕</th>
+                            </tr>
+                        </thead>
+                        <tbody id="purchase-items-body" class="divide-y divide-slate-200">
+                            <!-- Injected rows -->
+                        </tbody>
+                    </table>
+                </div>
             </div>
 
-            <div class="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
-                <button type="button" onclick="closeModal('add-purchase-modal')" class="px-4 py-2 text-slate-600 font-bold">Cancel</button>
-                <button type="submit" class="px-5 py-2.5 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl shadow">Save Purchase</button>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">Total Bill Amount (₹) *</label>
+                    <input type="number" step="0.01" id="pur-total-amount" name="total_amount" required placeholder="0.00" class="w-full px-3 py-2 rounded-xl border border-slate-300 font-black text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500">
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">Notes / Remarks</label>
+                    <input type="text" name="notes" placeholder="Bulk purchase, discount terms, etc." class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                </div>
+            </div>
+
+            <div class="flex flex-col sm:flex-row items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button type="button" onclick="closeModal('add-purchase-modal')" class="px-4 py-2 text-slate-600 font-bold rounded-xl">
+                    Cancel
+                </button>
+                <button type="submit" onclick="document.getElementById('pur-status-input').value = 'DRAFT'" class="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs rounded-xl transition">
+                    💾 Save as Draft (No Stock Change)
+                </button>
+                <button type="submit" onclick="document.getElementById('pur-status-input').value = 'CONFIRMED'" class="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs rounded-xl shadow transition flex items-center gap-1.5">
+                    <span>✅ Confirm Purchase (Auto Stock IN)</span>
+                </button>
             </div>
         </form>
     </div>
@@ -146,7 +208,7 @@
             <button onclick="closeModal('add-purchase-return-modal')" class="text-slate-400 hover:text-slate-700 text-xl font-bold">✕</button>
         </div>
 
-        <form action="/api/purchases/return" method="POST" class="mt-4 space-y-3 text-xs font-medium text-slate-700">
+        <form action="/api/purchases/returns" method="POST" class="mt-4 space-y-3 text-xs font-medium text-slate-700">
             <div>
                 <label class="block font-bold text-slate-900 mb-1">Select Inventory Part *</label>
                 <select name="item_id" required class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
@@ -184,4 +246,112 @@
         </form>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const availableInventory = [
+        {% for itm in inventory_items %}
+        { id: "{{ itm.id }}", name: "{{ itm.part_name }}", barcode: "{{ itm.barcode }}", cost: {{ itm.cost_price }} },
+        {% endfor %}
+    ];
+
+    let purchaseRows = [];
+
+    function addPurchaseLineItem(itemId = '', qty = 1, cost = 0) {
+        const rowId = 'prow_' + Math.random().toString(36).substr(2, 9);
+        const defaultItem = availableInventory.find(i => i.id === itemId) || availableInventory[0] || { id: '', name: 'Part', barcode: '', cost: 0 };
+
+        purchaseRows.push({
+            rowId: rowId,
+            item_id: itemId || defaultItem.id,
+            part_name: defaultItem.name,
+            barcode: defaultItem.barcode,
+            quantity: qty,
+            unit_cost: cost || defaultItem.cost
+        });
+        renderPurchaseRows();
+    }
+
+    function renderPurchaseRows() {
+        const tbody = document.getElementById('purchase-items-body');
+        tbody.innerHTML = '';
+
+        if (purchaseRows.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="5" class="py-4 text-center text-slate-400">No parts added. Click "+ Add Part Item" above.</td></tr>`;
+            return;
+        }
+
+        let calculatedTotal = 0;
+        purchaseRows.forEach((r, idx) => {
+            const lineTotal = r.quantity * r.unit_cost;
+            calculatedTotal += lineTotal;
+
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td class="py-2 px-2">
+                    <select onchange="updatePurchaseItemPart(${idx}, this.value)" class="w-full text-xs px-2 py-1.5 rounded-lg border border-slate-200">
+                        ${availableInventory.map(inv => `<option value="${inv.id}" ${inv.id === r.item_id ? 'selected' : ''}>${inv.name}</option>`).join('')}
+                    </select>
+                </td>
+                <td class="py-2 px-2">
+                    <input type="number" min="1" value="${r.quantity}" oninput="updatePurchaseItemQty(${idx}, this.value)" class="w-full text-xs px-2 py-1.5 rounded-lg border border-slate-200 text-center font-bold">
+                </td>
+                <td class="py-2 px-2">
+                    <input type="number" step="0.01" value="${r.unit_cost}" oninput="updatePurchaseItemCost(${idx}, this.value)" class="w-full text-xs px-2 py-1.5 rounded-lg border border-slate-200 text-right font-bold">
+                </td>
+                <td class="py-2 px-2 text-right font-bold text-slate-900">
+                    ₹${lineTotal.toFixed(2)}
+                </td>
+                <td class="py-2 px-2 text-center">
+                    <button type="button" onclick="removePurchaseRow(${idx})" class="text-rose-500 hover:text-rose-700 font-bold">✕</button>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+        const totalField = document.getElementById('pur-total-amount');
+        if (calculatedTotal > 0) {
+            totalField.value = calculatedTotal.toFixed(2);
+        }
+    }
+
+    function updatePurchaseItemPart(idx, partId) {
+        const found = availableInventory.find(i => i.id === partId);
+        if (found) {
+            purchaseRows[idx].item_id = found.id;
+            purchaseRows[idx].part_name = found.name;
+            purchaseRows[idx].barcode = found.barcode;
+            purchaseRows[idx].unit_cost = found.cost;
+        }
+        renderPurchaseRows();
+    }
+
+    function updatePurchaseItemQty(idx, val) {
+        purchaseRows[idx].quantity = Math.max(1, parseInt(val) || 1);
+        renderPurchaseRows();
+    }
+
+    function updatePurchaseItemCost(idx, val) {
+        purchaseRows[idx].unit_cost = Math.max(0, parseFloat(val) || 0);
+        renderPurchaseRows();
+    }
+
+    function removePurchaseRow(idx) {
+        purchaseRows.splice(idx, 1);
+        renderPurchaseRows();
+    }
+
+    function preparePurchaseSubmit(e) {
+        document.getElementById('pur-items-json').value = JSON.stringify(purchaseRows);
+        return true;
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+        // Initial row for convenience
+        if (availableInventory.length > 0 && purchaseRows.length === 0) {
+            addPurchaseLineItem();
+        }
+    });
+</script>
 {% endblock %}

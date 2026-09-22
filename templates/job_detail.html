@@ -28,13 +28,102 @@
                 <span>💬 WhatsApp Status</span>
             </button>
             
-            <!-- Generate Final Invoice Bill -->
-            <form action="/api/job-cards/{{ job.id }}/create-invoice" method="POST" class="inline">
-                <button type="submit" class="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white font-bold text-xs rounded-xl transition shadow flex items-center gap-1.5">
-                    <i data-lucide="receipt" class="w-4 h-4"></i>
-                    <span>Generate Bill & Print</span>
-                </button>
-            </form>
+            <!-- Generate Final Invoice Bill (Direct to POS pre-filled) -->
+            <a href="/billing?from_job={{ job.id }}" class="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white font-bold text-xs rounded-xl transition shadow flex items-center gap-1.5">
+                <i data-lucide="receipt" class="w-4 h-4"></i>
+                <span>Generate Bill & Print</span>
+            </a>
+        </div>
+    </div>
+
+    <!-- Vehicle Lifecycle Milestones Timeline -->
+    <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+        <div class="flex items-center justify-between border-b border-slate-100 pb-2">
+            <h3 class="font-extrabold text-xs uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-primary-600 animate-pulse"></span>
+                <span>Vehicle Service Lifecycle & Audit Log</span>
+            </h3>
+            <span class="text-[11px] font-mono text-slate-500 font-bold">Job #{{ job.job_number }}</span>
+        </div>
+        
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 pt-1">
+            <!-- 1. Vehicle Inward / Arrival -->
+            <div class="p-3 rounded-xl bg-blue-50/70 border border-blue-100 space-y-1">
+                <div class="flex items-center gap-1.5 text-blue-700 font-bold text-xs">
+                    <span class="text-base">🚗</span>
+                    <span>1. Inward</span>
+                </div>
+                <p class="text-[11px] font-semibold text-slate-800">{{ milestones.arrival_time or 'Recorded' }}</p>
+                <span class="text-[10px] text-blue-600 block">Vehicle Checked In</span>
+            </div>
+
+            <!-- 2. Inspection & Diagnosis -->
+            <div class="p-3 rounded-xl {% if job.status in ['INSPECTION', 'IN_PROGRESS', 'COMPLETED', 'DELIVERED'] or job.diagnosis_notes %}bg-indigo-50/70 border border-indigo-100{% else %}bg-slate-50 border border-slate-100 opacity-60{% endif %} space-y-1">
+                <div class="flex items-center gap-1.5 text-indigo-700 font-bold text-xs">
+                    <span class="text-base">🔍</span>
+                    <span>2. Diagnosis</span>
+                </div>
+                <p class="text-[11px] font-semibold text-slate-800 truncate" title="{{ job.diagnosis_notes or 'Inspection' }}">
+                    {{ job.diagnosis_notes or 'Inspection Active' }}
+                </p>
+                <span class="text-[10px] text-indigo-600 block">Tech: {{ job.assigned_technician_name or 'Unassigned' }}</span>
+            </div>
+
+            <!-- 3. Repair / Work Completed -->
+            <div class="p-3 rounded-xl {% if job.status in ['COMPLETED', 'DELIVERED'] or job.completed_at %}bg-amber-50/70 border border-amber-100{% else %}bg-slate-50 border border-slate-100 opacity-60{% endif %} space-y-1">
+                <div class="flex items-center gap-1.5 text-amber-700 font-bold text-xs">
+                    <span class="text-base">⚡</span>
+                    <span>3. Work Done</span>
+                </div>
+                <p class="text-[11px] font-semibold text-slate-800">{{ milestones.completed_time or ('In Progress' if job.status == 'IN_PROGRESS' else 'Pending') }}</p>
+                <span class="text-[10px] text-amber-700 block">{{ items|length }} Service Items</span>
+            </div>
+
+            <!-- 4. Bill Generated -->
+            <div class="p-3 rounded-xl {% if linked_invoice %}bg-purple-50/70 border border-purple-100{% else %}bg-slate-50 border border-slate-100 opacity-60{% endif %} space-y-1">
+                <div class="flex items-center gap-1.5 text-purple-700 font-bold text-xs">
+                    <span class="text-base">📄</span>
+                    <span>4. Invoice</span>
+                </div>
+                {% if linked_invoice %}
+                <p class="text-[11px] font-bold text-purple-900 font-mono">{{ linked_invoice.invoice_number }}</p>
+                <span class="text-[10px] text-purple-700 block">₹{{ "{:,.2f}".format(linked_invoice.grand_total) }}</span>
+                {% else %}
+                <p class="text-[11px] font-semibold text-slate-500">Not Billed</p>
+                <span class="text-[10px] text-slate-400 block">Ready to Generate</span>
+                {% endif %}
+            </div>
+
+            <!-- 5. Payment Status -->
+            <div class="p-3 rounded-xl {% if linked_invoice and linked_invoice.payment_status == 'PAID' %}bg-emerald-50/70 border border-emerald-100{% elif linked_invoice and linked_invoice.balance_due > 0 %}bg-rose-50/70 border border-rose-100{% else %}bg-slate-50 border border-slate-100 opacity-60{% endif %} space-y-1">
+                <div class="flex items-center gap-1.5 {% if linked_invoice and linked_invoice.payment_status == 'PAID' %}text-emerald-700{% elif linked_invoice and linked_invoice.balance_due > 0 %}text-rose-700{% else %}text-slate-600{% endif %} font-bold text-xs">
+                    <span class="text-base">💳</span>
+                    <span>5. Payment</span>
+                </div>
+                {% if linked_invoice %}
+                <p class="text-[11px] font-bold {% if linked_invoice.payment_status == 'PAID' %}text-emerald-800{% else %}text-rose-700{% endif %}">
+                    {{ linked_invoice.payment_status }} ({{ linked_invoice.payment_mode }})
+                </p>
+                <span class="text-[10px] {% if linked_invoice.balance_due > 0 %}text-rose-600 font-bold{% else %}text-emerald-600{% endif %} block">
+                    {% if linked_invoice.balance_due > 0 %}Due: ₹{{ "{:,.2f}".format(linked_invoice.balance_due) }}{% else %}Full Paid{% endif %}
+                </span>
+                {% else %}
+                <p class="text-[11px] font-semibold text-slate-500">Pending</p>
+                <span class="text-[10px] text-slate-400 block">Payment Due</span>
+                {% endif %}
+            </div>
+
+            <!-- 6. Vehicle Handover / Delivery -->
+            <div class="p-3 rounded-xl {% if job.status == 'DELIVERED' or job.delivered_at %}bg-emerald-100/70 border border-emerald-200 text-emerald-950{% else %}bg-slate-50 border border-slate-100 opacity-60{% endif %} space-y-1">
+                <div class="flex items-center gap-1.5 text-emerald-800 font-bold text-xs">
+                    <span class="text-base">🏁</span>
+                    <span>6. Delivery</span>
+                </div>
+                <p class="text-[11px] font-semibold text-slate-800">{{ milestones.delivered_time or ('Delivered' if job.status == 'DELIVERED' else 'In Workshop') }}</p>
+                <span class="text-[10px] text-emerald-700 block">
+                    {% if job.status == 'DELIVERED' %}Handed Over{% else %}Awaiting Pickup{% endif %}
+                </span>
+            </div>
         </div>
     </div>
 
