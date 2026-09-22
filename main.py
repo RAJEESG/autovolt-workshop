@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, date, timedelta
 from typing import Optional, List, Dict, Any
 
-from fastapi import FastAPI, HTTPException, Request, Form, Response, Query
+from fastapi import FastAPI, HTTPException, Request, Form, Response, Query, File, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -24,8 +24,11 @@ from whatsapp_helper import (
 )
 import ca_reports
 from pdf_generator import generate_invoice_pdf_bytes
+from excel_importer import generate_inventory_import_template, parse_inventory_file
+from auth_helper import hash_password, verify_password, verify_master_pin, generate_reset_token
+import otp_helper
 
-app = FastAPI(title="AutoVolt Pro — Auto Electrical Workshop Management", version="1.0.0")
+app = FastAPI(title="AutoVolt Pro — Auto Electrical Workshop Management", version="2.0.0")
 
 # Mount Static Files & Templates
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -44,7 +47,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Helper: Get current workshop profile
+# Helper: Get current active workshop profile
 def get_current_workshop() -> Dict[str, Any]:
     conn = db.get_db_connection()
     cursor = conn.cursor()
@@ -54,8 +57,10 @@ def get_current_workshop() -> Dict[str, Any]:
     if row:
         return dict(row)
     return {
+        "id": "default",
         "name": "SPARK AUTO ELECTRICALS",
         "subtitle": "Auto Electrical & Electronic Service Center",
+        "owner_name": "Suresh Kumar",
         "phone": "+91 98765 43210",
         "email": "sparkautocare@gmail.com",
         "address": "Near Highway Junction, Ernakulam, Kerala - 682001",
@@ -65,15 +70,250 @@ def get_current_workshop() -> Dict[str, Any]:
         "bank_account_no": "39876543210",
         "bank_ifsc": "SBIN0001234",
         "bank_branch": "Ernakulam Main",
+        "language": "en",
         "currency": "₹",
-        "terms": "1. Electrical parts warranty as per manufacturer.\n2. Goods once fitted cannot be returned."
+        "master_pin": "1234",
+        "terms": "1. Electrical parts warranty as per manufacturer policy.\n2. Goods once fitted cannot be returned."
     }
+
+# Helper: Check current SaaS subscription status
+def check_saas_subscription() -> Dict[str, Any]:
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM tenants WHERE id = 'tenant_1' OR id = 'default-workshop' LIMIT 1")
+    t_row = cursor.fetchone()
+    cursor.execute("SELECT * FROM subscriptions WHERE is_active = 1 ORDER BY end_date DESC LIMIT 1")
+    s_row = cursor.fetchone()
+    conn.close()
+
+    tenant = dict(t_row) if t_row else None
+    sub = dict(s_row) if s_row else None
+
+    is_expired = False
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    if sub and sub.get("end_date"):
+        if sub["end_date"] < today_str or sub.get("is_active") == 0:
+            is_expired = True
+
+    return {
+        "tenant": tenant,
+        "subscription": sub,
+        "is_expired": is_expired
+    }
+
+# SaaS Subscription & Authentication Middleware
+@app.middleware("http")
+async def auth_and_subscription_middleware(request: Request, call_next):
+    path = request.url.path
+    
+    # Exempt routes that should always remain accessible without login
+    exempt_prefixes = [
+        "/static", "/login", "/logout", "/forgot-password", "/verify-otp", "/reset-password",
+        "/subscription-expired", "/view", "/invoice"
+    ]
+    
+    is_exempt = any(path.startswith(prefix) for prefix in exempt_prefixes)
+    session_user = request.cookies.get("session_user")
+    
+    # If not logged in and accessing protected page, redirect to login
+    if not is_exempt and not session_user:
+        if request.method == "GET":
+            return RedirectResponse(url="/login", status_code=303)
+        else:
+            return JSONResponse({"error": "Authentication required", "redirect": "/login"}, status_code=401)
+            
+    # If already logged in and visiting login page, redirect to dashboard
+    if path == "/login" and session_user and request.method == "GET":
+        return RedirectResponse(url="/", status_code=303)
+    
+    # SaaS Expiration Check for authenticated users
+    if not is_exempt and request.method == "GET":
+        sub_info = check_saas_subscription()
+        if sub_info["is_expired"]:
+            return RedirectResponse(url="/subscription-expired", status_code=303)
+            
+    response = await call_next(request)
+    return response
+
+# Helper to get current logged in user dict
+def get_session_user(request: Request) -> Optional[dict]:
+    username = request.cookies.get("session_user")
+    if not username:
+        return None
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, username, role, full_name, email, phone, whatsapp_mobile FROM users WHERE username = ? AND status = 'ACTIVE'", (username,))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
 
 # Base URL for public links
 APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:8000")
 
 # =========================================================
-# 📊 PAGE ROUTES (HTML FRONTEND)
+# 🔐 AUTHENTICATION & WHATSAPP OTP PASSWORD RESET
+# =========================================================
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request, error: Optional[str] = None, success_msg: Optional[str] = None):
+    return templates.TemplateResponse(
+        request=request,
+        name="login.html",
+        context={"error": error, "success_msg": success_msg}
+    )
+
+@app.post("/login")
+async def handle_login(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...)
+):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM users WHERE username = ? AND status = 'ACTIVE'", (username.strip(),))
+    user_row = cursor.fetchone()
+
+    if not user_row or not verify_password(password.strip(), user_row["password_hash"]):
+        conn.close()
+        return templates.TemplateResponse(
+            request=request,
+            name="login.html",
+            context={"error": "Invalid username or password. Please try again."}
+        )
+
+    user = dict(user_row)
+    db.log_audit("USER_LOGIN", "users", user["id"], f"User {user['username']} logged in", cursor=cursor)
+    conn.commit()
+    conn.close()
+    
+    response = RedirectResponse(url="/", status_code=303)
+    response.set_cookie(key="session_user", value=user["username"], max_age=86400 * 30, httponly=True)
+    return response
+
+@app.get("/logout")
+async def handle_logout():
+    response = RedirectResponse(url="/login", status_code=303)
+    response.delete_cookie("session_user")
+    return response
+
+@app.get("/forgot-password", response_class=HTMLResponse)
+async def forgot_password_page(request: Request, error: Optional[str] = None):
+    return templates.TemplateResponse(
+        request=request,
+        name="forgot_password.html",
+        context={"error": error}
+    )
+
+@app.post("/forgot-password")
+async def handle_forgot_password(request: Request, username_or_mobile: str = Form(...)):
+    otp_data = otp_helper.generate_and_store_otp(username_or_mobile.strip())
+    
+    if not otp_data:
+        return templates.TemplateResponse(
+            request=request,
+            name="forgot_password.html",
+            context={"error": "No active account found for that username or WhatsApp mobile number."}
+        )
+
+    # Redirect to OTP verification page
+    username = otp_data["username"]
+    return RedirectResponse(url=f"/verify-otp?username={username}", status_code=303)
+
+@app.get("/verify-otp", response_class=HTMLResponse)
+async def verify_otp_page(request: Request, username: str = Query(...), error: Optional[str] = None):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM users WHERE username = ?", (username.strip(),))
+    user = cursor.fetchone()
+    conn.close()
+
+    if not user:
+        return RedirectResponse(url="/forgot-password?error=User+not+found", status_code=303)
+
+    user_dict = dict(user)
+    mobile = user_dict.get("whatsapp_mobile") or user_dict.get("phone") or "+919876500000"
+    otp_code = user_dict.get("otp_code", "")
+    whatsapp_link = otp_helper.build_whatsapp_otp_url(mobile, otp_code, username, user_dict.get("full_name", ""))
+
+    return templates.TemplateResponse(
+        request=request,
+        name="verify_otp.html",
+        context={
+            "username": username,
+            "whatsapp_mobile": mobile,
+            "whatsapp_link": whatsapp_link,
+            "otp_preview": otp_code,
+            "error": error
+        }
+    )
+
+@app.post("/verify-otp")
+async def handle_verify_otp(
+    request: Request,
+    username: str = Form(...),
+    otp: str = Form(...),
+    new_password: str = Form(...),
+    confirm_password: str = Form(...)
+):
+    if new_password.strip() != confirm_password.strip():
+        conn = db.get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users WHERE username = ?", (username.strip(),))
+        user = cursor.fetchone()
+        conn.close()
+        mobile = user["whatsapp_mobile"] if user else ""
+        otp_code = user["otp_code"] if user else ""
+        wa_link = otp_helper.build_whatsapp_otp_url(mobile, otp_code, username) if user else ""
+
+        return templates.TemplateResponse(
+            request=request,
+            name="verify_otp.html",
+            context={
+                "username": username,
+                "whatsapp_mobile": mobile,
+                "whatsapp_link": wa_link,
+                "otp_preview": otp_code,
+                "error": "Passwords do not match. Please re-enter."
+            }
+        )
+
+    success, msg = otp_helper.verify_and_reset_password(username.strip(), otp.strip(), new_password.strip())
+    
+    if not success:
+        conn = db.get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users WHERE username = ?", (username.strip(),))
+        user = cursor.fetchone()
+        conn.close()
+        mobile = user["whatsapp_mobile"] if user else ""
+        otp_code = user["otp_code"] if user else ""
+        wa_link = otp_helper.build_whatsapp_otp_url(mobile, otp_code, username) if user else ""
+
+        return templates.TemplateResponse(
+            request=request,
+            name="verify_otp.html",
+            context={
+                "username": username,
+                "whatsapp_mobile": mobile,
+                "whatsapp_link": wa_link,
+                "otp_preview": otp_code,
+                "error": msg
+            }
+        )
+
+    return RedirectResponse(url="/login?success_msg=Password+reset+successful!+Please+log+in+with+your+new+password.", status_code=303)
+
+@app.get("/subscription-expired", response_class=HTMLResponse)
+async def subscription_expired_page(request: Request):
+    workshop = get_current_workshop()
+    return templates.TemplateResponse(
+        request=request,
+        name="subscription_expired.html",
+        context={"workshop": workshop}
+    )
+
+# =========================================================
+# 📊 MAIN DASHBOARD & JOB CARDS
 # =========================================================
 
 @app.get("/", response_class=HTMLResponse)
@@ -81,7 +321,6 @@ async def dashboard_page(request: Request):
     conn = db.get_db_connection()
     cursor = conn.cursor()
     
-    # Metrics
     cursor.execute("SELECT COUNT(*) FROM job_cards WHERE status NOT IN ('DELIVERED', 'CANCELLED')")
     active_jobs_count = cursor.fetchone()[0]
     
@@ -97,15 +336,12 @@ async def dashboard_page(request: Request):
     cursor.execute("SELECT COUNT(*) FROM inventory_items WHERE stock_qty <= min_stock_alert")
     low_stock_count = cursor.fetchone()[0]
     
-    # Active Jobs
     cursor.execute("SELECT * FROM job_cards WHERE status NOT IN ('DELIVERED', 'CANCELLED') ORDER BY created_at DESC LIMIT 6")
     active_jobs = [dict(row) for row in cursor.fetchall()]
     
-    # Technicians
     cursor.execute("SELECT * FROM technicians ORDER BY total_jobs DESC")
     technicians = [dict(row) for row in cursor.fetchall()]
     
-    # Recent Invoices
     cursor.execute("SELECT * FROM invoices ORDER BY created_at DESC LIMIT 8")
     recent_invoices = [dict(row) for row in cursor.fetchall()]
     
@@ -128,31 +364,52 @@ async def dashboard_page(request: Request):
     )
 
 @app.get("/job-cards", response_class=HTMLResponse)
-async def job_cards_page(request: Request):
+async def job_cards_page(request: Request, filter: Optional[str] = None, status: Optional[str] = None):
     conn = db.get_db_connection()
     cursor = conn.cursor()
     
     cursor.execute("SELECT * FROM job_cards ORDER BY created_at DESC")
-    all_jobs = [dict(row) for row in cursor.fetchall()]
+    all_jobs_raw = [dict(row) for row in cursor.fetchall()]
     
-    # Group by Kanban status
-    jobs_by_status = {
-        "RECEIVED": [],
-        "INSPECTION": [],
-        "IN_PROGRESS": [],
-        "COMPLETED": [],
-        "DELIVERED": []
-    }
-    for job in all_jobs:
-        st = job["status"]
-        if st in jobs_by_status:
-            jobs_by_status[st].append(job)
-        else:
-            jobs_by_status["IN_PROGRESS"].append(job)
+    now = datetime.now()
+    all_jobs = []
+    active_count = 0
+    for j in all_jobs_raw:
+        st = j.get("status", "RECEIVED")
+        if st not in ("DELIVERED", "CANCELLED"):
+            active_count += 1
             
-    cursor.execute("SELECT * FROM technicians WHERE status = 'Active'")
+        created_dt = None
+        if j.get("created_at"):
+            try:
+                created_dt = datetime.fromisoformat(j["created_at"].replace("Z", ""))
+            except Exception:
+                pass
+        
+        if created_dt:
+            diff = now - created_dt
+            hours = int(diff.total_seconds() // 3600)
+            mins = int((diff.total_seconds() % 3600) // 60)
+            if hours > 24:
+                days = hours // 24
+                j["elapsed_time_str"] = f"{days}d {hours%24}h ago"
+            elif hours > 0:
+                j["elapsed_time_str"] = f"{hours}h {mins}m ago"
+            else:
+                j["elapsed_time_str"] = f"{max(1, mins)}m ago"
+        else:
+            j["elapsed_time_str"] = "Just now"
+            
+        all_jobs.append(j)
+        
+    filtered_jobs = all_jobs
+    if filter == "active":
+        filtered_jobs = [j for j in all_jobs if j.get("status") not in ("DELIVERED", "CANCELLED")]
+    elif status:
+        filtered_jobs = [j for j in all_jobs if j.get("status") == status]
+        
+    cursor.execute("SELECT * FROM technicians ORDER BY name ASC")
     technicians = [dict(row) for row in cursor.fetchall()]
-    
     conn.close()
     
     return templates.TemplateResponse(
@@ -160,7 +417,11 @@ async def job_cards_page(request: Request):
         name="job_cards.html",
         context={
             "active_page": "job_cards",
-            "jobs_by_status": jobs_by_status,
+            "jobs": filtered_jobs,
+            "all_jobs": all_jobs,
+            "active_count": active_count,
+            "filter_mode": filter or "",
+            "filter_status": status or "",
             "technicians": technicians
         }
     )
@@ -177,22 +438,18 @@ async def job_detail_page(request: Request, job_id: str):
         raise HTTPException(status_code=404, detail="Job Card not found")
     job = dict(job_row)
     
-    # Parse complaints list
     try:
         complaints_list = json.loads(job["complaints"]) if job["complaints"] else []
     except Exception:
         complaints_list = [job["complaints"]] if job["complaints"] else []
         
-    # Get Line Items
     cursor.execute("SELECT * FROM job_items WHERE job_card_id = ?", (job_id,))
     items = [dict(row) for row in cursor.fetchall()]
     
-    # Calculate totals
     total_labor = sum(i["total_price"] for i in items if i["item_type"] == "LABOR")
     total_parts = sum(i["total_price"] for i in items if i["item_type"] == "PART")
     grand_total = total_labor + total_parts
     
-    # Technicians & Inventory Items
     cursor.execute("SELECT * FROM technicians WHERE status = 'Active'")
     technicians = [dict(row) for row in cursor.fetchall()]
     
@@ -217,6 +474,242 @@ async def job_detail_page(request: Request, job_id: str):
         }
     )
 
+@app.post("/api/job-cards")
+async def create_job_card(
+    vehicle_reg_no: str = Form(...),
+    vehicle_make_model: str = Form(...),
+    customer_name: str = Form(...),
+    customer_phone: str = Form(...),
+    assigned_technician_id: Optional[str] = Form(None),
+    odometer: Optional[int] = Form(0),
+    complaints: List[str] = Form([]),
+    custom_complaint_notes: Optional[str] = Form(None)
+):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT COUNT(*) FROM job_cards")
+    cnt = cursor.fetchone()[0] + 1
+    job_number = f"JOB-2026-{cnt:03d}"
+    job_id = f"job_{uuid.uuid4().hex[:8]}"
+    
+    tech_name = None
+    if assigned_technician_id:
+        cursor.execute("SELECT name FROM technicians WHERE id = ?", (assigned_technician_id,))
+        t_row = cursor.fetchone()
+        if t_row:
+            tech_name = t_row["name"]
+            
+    cursor.execute("SELECT id FROM customers WHERE phone = ?", (customer_phone.strip(),))
+    c_row = cursor.fetchone()
+    if c_row:
+        customer_id = c_row["id"]
+        cursor.execute("UPDATE customers SET total_visits = total_visits + 1 WHERE id = ?", (customer_id,))
+    else:
+        customer_id = f"cust_{uuid.uuid4().hex[:8]}"
+        cursor.execute("INSERT INTO customers (id, name, phone, created_at) VALUES (?, ?, ?, datetime('now'))", (customer_id, customer_name, customer_phone))
+        
+    cursor.execute("SELECT id FROM vehicles WHERE reg_number = ?", (vehicle_reg_no.strip().upper(),))
+    v_row = cursor.fetchone()
+    if v_row:
+        vehicle_id = v_row["id"]
+        cursor.execute("UPDATE vehicles SET odometer = ? WHERE id = ?", (odometer, vehicle_id))
+    else:
+        vehicle_id = f"veh_{uuid.uuid4().hex[:8]}"
+        cursor.execute("""
+        INSERT INTO vehicles (id, reg_number, customer_id, customer_name, customer_phone, make_model, odometer, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        """, (vehicle_id, vehicle_reg_no.strip().upper(), customer_id, customer_name, customer_phone, vehicle_make_model, odometer))
+        
+    complaints_json = json.dumps(complaints)
+    cursor.execute("""
+    INSERT INTO job_cards (
+        id, job_number, customer_id, customer_name, customer_phone, vehicle_id, vehicle_reg_no,
+        vehicle_make_model, odometer, assigned_technician_id, assigned_technician_name,
+        status, complaints, custom_complaint_notes, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RECEIVED', ?, ?, datetime('now'))
+    """, (
+        job_id, job_number, customer_id, customer_name, customer_phone, vehicle_id,
+        vehicle_reg_no.strip().upper(), vehicle_make_model, odometer, assigned_technician_id,
+        tech_name, complaints_json, custom_complaint_notes
+    ))
+    
+    db.log_audit("CREATE_JOB_CARD", "job_cards", job_id, f"Job {job_number} for {vehicle_reg_no}", cursor=cursor)
+    conn.commit()
+    conn.close()
+    return RedirectResponse(url=f"/job-cards/{job_id}", status_code=303)
+
+@app.post("/api/job-cards/{job_id}/status")
+async def update_job_status(job_id: str, status: str = Form(...)):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE job_cards SET status = ? WHERE id = ?", (status, job_id))
+    db.log_audit("UPDATE_JOB_STATUS", "job_cards", job_id, f"Status changed to {status}", cursor=cursor)
+    conn.commit()
+    conn.close()
+    return RedirectResponse(url=f"/job-cards", status_code=303)
+
+@app.post("/api/job-cards/{job_id}/update-diagnosis")
+async def update_job_diagnosis(job_id: str, diagnosis_notes: str = Form(...)):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE job_cards SET diagnosis_notes = ? WHERE id = ?", (diagnosis_notes, job_id))
+    conn.commit()
+    conn.close()
+    return RedirectResponse(url=f"/job-cards/{job_id}", status_code=303)
+
+@app.post("/api/job-cards/{job_id}/items")
+async def add_job_card_item(
+    job_id: str,
+    item_type: str = Form(...),
+    name: Optional[str] = Form(None),
+    item_id: Optional[str] = Form(None),
+    quantity: int = Form(1),
+    unit_price: Optional[float] = Form(None),
+    technician_id: Optional[str] = Form(None)
+):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    
+    tech_name = None
+    if technician_id:
+        cursor.execute("SELECT name FROM technicians WHERE id = ?", (technician_id,))
+        t_row = cursor.fetchone()
+        if t_row:
+            tech_name = t_row["name"]
+            
+    barcode = None
+    hsn_code = "8536"
+    tax_rate = 18.0
+    
+    if item_type == "PART" and item_id:
+        cursor.execute("SELECT * FROM inventory_items WHERE id = ?", (item_id,))
+        p_row = cursor.fetchone()
+        if p_row:
+            name = p_row["part_name"]
+            barcode = p_row["barcode"]
+            hsn_code = p_row["hsn_code"] or "8536"
+            tax_rate = p_row["tax_rate"] or 18.0
+            if unit_price is None or unit_price == 0:
+                unit_price = p_row["selling_price"]
+                
+            cursor.execute("UPDATE inventory_items SET stock_qty = MAX(0, stock_qty - ?) WHERE id = ?", (quantity, item_id))
+    else:
+        hsn_code = "9987"
+        tax_rate = 0.0
+        
+    line_total = (unit_price or 0.0) * quantity
+    line_id = f"ji_{uuid.uuid4().hex[:8]}"
+    
+    cursor.execute("""
+    INSERT INTO job_items (
+        id, job_card_id, item_type, item_id, barcode, name, hsn_code,
+        quantity, unit_price, tax_rate, total_price, technician_id, technician_name
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        line_id, job_id, item_type, item_id, barcode, name or "Labor Charge",
+        hsn_code, quantity, unit_price or 0.0, tax_rate, line_total, technician_id, tech_name
+    ))
+    
+    conn.commit()
+    conn.close()
+    return RedirectResponse(url=f"/job-cards/{job_id}", status_code=303)
+
+@app.post("/api/job-cards/{job_id}/items/{item_id}/delete")
+async def delete_job_card_item(job_id: str, item_id: str):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM job_items WHERE id = ? AND job_card_id = ?", (item_id, job_id))
+    conn.commit()
+    conn.close()
+    return RedirectResponse(url=f"/job-cards/{job_id}", status_code=303)
+
+@app.post("/api/job-cards/{job_id}/delete")
+async def delete_job_card_with_pin(job_id: str, payload: Dict[str, Any]):
+    pin = payload.get("pin", "")
+    workshop = get_current_workshop()
+    if not verify_master_pin(pin, workshop.get("master_pin", "1234")):
+        raise HTTPException(status_code=403, detail="Invalid Master Security PIN")
+
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM job_items WHERE job_card_id = ?", (job_id,))
+    cursor.execute("DELETE FROM job_cards WHERE id = ?", (job_id,))
+    db.log_audit("DELETE_JOB_CARD", "job_cards", job_id, f"Deleted job card {job_id} using Master PIN", cursor=cursor)
+    conn.commit()
+    conn.close()
+    return {"success": True}
+
+@app.post("/api/job-cards/{job_id}/create-invoice")
+async def convert_job_card_to_invoice(job_id: str):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT * FROM job_cards WHERE id = ?", (job_id,))
+    job = cursor.fetchone()
+    if not job:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Job not found")
+        
+    cursor.execute("SELECT * FROM job_items WHERE job_card_id = ?", (job_id,))
+    items = [dict(row) for row in cursor.fetchall()]
+    
+    cursor.execute("SELECT COUNT(*) FROM invoices")
+    cnt = cursor.fetchone()[0] + 1
+    invoice_number = f"INV-2026-{cnt:03d}"
+    invoice_id = f"inv_{uuid.uuid4().hex[:8]}"
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    
+    subtotal_labor = sum(i["total_price"] for i in items if i["item_type"] == "LABOR")
+    subtotal_parts = sum(i["total_price"] for i in items if i["item_type"] == "PART")
+    grand_total = subtotal_labor + subtotal_parts
+    
+    workshop = get_current_workshop()
+    vpa = workshop.get("upi_id", "sparkautoworkshop@okaxis")
+    upi_link = generate_upi_link(vpa, workshop.get("name", "Auto Workshop"), grand_total, f"Inv_{invoice_number}")
+    
+    cursor.execute("""
+    INSERT INTO invoices (
+        id, invoice_number, invoice_date, invoice_type, job_card_id, job_number,
+        customer_id, customer_name, customer_phone, vehicle_reg_no, vehicle_make_model,
+        odometer, subtotal_labor, subtotal_parts, taxable_subtotal, grand_total,
+        amount_paid, balance_due, payment_status, payment_mode, upi_payment_link, created_at
+    ) VALUES (?, ?, ?, 'JOB_SERVICE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PAID', 'UPI', ?, datetime('now'))
+    """, (
+        invoice_id, invoice_number, today_str, job_id, job["job_number"],
+        job["customer_id"], job["customer_name"], job["customer_phone"],
+        job["vehicle_reg_no"], job["vehicle_make_model"], job["odometer"],
+        subtotal_labor, subtotal_parts, grand_total, grand_total, grand_total,
+        0.0, upi_link
+    ))
+    
+    for i in items:
+        inv_item_id = f"ii_{uuid.uuid4().hex[:8]}"
+        cursor.execute("""
+        INSERT INTO invoice_items (
+            id, invoice_id, item_type, item_id, barcode, name, hsn_sac,
+            quantity, unit_price, tax_rate, taxable_amount, total_price, technician_name
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            inv_item_id, invoice_id, i["item_type"], i["item_id"], i["barcode"],
+            i["name"], i["hsn_code"] or "8536", i["quantity"], i["unit_price"],
+            i["tax_rate"], i["total_price"], i["total_price"], i["technician_name"]
+        ))
+        
+    cursor.execute("UPDATE job_cards SET status = 'COMPLETED', completed_at = datetime('now') WHERE id = ?", (job_id,))
+    
+    if job["assigned_technician_id"]:
+        cursor.execute("UPDATE technicians SET total_jobs = total_jobs + 1 WHERE id = ?", (job["assigned_technician_id"],))
+        
+    db.log_audit("GENERATE_INVOICE", "invoices", invoice_id, f"Generated #{invoice_number} from Job {job['job_number']}", cursor=cursor)
+    conn.commit()
+    conn.close()
+    return RedirectResponse(url=f"/billing", status_code=303)
+
+# =========================================================
+# 💳 BILLING, BARCODE SCAN POS & INVOICES
+# =========================================================
+
 @app.get("/billing", response_class=HTMLResponse)
 async def billing_page(request: Request):
     conn = db.get_db_connection()
@@ -227,7 +720,24 @@ async def billing_page(request: Request):
     
     cursor.execute("SELECT * FROM invoices ORDER BY created_at DESC LIMIT 50")
     invoices = [dict(row) for row in cursor.fetchall()]
-    
+
+    cursor.execute("""
+    SELECT c.name, c.phone, v.reg_number as vehicle_reg_no
+    FROM customers c
+    LEFT JOIN vehicles v ON c.id = v.customer_id
+    ORDER BY c.name ASC
+    """)
+    customers = [dict(row) for row in cursor.fetchall()]
+
+    cursor.execute("SELECT gst_slabs FROM workshop_profile WHERE id = 'default'")
+    prof_row = cursor.fetchone()
+    gst_slabs_list = ["0", "5", "12", "18", "28"]
+    if prof_row and prof_row["gst_slabs"]:
+        try:
+            gst_slabs_list = json.loads(prof_row["gst_slabs"])
+        except Exception:
+            pass
+
     conn.close()
     
     return templates.TemplateResponse(
@@ -236,26 +746,257 @@ async def billing_page(request: Request):
         context={
             "active_page": "billing",
             "inventory_items": inventory_items,
-            "invoices": invoices
+            "invoices": invoices,
+            "customers": customers,
+            "gst_slabs_list": gst_slabs_list
         }
     )
 
-@app.get("/barcode-labels", response_class=HTMLResponse)
-async def barcode_labels_page(request: Request):
+@app.post("/api/invoices")
+async def create_pos_invoice(payload: Dict[str, Any]):
     conn = db.get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM inventory_items ORDER BY part_name")
-    inventory_items = [dict(row) for row in cursor.fetchall()]
+    
+    cursor.execute("SELECT COUNT(*) FROM invoices")
+    cnt = cursor.fetchone()[0] + 1
+    invoice_number = f"INV-2026-{cnt:03d}"
+    invoice_id = f"inv_{uuid.uuid4().hex[:8]}"
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    
+    items = payload.get("items", [])
+    subtotal_labor = sum(i["unit_price"] * i["quantity"] for i in items if i.get("item_type") == "LABOR")
+    subtotal_parts = sum(i["unit_price"] * i["quantity"] for i in items if i.get("item_type") == "PART")
+    discount = float(payload.get("discount_amount", 0.0))
+    grand_total = max(0.0, (subtotal_labor + subtotal_parts) - discount)
+    amount_paid = float(payload.get("amount_paid", grand_total))
+    balance_due = max(0.0, grand_total - amount_paid)
+    payment_status = "PAID" if balance_due <= 0 else ("PARTIAL" if amount_paid > 0 else "UNPAID")
+    
+    workshop = get_current_workshop()
+    vpa = workshop.get("upi_id", "sparkautoworkshop@okaxis")
+    pay_for_qr = balance_due if balance_due > 0 else grand_total
+    upi_link = generate_upi_link(vpa, workshop.get("name", "Auto Workshop"), pay_for_qr, f"Inv_{invoice_number}")
+    
+    cursor.execute("""
+    INSERT INTO invoices (
+        id, invoice_number, invoice_date, invoice_type,
+        customer_name, customer_phone, vehicle_reg_no,
+        subtotal_labor, subtotal_parts, taxable_subtotal, discount_amount,
+        grand_total, amount_paid, balance_due, payment_status, payment_mode,
+        upi_payment_link, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    """, (
+        invoice_id, invoice_number, today_str, payload.get("invoice_type", "COUNTER_SALE"),
+        payload.get("customer_name", "Walk-in"), payload.get("customer_phone", "9876543210"),
+        payload.get("vehicle_reg_no", ""),
+        subtotal_labor, subtotal_parts, grand_total, discount,
+        grand_total, amount_paid, balance_due, payment_status,
+        payload.get("payment_mode", "UPI"), upi_link
+    ))
+    
+    for i in items:
+        inv_item_id = f"ii_{uuid.uuid4().hex[:8]}"
+        line_total = i["unit_price"] * i["quantity"]
+        cursor.execute("""
+        INSERT INTO invoice_items (
+            id, invoice_id, item_type, item_id, barcode, name, hsn_sac,
+            quantity, unit_price, tax_rate, taxable_amount, total_price
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            inv_item_id, invoice_id, i.get("item_type", "PART"), i.get("item_id"),
+            i.get("barcode"), i.get("name", "Item"), i.get("hsn_sac", "8536"),
+            i["quantity"], i["unit_price"], i.get("tax_rate", 18.0),
+            line_total, line_total
+        ))
+        
+        if i.get("item_id"):
+            cursor.execute("UPDATE inventory_items SET stock_qty = MAX(0, stock_qty - ?) WHERE id = ?", (i["quantity"], i["item_id"]))
+            
+    db.log_audit("CREATE_INVOICE", "invoices", invoice_id, f"Created bill #{invoice_number} (₹{grand_total:.2f}, Status: {payment_status})", cursor=cursor)
+    conn.commit()
+    conn.close()
+    return {"success": True, "invoice_id": invoice_id, "invoice_number": invoice_number}
+
+@app.post("/api/invoices/{invoice_id}/record-payment")
+async def record_invoice_payment(invoice_id: str, payload: Dict[str, Any]):
+    amount = float(payload.get("amount", 0.0))
+    mode = payload.get("payment_mode", "UPI")
+    notes = payload.get("notes", "")
+
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Payment amount must be greater than zero")
+
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,))
+    inv = cursor.fetchone()
+    if not inv:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    old_paid = inv["amount_paid"] or 0.0
+    new_paid = old_paid + amount
+    grand_total = inv["grand_total"]
+    new_balance = max(0.0, grand_total - new_paid)
+    new_status = "PAID" if new_balance <= 0 else "PARTIAL"
+
+    cursor.execute("""
+    UPDATE invoices SET amount_paid = ?, balance_due = ?, payment_status = ?, payment_mode = ? WHERE id = ?
+    """, (new_paid, new_balance, new_status, mode, invoice_id))
+
+    db.log_audit("RECORD_PAYMENT", "invoices", invoice_id, f"Recorded ₹{amount:.2f} via {mode}. New status: {new_status}", cursor=cursor)
+    conn.commit()
+    conn.close()
+    return {"success": True, "new_balance": new_balance, "new_status": new_status}
+
+@app.post("/api/invoices/{invoice_id}/delete")
+async def delete_invoice_with_pin(invoice_id: str, payload: Dict[str, Any]):
+    pin = payload.get("pin", "")
+    workshop = get_current_workshop()
+    if not verify_master_pin(pin, workshop.get("master_pin", "1234")):
+        raise HTTPException(status_code=403, detail="Invalid Master Security PIN")
+
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,))
+    inv = cursor.fetchone()
+    if not inv:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    cursor.execute("SELECT * FROM invoice_items WHERE invoice_id = ?", (invoice_id,))
+    items = cursor.fetchall()
+    for itm in items:
+        if itm["item_type"] == "PART" and itm["item_id"]:
+            cursor.execute("UPDATE inventory_items SET stock_qty = stock_qty + ? WHERE id = ?", (itm["quantity"], itm["item_id"]))
+
+    cursor.execute("DELETE FROM invoice_items WHERE invoice_id = ?", (invoice_id,))
+    cursor.execute("DELETE FROM invoices WHERE id = ?", (invoice_id,))
+    db.log_audit("DELETE_INVOICE", "invoices", invoice_id, f"Deleted #{inv['invoice_number']} and restored stock", cursor=cursor)
+    conn.commit()
+    conn.close()
+    return {"success": True}
+
+@app.get("/api/invoices/{invoice_id}/pdf")
+async def download_invoice_pdf(invoice_id: str):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,))
+    inv_row = cursor.fetchone()
+    if not inv_row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    invoice = dict(inv_row)
+    
+    cursor.execute("SELECT * FROM invoice_items WHERE invoice_id = ?", (invoice_id,))
+    invoice["items"] = [dict(row) for row in cursor.fetchall()]
     conn.close()
     
-    return templates.TemplateResponse(
-        request=request,
-        name="barcode_labels.html",
-        context={
-            "active_page": "barcode_labels",
-            "inventory_items": inventory_items
-        }
+    workshop = get_current_workshop()
+    pdf_bytes = generate_invoice_pdf_bytes(invoice, workshop)
+    
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename=Invoice_{invoice['invoice_number']}.pdf"}
     )
+
+@app.get("/api/invoices/{invoice_id}/whatsapp-link")
+async def get_invoice_whatsapp_link(invoice_id: str):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,))
+    inv_row = cursor.fetchone()
+    if not inv_row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    inv = dict(inv_row)
+    conn.close()
+    
+    workshop = get_current_workshop()
+    public_url = f"{APP_BASE_URL}/view/invoice/{invoice_id}"
+    lang = workshop.get("language", "en")
+    
+    msg = format_invoice_whatsapp_message(
+        workshop_name=workshop["name"],
+        invoice_number=inv["invoice_number"],
+        customer_name=inv["customer_name"],
+        vehicle_reg_no=inv["vehicle_reg_no"] or "Counter",
+        vehicle_make_model=inv["vehicle_make_model"] or "Vehicle",
+        grand_total=inv["grand_total"],
+        amount_paid=inv["amount_paid"],
+        balance_due=inv["balance_due"],
+        upi_payment_link=inv.get("upi_payment_link", ""),
+        public_view_url=public_url,
+        workshop_phone=workshop["phone"],
+        lang=lang
+    )
+    
+    wa_url = generate_wa_me_url(inv["customer_phone"], msg)
+    return {"whatsapp_url": wa_url, "message": msg}
+
+@app.get("/api/job-cards/{job_id}/whatsapp-link")
+async def get_job_whatsapp_link(job_id: str):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM job_cards WHERE id = ?", (job_id,))
+    job_row = cursor.fetchone()
+    if not job_row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Job not found")
+    job = dict(job_row)
+    conn.close()
+    
+    workshop = get_current_workshop()
+    public_url = f"{APP_BASE_URL}/view/job/{job_id}"
+    lang = workshop.get("language", "en")
+    
+    msg = format_job_status_whatsapp_message(
+        workshop_name=workshop["name"],
+        job_number=job["job_number"],
+        status=job["status"],
+        customer_name=job["customer_name"],
+        vehicle_reg_no=job["vehicle_reg_no"],
+        vehicle_make_model=job["vehicle_make_model"],
+        technician_name=job["assigned_technician_name"] or "Team",
+        notes=job.get("diagnosis_notes") or "",
+        public_job_url=public_url,
+        workshop_phone=workshop["phone"],
+        lang=lang
+    )
+    
+    wa_url = generate_wa_me_url(job["customer_phone"], msg)
+    return {"whatsapp_url": wa_url, "message": msg}
+
+@app.get("/api/invoices/{invoice_id}/khata-reminder-link")
+async def get_khata_reminder_link(invoice_id: str):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,))
+    inv_row = cursor.fetchone()
+    if not inv_row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    inv = dict(inv_row)
+    conn.close()
+    
+    workshop = get_current_workshop()
+    lang = workshop.get("language", "en")
+    msg = format_khata_due_reminder_whatsapp_message(
+        workshop_name=workshop["name"],
+        customer_name=inv["customer_name"],
+        due_amount=inv["balance_due"],
+        upi_payment_link=inv.get("upi_payment_link", ""),
+        workshop_phone=workshop["phone"],
+        lang=lang
+    )
+    
+    wa_url = generate_wa_me_url(inv["customer_phone"], msg)
+    return {"whatsapp_url": wa_url, "message": msg}
+
+# =========================================================
+# 📦 INVENTORY, EXCEL BULK IMPORT & BARCODES
+# =========================================================
 
 @app.get("/inventory", response_class=HTMLResponse)
 async def inventory_page(request: Request, category: Optional[str] = None, filter: Optional[str] = None):
@@ -296,12 +1037,167 @@ async def inventory_page(request: Request, category: Optional[str] = None, filte
         }
     )
 
+@app.get("/api/inventory/template/excel")
+async def download_inventory_excel_template():
+    excel_bytes = generate_inventory_import_template()
+    return Response(
+        content=excel_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=AutoVolt_Inventory_Import_Template.xlsx"}
+    )
+
+@app.post("/api/inventory/import/excel")
+async def import_inventory_excel(file: UploadFile = File(...)):
+    file_bytes = await file.read()
+    items, errors = parse_inventory_file(file_bytes, file.filename)
+    
+    if not items:
+        err_msg = ", ".join(errors) if errors else "No valid items found in file."
+        raise HTTPException(status_code=400, detail=f"Import failed: {err_msg}")
+
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    
+    imported_count = 0
+    for itm in items:
+        cursor.execute("SELECT id FROM inventory_items WHERE barcode = ?", (itm["barcode"],))
+        existing = cursor.fetchone()
+        if existing:
+            cursor.execute("""
+            UPDATE inventory_items SET
+                part_name = ?, category = ?, stock_qty = stock_qty + ?,
+                cost_price = ?, selling_price = ?, tax_rate = ?, hsn_code = ?,
+                unit = ?, warranty_months = ?, location_rack = ?, updated_at = datetime('now')
+            WHERE id = ?
+            """, (
+                itm["part_name"], itm["category"], itm["stock_qty"],
+                itm["cost_price"], itm["selling_price"], itm["tax_rate"], itm["hsn_code"],
+                itm["unit"], itm["warranty_months"], itm["location_rack"], existing["id"]
+            ))
+        else:
+            item_id = f"item_{uuid.uuid4().hex[:8]}"
+            cursor.execute("""
+            INSERT INTO inventory_items (
+                id, part_name, sku, barcode, category, stock_qty, min_stock_alert,
+                cost_price, selling_price, tax_rate, hsn_code, unit, warranty_months,
+                location_rack, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, 5, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+            """, (
+                item_id, itm["part_name"], itm["barcode"], itm["barcode"], itm["category"],
+                itm["stock_qty"], itm["cost_price"], itm["selling_price"], itm["tax_rate"],
+                itm["hsn_code"], itm["unit"], itm["warranty_months"], itm["location_rack"]
+            ))
+        imported_count += 1
+
+    db.log_audit("BULK_EXCEL_IMPORT", "inventory_items", "bulk", f"Imported {imported_count} parts from {file.filename}", cursor=cursor)
+    conn.commit()
+    conn.close()
+
+    return RedirectResponse(url="/inventory", status_code=303)
+
+@app.get("/api/inventory/scan/{barcode}")
+async def scan_barcode_lookup(barcode: str):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM inventory_items WHERE barcode = ? OR sku = ?", (barcode.strip(), barcode.strip()))
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Barcode item not found")
+    return dict(row)
+
+@app.get("/api/inventory/barcode-svg/{barcode}")
+async def get_barcode_svg_endpoint(barcode: str):
+    svg = generate_barcode_svg(barcode)
+    return {"barcode": barcode, "svg": svg}
+
+@app.get("/barcode-labels", response_class=HTMLResponse)
+async def barcode_labels_page(request: Request):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM inventory_items ORDER BY part_name")
+    inventory_items = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    
+    return templates.TemplateResponse(
+        request=request,
+        name="barcode_labels.html",
+        context={
+            "active_page": "barcode_labels",
+            "inventory_items": inventory_items
+        }
+    )
+
+@app.post("/api/inventory")
+async def add_inventory_item(
+    part_name: str = Form(...),
+    barcode: str = Form(...),
+    category: str = Form("Relays & Fuses"),
+    stock_qty: int = Form(10),
+    cost_price: float = Form(0.0),
+    selling_price: float = Form(0.0),
+    tax_rate: float = Form(18.0),
+    hsn_code: str = Form("8536"),
+    warranty_months: int = Form(0)
+):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    item_id = f"item_{uuid.uuid4().hex[:8]}"
+    cursor.execute("""
+    INSERT INTO inventory_items (
+        id, part_name, sku, barcode, category, stock_qty, min_stock_alert,
+        cost_price, selling_price, tax_rate, hsn_code, unit, warranty_months,
+        created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+    """, (item_id, part_name, barcode, barcode, category, stock_qty, 5, cost_price, selling_price, tax_rate, hsn_code, "pcs", warranty_months))
+    
+    db.log_audit("ADD_INVENTORY_PART", "inventory_items", item_id, f"Added part: {part_name} (Barcode: {barcode})", cursor=cursor)
+    conn.commit()
+    conn.close()
+    return RedirectResponse(url="/inventory", status_code=303)
+
+@app.post("/api/inventory/adjust")
+async def adjust_inventory_stock(
+    item_id: str = Form(...),
+    action_type: str = Form("PURCHASE"),
+    change_qty: int = Form(...)
+):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT stock_qty, part_name, barcode, cost_price FROM inventory_items WHERE id = ?", (item_id,))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Item not found")
+        
+    old_qty = row["stock_qty"]
+    new_qty = old_qty + change_qty
+    cursor.execute("UPDATE inventory_items SET stock_qty = ?, updated_at = datetime('now') WHERE id = ?", (new_qty, item_id))
+    
+    log_id = f"stk_{uuid.uuid4().hex[:8]}"
+    cursor.execute("""
+    INSERT INTO stock_logs (id, item_id, part_name, barcode, change_qty, new_stock_qty, action_type, unit_cost, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    """, (log_id, item_id, row["part_name"], row["barcode"], change_qty, new_qty, action_type, row["cost_price"]))
+    
+    conn.commit()
+    conn.close()
+    return RedirectResponse(url="/inventory", status_code=303)
+
+# =========================================================
+# 👨‍🔧 TECHNICIANS, WAGES, ADVANCES & ATTENDANCE
+# =========================================================
+
 @app.get("/technicians", response_class=HTMLResponse)
 async def technicians_page(request: Request):
     conn = db.get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM technicians ORDER BY total_jobs DESC")
     technicians = [dict(row) for row in cursor.fetchall()]
+    
+    for t in technicians:
+        t["advance_balance"] = t.get("current_advance_balance", 0.0)
+
     conn.close()
     
     return templates.TemplateResponse(
@@ -312,6 +1208,269 @@ async def technicians_page(request: Request):
             "technicians": technicians
         }
     )
+
+@app.post("/api/technicians")
+async def add_technician(
+    name: str = Form(...),
+    phone: str = Form(...),
+    role: str = Form("Senior Auto Electrician"),
+    commission_pct: float = Form(10.0),
+    notes: Optional[str] = Form(None)
+):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    tech_id = f"tech_{uuid.uuid4().hex[:8]}"
+    cursor.execute("""
+    INSERT INTO technicians (id, name, phone, role, commission_pct, status, is_on_leave, current_advance_balance, notes, total_jobs, created_at)
+    VALUES (?, ?, ?, ?, ?, 'Active', 0, 0.0, ?, 0, datetime('now'))
+    """, (tech_id, name, phone, role, commission_pct, notes))
+    db.log_audit("ADD_TECHNICIAN", "technicians", tech_id, f"Added staff: {name} ({role})", cursor=cursor)
+    conn.commit()
+    conn.close()
+    return RedirectResponse(url="/technicians", status_code=303)
+
+@app.post("/api/technicians/{tech_id}/toggle-leave")
+async def toggle_technician_leave(tech_id: str):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT is_on_leave, name FROM technicians WHERE id = ?", (tech_id,))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Technician not found")
+
+    new_leave_state = 0 if row["is_on_leave"] == 1 else 1
+    cursor.execute("UPDATE technicians SET is_on_leave = ? WHERE id = ?", (new_leave_state, tech_id))
+    
+    att_id = f"att_{uuid.uuid4().hex[:8]}"
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    att_status = "ON_LEAVE" if new_leave_state == 1 else "PRESENT"
+    cursor.execute("""
+    INSERT INTO attendance (id, technician_id, date, status, created_at)
+    VALUES (?, ?, ?, ?, datetime('now'))
+    """, (att_id, tech_id, today_str, att_status))
+
+    db.log_audit("TOGGLE_LEAVE", "technicians", tech_id, f"{row['name']} marked as {att_status}", cursor=cursor)
+    conn.commit()
+    conn.close()
+    return {"success": True, "is_on_leave": bool(new_leave_state)}
+
+@app.post("/api/technicians/advances")
+async def record_technician_advance(
+    technician_id: str = Form(...),
+    amount: float = Form(...),
+    payment_mode: str = Form("CASH"),
+    notes: Optional[str] = Form(None)
+):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT name FROM technicians WHERE id = ?", (technician_id,))
+    tech = cursor.fetchone()
+    if not tech:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Technician not found")
+
+    adv_id = f"adv_{uuid.uuid4().hex[:8]}"
+    today_str = datetime.now().strftime("%Y-%m-%d")
+
+    cursor.execute("""
+    INSERT INTO employee_advances (id, technician_id, technician_name, amount, advance_date, status, payment_mode, notes, created_at)
+    VALUES (?, ?, ?, ?, ?, 'OUTSTANDING', ?, ?, datetime('now'))
+    """, (adv_id, technician_id, tech["name"], amount, today_str, payment_mode, notes))
+
+    cursor.execute("UPDATE technicians SET current_advance_balance = current_advance_balance + ? WHERE id = ?", (amount, technician_id))
+
+    db.log_audit("STAFF_ADVANCE", "technicians", technician_id, f"Disbursed advance ₹{amount:.2f} to {tech['name']}", cursor=cursor)
+    conn.commit()
+    conn.close()
+    return RedirectResponse(url="/technicians", status_code=303)
+
+@app.post("/api/technicians/wages")
+async def record_technician_wages(
+    technician_id: str = Form(...),
+    base_wages: float = Form(4000.0),
+    commission_amount: float = Form(0.0),
+    advance_deducted: float = Form(0.0),
+    payment_mode: str = Form("CASH")
+):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT name, current_advance_balance FROM technicians WHERE id = ?", (technician_id,))
+    tech = cursor.fetchone()
+    if not tech:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Technician not found")
+
+    gross = base_wages + commission_amount
+    net_paid = max(0.0, gross - advance_deducted)
+    wage_id = f"wage_{uuid.uuid4().hex[:8]}"
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    start_str = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+
+    cursor.execute("""
+    INSERT INTO employee_wages (
+        id, technician_id, technician_name, period_start, period_end,
+        gross_amount, advance_deducted, net_paid, payment_date, payment_mode, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    """, (
+        wage_id, technician_id, tech["name"], start_str, today_str,
+        gross, advance_deducted, net_paid, today_str, payment_mode
+    ))
+
+    if advance_deducted > 0:
+        cursor.execute("UPDATE technicians SET current_advance_balance = MAX(0.0, current_advance_balance - ?) WHERE id = ?", (advance_deducted, technician_id))
+
+    db.log_audit("PAY_WAGES", "technicians", technician_id, f"Paid weekly wages ₹{net_paid:.2f} to {tech['name']}", cursor=cursor)
+    conn.commit()
+    conn.close()
+    return RedirectResponse(url="/technicians", status_code=303)
+
+# =========================================================
+# 📥 PURCHASES & RETURNS (DEBIT NOTES / CREDIT NOTES)
+# =========================================================
+
+@app.get("/purchases", response_class=HTMLResponse)
+async def purchases_page(request: Request):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT * FROM purchase_bills ORDER BY bill_date DESC")
+    purchases = [dict(row) for row in cursor.fetchall()]
+    
+    cursor.execute("SELECT * FROM purchase_returns ORDER BY return_date DESC")
+    purchase_returns = [dict(row) for row in cursor.fetchall()]
+
+    cursor.execute("SELECT * FROM inventory_items ORDER BY part_name")
+    inventory_items = [dict(row) for row in cursor.fetchall()]
+
+    conn.close()
+    
+    return templates.TemplateResponse(
+        request=request,
+        name="purchases.html",
+        context={
+            "active_page": "purchases",
+            "purchases": purchases,
+            "purchase_returns": purchase_returns,
+            "inventory_items": inventory_items
+        }
+    )
+
+@app.post("/api/purchases")
+async def record_purchase_bill(
+    supplier_name: str = Form(...),
+    bill_number: str = Form(...),
+    bill_date: str = Form(...),
+    total_amount: float = Form(...),
+    payment_mode: str = Form("BANK_TRANSFER"),
+    notes: Optional[str] = Form(None)
+):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    pur_id = f"pur_{uuid.uuid4().hex[:8]}"
+    cursor.execute("""
+    INSERT INTO purchase_bills (id, bill_number, supplier_name, bill_date, total_amount, payment_mode, notes, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    """, (pur_id, bill_number, supplier_name, bill_date, total_amount, payment_mode, notes))
+    db.log_audit("RECORD_PURCHASE", "purchase_bills", pur_id, f"Purchase bill #{bill_number} from {supplier_name} (₹{total_amount:.2f})", cursor=cursor)
+    conn.commit()
+    conn.close()
+    return RedirectResponse(url="/purchases", status_code=303)
+
+@app.post("/api/purchases/returns")
+async def record_purchase_return(
+    supplier_name: str = Form(...),
+    item_id: str = Form(...),
+    quantity: int = Form(1),
+    return_amount: float = Form(...),
+    reason: str = Form("Defective Part")
+):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT part_name, cost_price FROM inventory_items WHERE id = ?", (item_id,))
+    item = cursor.fetchone()
+    if not item:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    ret_id = f"pr_{uuid.uuid4().hex[:8]}"
+    cursor.execute("SELECT COUNT(*) FROM purchase_returns")
+    cnt = cursor.fetchone()[0] + 1
+    return_number = f"DN-2026-{cnt:03d}"
+    today_str = datetime.now().strftime("%Y-%m-%d")
+
+    cursor.execute("""
+    INSERT INTO purchase_returns (id, return_number, supplier_name, item_id, part_name, quantity, unit_cost, return_amount, return_date, reason, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    """, (ret_id, return_number, supplier_name, item_id, item["part_name"], quantity, item["cost_price"], return_amount, today_str, reason))
+
+    cursor.execute("UPDATE inventory_items SET stock_qty = MAX(0, stock_qty - ?) WHERE id = ?", (quantity, item_id))
+
+    db.log_audit("PURCHASE_RETURN", "purchase_returns", ret_id, f"Debit note #{return_number} for {quantity}x {item['part_name']}", cursor=cursor)
+    conn.commit()
+    conn.close()
+    return RedirectResponse(url="/purchases", status_code=303)
+
+@app.get("/sales-returns", response_class=HTMLResponse)
+async def sales_returns_page(request: Request):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM sales_returns ORDER BY return_date DESC")
+    returns = [dict(row) for row in cursor.fetchall()]
+
+    cursor.execute("SELECT * FROM inventory_items ORDER BY part_name")
+    inventory_items = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+
+    return templates.TemplateResponse(
+        request=request,
+        name="sales_returns.html",
+        context={
+            "active_page": "sales_returns",
+            "returns": returns,
+            "inventory_items": inventory_items
+        }
+    )
+
+@app.post("/api/sales-returns")
+async def record_sales_return(
+    invoice_id: str = Form(...),
+    customer_name: str = Form(...),
+    item_id: str = Form(...),
+    quantity: int = Form(1),
+    refund_amount: float = Form(...),
+    refund_mode: str = Form("CASH"),
+    reason: str = Form("Customer Returned Part")
+):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT part_name, selling_price FROM inventory_items WHERE id = ?", (item_id,))
+    item = cursor.fetchone()
+    if not item:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    sr_id = f"sr_{uuid.uuid4().hex[:8]}"
+    cursor.execute("SELECT COUNT(*) FROM sales_returns")
+    cnt = cursor.fetchone()[0] + 1
+    return_number = f"CN-2026-{cnt:03d}"
+    today_str = datetime.now().strftime("%Y-%m-%d")
+
+    cursor.execute("""
+    INSERT INTO sales_returns (id, return_number, invoice_id, customer_name, item_id, name, quantity, unit_price, refund_amount, return_date, refund_mode, reason, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    """, (sr_id, return_number, invoice_id, customer_name, item_id, item["part_name"], quantity, item["selling_price"], refund_amount, today_str, refund_mode, reason))
+
+    cursor.execute("UPDATE inventory_items SET stock_qty = stock_qty + ? WHERE id = ?", (quantity, item_id))
+
+    db.log_audit("SALES_RETURN", "sales_returns", sr_id, f"Credit note #{return_number} for {customer_name}: {quantity}x {item['part_name']}", cursor=cursor)
+    conn.commit()
+    conn.close()
+    return RedirectResponse(url="/sales-returns", status_code=303)
+
+# =========================================================
+# 👥 CUSTOMERS, BANK ACCOUNTS & EXPENSES
+# =========================================================
 
 @app.get("/customers", response_class=HTMLResponse)
 async def customers_page(request: Request):
@@ -347,6 +1506,27 @@ async def bank_accounts_page(request: Request):
         }
     )
 
+@app.post("/api/bank-accounts")
+async def add_bank_account(
+    account_name: str = Form(...),
+    bank_name: Optional[str] = Form(None),
+    account_type: str = Form("BANK"),
+    account_number: Optional[str] = Form(None),
+    ifsc_code: Optional[str] = Form(None),
+    upi_vpa: Optional[str] = Form(None),
+    current_balance: float = Form(0.0)
+):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    acc_id = f"bank_{uuid.uuid4().hex[:8]}"
+    cursor.execute("""
+    INSERT INTO bank_accounts (id, account_name, bank_name, account_type, account_number, ifsc_code, upi_vpa, current_balance, is_primary, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, datetime('now'))
+    """, (acc_id, account_name, bank_name, account_type, account_number, ifsc_code, upi_vpa, current_balance))
+    conn.commit()
+    conn.close()
+    return RedirectResponse(url="/bank-accounts", status_code=303)
+
 @app.get("/expenses", response_class=HTMLResponse)
 async def expenses_page(request: Request):
     conn = db.get_db_connection()
@@ -367,12 +1547,47 @@ async def expenses_page(request: Request):
         }
     )
 
+@app.post("/api/expenses")
+async def record_expense(
+    title: str = Form(...),
+    category: str = Form("Electricity Bill"),
+    amount: float = Form(...),
+    payment_mode: str = Form("CASH"),
+    expense_date: str = Form(...),
+    paid_to: Optional[str] = Form(None),
+    reference_no: Optional[str] = Form(None)
+):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    exp_id = f"exp_{uuid.uuid4().hex[:8]}"
+    cursor.execute("""
+    INSERT INTO expenses (id, title, category, amount, payment_mode, expense_date, paid_to, reference_no, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    """, (exp_id, title, category, amount, payment_mode, expense_date, paid_to, reference_no))
+    conn.commit()
+    conn.close()
+    return RedirectResponse(url="/expenses", status_code=303)
+
+# =========================================================
+# 📊 CA TAX AUDIT REPORTS & KHATA
+# =========================================================
+
 @app.get("/ca-reports", response_class=HTMLResponse)
-async def ca_reports_page(request: Request, start_date: Optional[str] = None, end_date: Optional[str] = None):
-    gstr1 = ca_reports.generate_gstr1_report(start_date, end_date)
-    pnl = ca_reports.generate_profit_and_loss_report(start_date, end_date)
+async def ca_reports_page(
+    request: Request,
+    financial_year: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+):
+    fy_dates = ca_reports.get_financial_year_dates(financial_year)
+    s_date = start_date or fy_dates["start_date"]
+    e_date = end_date or fy_dates["end_date"]
+
+    gstr1 = ca_reports.generate_gstr1_report(s_date, e_date)
+    pnl = ca_reports.generate_profit_and_loss_report(s_date, e_date)
     valuation = ca_reports.generate_inventory_valuation_report()
-    
+    collections = ca_reports.generate_daily_collection_register(s_date, e_date)
+
     return templates.TemplateResponse(
         request=request,
         name="ca_reports.html",
@@ -381,9 +1596,21 @@ async def ca_reports_page(request: Request, start_date: Optional[str] = None, en
             "gstr1": gstr1,
             "pnl": pnl,
             "valuation": valuation,
-            "start_date": start_date or "",
-            "end_date": end_date or ""
+            "collections": collections,
+            "financial_year": financial_year or fy_dates["financial_year"],
+            "start_date": s_date,
+            "end_date": e_date
         }
+    )
+
+@app.get("/api/ca-reports/export-gstr1-excel")
+async def export_ca_gstr1_excel(financial_year: Optional[str] = None):
+    fy_dates = ca_reports.get_financial_year_dates(financial_year)
+    excel_bytes = ca_reports.export_gstr1_excel(fy_dates["start_date"], fy_dates["end_date"])
+    return Response(
+        content=excel_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename=GSTR1_Audit_Report_{fy_dates['financial_year']}.xlsx"}
     )
 
 @app.get("/khata", response_class=HTMLResponse)
@@ -406,9 +1633,31 @@ async def khata_page(request: Request):
         }
     )
 
+@app.get("/activity-logs", response_class=HTMLResponse)
+async def activity_logs_page(request: Request):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM activity_logs ORDER BY created_at DESC LIMIT 100")
+    logs = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+
+    return templates.TemplateResponse(
+        request=request,
+        name="activity_logs.html",
+        context={
+            "active_page": "activity_logs",
+            "logs": logs
+        }
+    )
+
+# =========================================================
+# ⚙️ WORKSHOP SETTINGS & PUBLIC VIEWS
+# =========================================================
+
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request):
     profile = get_current_workshop()
+    saas_info = check_saas_subscription()
     is_supabase_connected = bool(db.supabase_client)
     
     return templates.TemplateResponse(
@@ -417,13 +1666,42 @@ async def settings_page(request: Request):
         context={
             "active_page": "settings",
             "profile": profile,
+            "tenant": saas_info["tenant"],
+            "subscription": saas_info["subscription"],
             "is_supabase_connected": is_supabase_connected
         }
     )
 
-# =========================================================
-# 🌐 PUBLIC CUSTOMER VIEWS & PRINT FORMATS
-# =========================================================
+@app.post("/api/settings/profile")
+async def update_workshop_profile(
+    name: str = Form(...),
+    subtitle: Optional[str] = Form(None),
+    phone: str = Form(...),
+    email: Optional[str] = Form(None),
+    address: str = Form(...),
+    gstin: Optional[str] = Form(None),
+    upi_id: str = Form(...),
+    bank_name: Optional[str] = Form(None),
+    bank_account_no: Optional[str] = Form(None),
+    bank_ifsc: Optional[str] = Form(None),
+    bank_branch: Optional[str] = Form(None),
+    whatsapp_lang: str = Form("en"),
+    master_pin: str = Form("1234"),
+    terms: Optional[str] = Form(None)
+):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+    UPDATE workshop_profile SET
+        name = ?, subtitle = ?, phone = ?, email = ?, address = ?, gstin = ?,
+        upi_id = ?, bank_name = ?, bank_account_no = ?, bank_ifsc = ?, bank_branch = ?,
+        language = ?, master_pin = ?, terms = ?, updated_at = datetime('now')
+    WHERE id = 'default'
+    """, (name, subtitle, phone, email, address, gstin, upi_id, bank_name, bank_account_no, bank_ifsc, bank_branch, whatsapp_lang, master_pin, terms))
+    db.log_audit("UPDATE_PROFILE", "workshop_profile", "default", f"Updated garage profile ({name})", cursor=cursor)
+    conn.commit()
+    conn.close()
+    return RedirectResponse(url="/settings", status_code=303)
 
 @app.get("/view/invoice/{invoice_id}", response_class=HTMLResponse)
 async def public_invoice_view(request: Request, invoice_id: str):
@@ -442,7 +1720,6 @@ async def public_invoice_view(request: Request, invoice_id: str):
     
     workshop = get_current_workshop()
     
-    # Dynamic UPI QR Code
     vpa = workshop.get("upi_id", "sparkautoworkshop@okaxis")
     grand_total = float(invoice.get("grand_total", 0.0))
     balance_due = float(invoice.get("balance_due", 0.0))
@@ -508,7 +1785,6 @@ async def print_invoice_page(request: Request, invoice_id: str, format: str = Qu
     
     workshop = get_current_workshop()
     
-    # UPI QR for Thermal
     vpa = workshop.get("upi_id", "sparkautoworkshop@okaxis")
     grand_total = float(invoice.get("grand_total", 0.0))
     upi_link = invoice.get("upi_payment_link") or generate_upi_link(vpa, workshop.get("name", "Auto Workshop"), grand_total, f"Inv_{invoice.get('invoice_number')}")
@@ -526,592 +1802,6 @@ async def print_invoice_page(request: Request, invoice_id: str, format: str = Qu
         }
     )
 
-# =========================================================
-# ⚡ REST APIS (BARCODE POS, INVENTORY, JOBS, INVOICES)
-# =========================================================
-
-@app.get("/api/inventory/scan/{barcode}")
-async def scan_barcode_lookup(barcode: str):
-    """Instant lookup of item by barcode for USB/Bluetooth Gun Scanner or Camera"""
-    conn = db.get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM inventory_items WHERE barcode = ? OR sku = ?", (barcode.strip(), barcode.strip()))
-    row = cursor.fetchone()
-    conn.close()
-    if not row:
-        raise HTTPException(status_code=404, detail="Barcode item not found")
-    return dict(row)
-
-@app.get("/api/inventory/barcode-svg/{barcode}")
-async def get_barcode_svg_endpoint(barcode: str):
-    """Return inline SVG for barcode sticker printing"""
-    svg = generate_barcode_svg(barcode)
-    return {"barcode": barcode, "svg": svg}
-
-@app.post("/api/inventory")
-async def add_inventory_item(
-    part_name: str = Form(...),
-    barcode: str = Form(...),
-    category: str = Form("Relays & Fuses"),
-    stock_qty: int = Form(10),
-    cost_price: float = Form(0.0),
-    selling_price: float = Form(0.0),
-    tax_rate: float = Form(18.0),
-    hsn_code: str = Form("8536"),
-    warranty_months: int = Form(0)
-):
-    conn = db.get_db_connection()
-    cursor = conn.cursor()
-    item_id = f"item_{uuid.uuid4().hex[:8]}"
-    cursor.execute("""
-    INSERT INTO inventory_items (
-        id, part_name, sku, barcode, category, stock_qty, min_stock_alert,
-        cost_price, selling_price, tax_rate, hsn_code, unit, warranty_months,
-        created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-    """, (item_id, part_name, barcode, barcode, category, stock_qty, 5, cost_price, selling_price, tax_rate, hsn_code, "pcs", warranty_months))
-    
-    # Audit log
-    db.log_audit("ADD_INVENTORY_PART", "inventory_items", item_id, f"Added part: {part_name} (Barcode: {barcode})")
-    conn.commit()
-    conn.close()
-    return RedirectResponse(url="/inventory", status_code=303)
-
-@app.post("/api/inventory/adjust")
-async def adjust_inventory_stock(
-    item_id: str = Form(...),
-    action_type: str = Form("PURCHASE"),
-    change_qty: int = Form(...)
-):
-    conn = db.get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT stock_qty, part_name, barcode, cost_price FROM inventory_items WHERE id = ?", (item_id,))
-    row = cursor.fetchone()
-    if not row:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Item not found")
-        
-    old_qty = row["stock_qty"]
-    new_qty = old_qty + change_qty
-    cursor.execute("UPDATE inventory_items SET stock_qty = ?, updated_at = datetime('now') WHERE id = ?", (new_qty, item_id))
-    
-    # Stock Log
-    log_id = f"stk_{uuid.uuid4().hex[:8]}"
-    cursor.execute("""
-    INSERT INTO stock_logs (id, item_id, part_name, barcode, change_qty, new_stock_qty, action_type, unit_cost, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-    """, (log_id, item_id, row["part_name"], row["barcode"], change_qty, new_qty, action_type, row["cost_price"]))
-    
-    conn.commit()
-    conn.close()
-    return RedirectResponse(url="/inventory", status_code=303)
-
-@app.post("/api/job-cards")
-async def create_job_card(
-    vehicle_reg_no: str = Form(...),
-    vehicle_make_model: str = Form(...),
-    customer_name: str = Form(...),
-    customer_phone: str = Form(...),
-    assigned_technician_id: Optional[str] = Form(None),
-    odometer: Optional[int] = Form(0),
-    complaints: List[str] = Form([]),
-    custom_complaint_notes: Optional[str] = Form(None)
-):
-    conn = db.get_db_connection()
-    cursor = conn.cursor()
-    
-    # Generate sequential Job Number
-    cursor.execute("SELECT COUNT(*) FROM job_cards")
-    cnt = cursor.fetchone()[0] + 1
-    job_number = f"JOB-2026-{cnt:03d}"
-    job_id = f"job_{uuid.uuid4().hex[:8]}"
-    
-    # Technician Name
-    tech_name = None
-    if assigned_technician_id:
-        cursor.execute("SELECT name FROM technicians WHERE id = ?", (assigned_technician_id,))
-        t_row = cursor.fetchone()
-        if t_row:
-            tech_name = t_row["name"]
-            
-    # Customer / Vehicle Record update
-    cursor.execute("SELECT id FROM customers WHERE phone = ?", (customer_phone.strip(),))
-    c_row = cursor.fetchone()
-    if c_row:
-        customer_id = c_row["id"]
-        cursor.execute("UPDATE customers SET total_visits = total_visits + 1 WHERE id = ?", (customer_id,))
-    else:
-        customer_id = f"cust_{uuid.uuid4().hex[:8]}"
-        cursor.execute("INSERT INTO customers (id, name, phone, created_at) VALUES (?, ?, ?, datetime('now'))", (customer_id, customer_name, customer_phone))
-        
-    cursor.execute("SELECT id FROM vehicles WHERE reg_number = ?", (vehicle_reg_no.strip().upper(),))
-    v_row = cursor.fetchone()
-    if v_row:
-        vehicle_id = v_row["id"]
-        cursor.execute("UPDATE vehicles SET odometer = ? WHERE id = ?", (odometer, vehicle_id))
-    else:
-        vehicle_id = f"veh_{uuid.uuid4().hex[:8]}"
-        cursor.execute("""
-        INSERT INTO vehicles (id, reg_number, customer_id, customer_name, customer_phone, make_model, odometer, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
-        """, (vehicle_id, vehicle_reg_no.strip().upper(), customer_id, customer_name, customer_phone, vehicle_make_model, odometer))
-        
-    # Insert Job Card
-    complaints_json = json.dumps(complaints)
-    cursor.execute("""
-    INSERT INTO job_cards (
-        id, job_number, customer_id, customer_name, customer_phone, vehicle_id, vehicle_reg_no,
-        vehicle_make_model, odometer, assigned_technician_id, assigned_technician_name,
-        status, complaints, custom_complaint_notes, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RECEIVED', ?, ?, datetime('now'))
-    """, (
-        job_id, job_number, customer_id, customer_name, customer_phone, vehicle_id,
-        vehicle_reg_no.strip().upper(), vehicle_make_model, odometer, assigned_technician_id,
-        tech_name, complaints_json, custom_complaint_notes
-    ))
-    
-    db.log_audit("CREATE_JOB_CARD", "job_cards", job_id, f"Job {job_number} for {vehicle_reg_no}")
-    conn.commit()
-    conn.close()
-    return RedirectResponse(url=f"/job-cards/{job_id}", status_code=303)
-
-@app.post("/api/job-cards/{job_id}/status")
-async def update_job_status(job_id: str, status: str = Form(...)):
-    conn = db.get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("UPDATE job_cards SET status = ? WHERE id = ?", (status, job_id))
-    conn.commit()
-    conn.close()
-    return RedirectResponse(url=f"/job-cards", status_code=303)
-
-@app.post("/api/job-cards/{job_id}/update-diagnosis")
-async def update_job_diagnosis(job_id: str, diagnosis_notes: str = Form(...)):
-    conn = db.get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("UPDATE job_cards SET diagnosis_notes = ? WHERE id = ?", (diagnosis_notes, job_id))
-    conn.commit()
-    conn.close()
-    return RedirectResponse(url=f"/job-cards/{job_id}", status_code=303)
-
-@app.post("/api/job-cards/{job_id}/items")
-async def add_job_card_item(
-    job_id: str,
-    item_type: str = Form(...),
-    name: Optional[str] = Form(None),
-    item_id: Optional[str] = Form(None),
-    quantity: int = Form(1),
-    unit_price: Optional[float] = Form(None),
-    technician_id: Optional[str] = Form(None)
-):
-    conn = db.get_db_connection()
-    cursor = conn.cursor()
-    
-    tech_name = None
-    if technician_id:
-        cursor.execute("SELECT name FROM technicians WHERE id = ?", (technician_id,))
-        t_row = cursor.fetchone()
-        if t_row:
-            tech_name = t_row["name"]
-            
-    barcode = None
-    hsn_code = "8536"
-    tax_rate = 18.0
-    
-    if item_type == "PART" and item_id:
-        cursor.execute("SELECT * FROM inventory_items WHERE id = ?", (item_id,))
-        p_row = cursor.fetchone()
-        if p_row:
-            name = p_row["part_name"]
-            barcode = p_row["barcode"]
-            hsn_code = p_row["hsn_code"] or "8536"
-            tax_rate = p_row["tax_rate"] or 18.0
-            if unit_price is None or unit_price == 0:
-                unit_price = p_row["selling_price"]
-                
-            # Automatically reduce stock from inventory
-            cursor.execute("UPDATE inventory_items SET stock_qty = MAX(0, stock_qty - ?) WHERE id = ?", (quantity, item_id))
-    else:
-        hsn_code = "9987" # Service Code
-        tax_rate = 0.0
-        
-    line_total = (unit_price or 0.0) * quantity
-    line_id = f"ji_{uuid.uuid4().hex[:8]}"
-    
-    cursor.execute("""
-    INSERT INTO job_items (
-        id, job_card_id, item_type, item_id, barcode, name, hsn_code,
-        quantity, unit_price, tax_rate, total_price, technician_id, technician_name
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        line_id, job_id, item_type, item_id, barcode, name or "Labor Charge",
-        hsn_code, quantity, unit_price or 0.0, tax_rate, line_total, technician_id, tech_name
-    ))
-    
-    conn.commit()
-    conn.close()
-    return RedirectResponse(url=f"/job-cards/{job_id}", status_code=303)
-
-@app.post("/api/job-cards/{job_id}/items/{item_id}/delete")
-async def delete_job_card_item(job_id: str, item_id: str):
-    conn = db.get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM job_items WHERE id = ? AND job_card_id = ?", (item_id, job_id))
-    conn.commit()
-    conn.close()
-    return RedirectResponse(url=f"/job-cards/{job_id}", status_code=303)
-
-@app.post("/api/job-cards/{job_id}/create-invoice")
-async def convert_job_card_to_invoice(job_id: str):
-    """Convert completed Job Card to official Invoice"""
-    conn = db.get_db_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute("SELECT * FROM job_cards WHERE id = ?", (job_id,))
-    job = cursor.fetchone()
-    if not job:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Job not found")
-        
-    cursor.execute("SELECT * FROM job_items WHERE job_card_id = ?", (job_id,))
-    items = [dict(row) for row in cursor.fetchall()]
-    
-    # Generate sequential Invoice Number
-    cursor.execute("SELECT COUNT(*) FROM invoices")
-    cnt = cursor.fetchone()[0] + 1
-    invoice_number = f"INV-2026-{cnt:03d}"
-    invoice_id = f"inv_{uuid.uuid4().hex[:8]}"
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    
-    subtotal_labor = sum(i["total_price"] for i in items if i["item_type"] == "LABOR")
-    subtotal_parts = sum(i["total_price"] for i in items if i["item_type"] == "PART")
-    grand_total = subtotal_labor + subtotal_parts
-    
-    workshop = get_current_workshop()
-    vpa = workshop.get("upi_id", "sparkautoworkshop@okaxis")
-    upi_link = generate_upi_link(vpa, workshop.get("name", "Auto Workshop"), grand_total, f"Inv_{invoice_number}")
-    
-    # Insert Invoice
-    cursor.execute("""
-    INSERT INTO invoices (
-        id, invoice_number, invoice_date, invoice_type, job_card_id, job_number,
-        customer_id, customer_name, customer_phone, vehicle_reg_no, vehicle_make_model,
-        odometer, subtotal_labor, subtotal_parts, taxable_subtotal, grand_total,
-        amount_paid, balance_due, payment_status, payment_mode, upi_payment_link, created_at
-    ) VALUES (?, ?, ?, 'JOB_SERVICE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PAID', 'UPI', ?, datetime('now'))
-    """, (
-        invoice_id, invoice_number, today_str, job_id, job["job_number"],
-        job["customer_id"], job["customer_name"], job["customer_phone"],
-        job["vehicle_reg_no"], job["vehicle_make_model"], job["odometer"],
-        subtotal_labor, subtotal_parts, grand_total, grand_total, grand_total,
-        0.0, upi_link
-    ))
-    
-    # Insert Invoice Items
-    for i in items:
-        inv_item_id = f"ii_{uuid.uuid4().hex[:8]}"
-        cursor.execute("""
-        INSERT INTO invoice_items (
-            id, invoice_id, item_type, item_id, barcode, name, hsn_sac,
-            quantity, unit_price, tax_rate, taxable_amount, total_price, technician_name
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            inv_item_id, invoice_id, i["item_type"], i["item_id"], i["barcode"],
-            i["name"], i["hsn_code"] or "8536", i["quantity"], i["unit_price"],
-            i["tax_rate"], i["total_price"], i["total_price"], i["technician_name"]
-        ))
-        
-    # Mark Job as COMPLETED
-    cursor.execute("UPDATE job_cards SET status = 'COMPLETED', completed_at = datetime('now') WHERE id = ?", (job_id,))
-    
-    # Update Technician stats
-    if job["assigned_technician_id"]:
-        cursor.execute("UPDATE technicians SET total_jobs = total_jobs + 1 WHERE id = ?", (job["assigned_technician_id"],))
-        
-    conn.commit()
-    conn.close()
-    return RedirectResponse(url=f"/billing", status_code=303)
-
-@app.post("/api/invoices")
-async def create_pos_invoice(payload: Dict[str, Any]):
-    """Create Rapid POS Barcode Bill"""
-    conn = db.get_db_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute("SELECT COUNT(*) FROM invoices")
-    cnt = cursor.fetchone()[0] + 1
-    invoice_number = f"INV-2026-{cnt:03d}"
-    invoice_id = f"inv_{uuid.uuid4().hex[:8]}"
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    
-    items = payload.get("items", [])
-    subtotal_labor = sum(i["unit_price"] * i["quantity"] for i in items if i.get("item_type") == "LABOR")
-    subtotal_parts = sum(i["unit_price"] * i["quantity"] for i in items if i.get("item_type") == "PART")
-    discount = float(payload.get("discount_amount", 0.0))
-    grand_total = max(0.0, (subtotal_labor + subtotal_parts) - discount)
-    amount_paid = float(payload.get("amount_paid", grand_total))
-    balance_due = max(0.0, grand_total - amount_paid)
-    payment_status = "PAID" if balance_due <= 0 else ("PARTIAL" if amount_paid > 0 else "UNPAID")
-    
-    workshop = get_current_workshop()
-    vpa = workshop.get("upi_id", "sparkautoworkshop@okaxis")
-    upi_link = generate_upi_link(vpa, workshop.get("name", "Auto Workshop"), grand_total, f"Inv_{invoice_number}")
-    
-    cursor.execute("""
-    INSERT INTO invoices (
-        id, invoice_number, invoice_date, invoice_type,
-        customer_name, customer_phone, vehicle_reg_no,
-        subtotal_labor, subtotal_parts, taxable_subtotal, discount_amount,
-        grand_total, amount_paid, balance_due, payment_status, payment_mode,
-        upi_payment_link, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-    """, (
-        invoice_id, invoice_number, today_str, payload.get("invoice_type", "COUNTER_SALE"),
-        payload.get("customer_name", "Walk-in"), payload.get("customer_phone", "9876543210"),
-        payload.get("vehicle_reg_no", ""),
-        subtotal_labor, subtotal_parts, grand_total, discount,
-        grand_total, amount_paid, balance_due, payment_status,
-        payload.get("payment_mode", "UPI"), upi_link
-    ))
-    
-    # Line items & Inventory Stock Deductions
-    for i in items:
-        inv_item_id = f"ii_{uuid.uuid4().hex[:8]}"
-        line_total = i["unit_price"] * i["quantity"]
-        cursor.execute("""
-        INSERT INTO invoice_items (
-            id, invoice_id, item_type, item_id, barcode, name, hsn_sac,
-            quantity, unit_price, tax_rate, taxable_amount, total_price
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            inv_item_id, invoice_id, i.get("item_type", "PART"), i.get("item_id"),
-            i.get("barcode"), i.get("name", "Item"), i.get("hsn_sac", "8536"),
-            i["quantity"], i["unit_price"], i.get("tax_rate", 18.0),
-            line_total, line_total
-        ))
-        
-        # Deduct stock if inventory item
-        if i.get("item_id"):
-            cursor.execute("UPDATE inventory_items SET stock_qty = MAX(0, stock_qty - ?) WHERE id = ?", (i["quantity"], i["item_id"]))
-            
-    conn.commit()
-    conn.close()
-    return {"success": True, "invoice_id": invoice_id, "invoice_number": invoice_number}
-
-@app.get("/api/invoices/{invoice_id}/pdf")
-async def download_invoice_pdf(invoice_id: str):
-    """Download crisp A4 PDF invoice"""
-    conn = db.get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,))
-    inv_row = cursor.fetchone()
-    if not inv_row:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Invoice not found")
-    invoice = dict(inv_row)
-    
-    cursor.execute("SELECT * FROM invoice_items WHERE invoice_id = ?", (invoice_id,))
-    invoice["items"] = [dict(row) for row in cursor.fetchall()]
-    conn.close()
-    
-    workshop = get_current_workshop()
-    pdf_bytes = generate_invoice_pdf_bytes(invoice, workshop)
-    
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f"inline; filename=Invoice_{invoice['invoice_number']}.pdf"}
-    )
-
-@app.get("/api/invoices/{invoice_id}/whatsapp-link")
-async def get_invoice_whatsapp_link(invoice_id: str):
-    """Generate 1-Click WhatsApp sharing URL"""
-    conn = db.get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,))
-    inv_row = cursor.fetchone()
-    if not inv_row:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Invoice not found")
-    inv = dict(inv_row)
-    conn.close()
-    
-    workshop = get_current_workshop()
-    public_url = f"{APP_BASE_URL}/view/invoice/{invoice_id}"
-    
-    msg = format_invoice_whatsapp_message(
-        workshop_name=workshop["name"],
-        invoice_number=inv["invoice_number"],
-        customer_name=inv["customer_name"],
-        vehicle_reg_no=inv["vehicle_reg_no"] or "Counter",
-        vehicle_make_model=inv["vehicle_make_model"] or "Vehicle",
-        grand_total=inv["grand_total"],
-        amount_paid=inv["amount_paid"],
-        balance_due=inv["balance_due"],
-        upi_payment_link=inv.get("upi_payment_link", ""),
-        public_view_url=public_url,
-        workshop_phone=workshop["phone"]
-    )
-    
-    wa_url = generate_wa_me_url(inv["customer_phone"], msg)
-    return {"whatsapp_url": wa_url, "message": msg}
-
-@app.get("/api/job-cards/{job_id}/whatsapp-link")
-async def get_job_whatsapp_link(job_id: str):
-    """Generate WhatsApp status update link for Job Card"""
-    conn = db.get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM job_cards WHERE id = ?", (job_id,))
-    job_row = cursor.fetchone()
-    if not job_row:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Job not found")
-    job = dict(job_row)
-    conn.close()
-    
-    workshop = get_current_workshop()
-    public_url = f"{APP_BASE_URL}/view/job/{job_id}"
-    
-    msg = format_job_status_whatsapp_message(
-        workshop_name=workshop["name"],
-        job_number=job["job_number"],
-        status=job["status"],
-        customer_name=job["customer_name"],
-        vehicle_reg_no=job["vehicle_reg_no"],
-        vehicle_make_model=job["vehicle_make_model"],
-        technician_name=job["assigned_technician_name"] or "Team",
-        notes=job.get("diagnosis_notes") or "",
-        public_job_url=public_url,
-        workshop_phone=workshop["phone"]
-    )
-    
-    wa_url = generate_wa_me_url(job["customer_phone"], msg)
-    return {"whatsapp_url": wa_url, "message": msg}
-
-@app.get("/api/invoices/{invoice_id}/khata-reminder-link")
-async def get_khata_reminder_link(invoice_id: str):
-    """Generate WhatsApp payment reminder for khata dues"""
-    conn = db.get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,))
-    inv_row = cursor.fetchone()
-    if not inv_row:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Invoice not found")
-    inv = dict(inv_row)
-    conn.close()
-    
-    workshop = get_current_workshop()
-    msg = format_khata_due_reminder_whatsapp_message(
-        workshop_name=workshop["name"],
-        customer_name=inv["customer_name"],
-        due_amount=inv["balance_due"],
-        upi_payment_link=inv.get("upi_payment_link", ""),
-        workshop_phone=workshop["phone"]
-    )
-    
-    wa_url = generate_wa_me_url(inv["customer_phone"], msg)
-    return {"whatsapp_url": wa_url, "message": msg}
-
-@app.get("/api/ca-reports/export-gstr1-excel")
-async def export_ca_gstr1_excel():
-    """Download GSTR-1 Excel for CA"""
-    excel_bytes = ca_reports.export_gstr1_excel()
-    return Response(
-        content=excel_bytes,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=GSTR1_Sales_Audit_Report.xlsx"}
-    )
-
-@app.post("/api/technicians")
-async def add_technician(
-    name: str = Form(...),
-    phone: str = Form(...),
-    role: str = Form("Senior Auto Electrician"),
-    commission_pct: float = Form(10.0),
-    notes: Optional[str] = Form(None)
-):
-    conn = db.get_db_connection()
-    cursor = conn.cursor()
-    tech_id = f"tech_{uuid.uuid4().hex[:8]}"
-    cursor.execute("""
-    INSERT INTO technicians (id, name, phone, role, commission_pct, status, notes, total_jobs, created_at)
-    VALUES (?, ?, ?, ?, ?, 'Active', ?, 0, datetime('now'))
-    """, (tech_id, name, phone, role, commission_pct, notes))
-    conn.commit()
-    conn.close()
-    return RedirectResponse(url="/technicians", status_code=303)
-
-@app.post("/api/bank-accounts")
-async def add_bank_account(
-    account_name: str = Form(...),
-    bank_name: Optional[str] = Form(None),
-    account_type: str = Form("BANK"),
-    account_number: Optional[str] = Form(None),
-    ifsc_code: Optional[str] = Form(None),
-    upi_vpa: Optional[str] = Form(None),
-    current_balance: float = Form(0.0)
-):
-    conn = db.get_db_connection()
-    cursor = conn.cursor()
-    acc_id = f"bank_{uuid.uuid4().hex[:8]}"
-    cursor.execute("""
-    INSERT INTO bank_accounts (id, account_name, bank_name, account_type, account_number, ifsc_code, upi_vpa, current_balance, is_primary, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, datetime('now'))
-    """, (acc_id, account_name, bank_name, account_type, account_number, ifsc_code, upi_vpa, current_balance))
-    conn.commit()
-    conn.close()
-    return RedirectResponse(url="/bank-accounts", status_code=303)
-
-@app.post("/api/expenses")
-async def record_expense(
-    title: str = Form(...),
-    category: str = Form("Electricity Bill"),
-    amount: float = Form(...),
-    payment_mode: str = Form("CASH"),
-    expense_date: str = Form(...),
-    paid_to: Optional[str] = Form(None),
-    reference_no: Optional[str] = Form(None)
-):
-    conn = db.get_db_connection()
-    cursor = conn.cursor()
-    exp_id = f"exp_{uuid.uuid4().hex[:8]}"
-    cursor.execute("""
-    INSERT INTO expenses (id, title, category, amount, payment_mode, expense_date, paid_to, reference_no, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-    """, (exp_id, title, category, amount, payment_mode, expense_date, paid_to, reference_no))
-    conn.commit()
-    conn.close()
-    return RedirectResponse(url="/expenses", status_code=303)
-
-@app.post("/api/settings/profile")
-async def update_workshop_profile(
-    name: str = Form(...),
-    subtitle: Optional[str] = Form(None),
-    phone: str = Form(...),
-    email: Optional[str] = Form(None),
-    address: str = Form(...),
-    gstin: Optional[str] = Form(None),
-    upi_id: str = Form(...),
-    bank_name: Optional[str] = Form(None),
-    bank_account_no: Optional[str] = Form(None),
-    bank_ifsc: Optional[str] = Form(None),
-    bank_branch: Optional[str] = Form(None),
-    terms: Optional[str] = Form(None)
-):
-    conn = db.get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-    UPDATE workshop_profile SET
-        name = ?, subtitle = ?, phone = ?, email = ?, address = ?, gstin = ?,
-        upi_id = ?, bank_name = ?, bank_account_no = ?, bank_ifsc = ?, bank_branch = ?,
-        terms = ?, updated_at = datetime('now')
-    WHERE id = 'default'
-    """, (name, subtitle, phone, email, address, gstin, upi_id, bank_name, bank_account_no, bank_ifsc, bank_branch, terms))
-    conn.commit()
-    conn.close()
-    return RedirectResponse(url="/settings", status_code=303)
-
-# If executed directly
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))

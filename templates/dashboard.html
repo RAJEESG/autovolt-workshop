@@ -7,20 +7,20 @@
 <div class="space-y-6 max-w-7xl mx-auto">
     <!-- Top Summary Cards -->
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <!-- Active Vehicles -->
-        <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+        <!-- Active Vehicles (Clickable to open active list) -->
+        <a href="/job-cards?filter=active" class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between hover:border-amber-400 transition group">
             <div>
-                <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Vehicles In Workshop</p>
+                <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider group-hover:text-amber-600 transition">Vehicles In Workshop</p>
                 <h3 class="text-3xl font-extrabold text-slate-900 mt-1">{{ active_jobs_count }}</h3>
                 <span class="text-xs text-amber-600 font-medium flex items-center gap-1 mt-1">
                     <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
-                    Under Repair / Testing
+                    Click to view all active vehicles →
                 </span>
             </div>
-            <div class="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center font-bold text-xl">
+            <div class="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center font-bold text-xl group-hover:scale-105 transition">
                 🚗
             </div>
-        </div>
+        </a>
 
         <!-- Today's Revenue -->
         <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">

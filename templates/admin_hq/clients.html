@@ -1,0 +1,459 @@
+{% extends "admin_hq/base_admin.html" %}
+
+{% block title %}Client Garages & Configuration — AutoVolt Cloud HQ{% endblock %}
+
+{% block content %}
+<div class="space-y-6 max-w-7xl mx-auto">
+
+    <!-- Header with Action -->
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+            <h1 class="text-2xl font-black text-white tracking-tight flex items-center gap-2.5">
+                <i data-lucide="warehouse" class="w-7 h-7 text-hq-400"></i>
+                <span>Client Workshops & Multi-Tenant Configuration</span>
+            </h1>
+            <p class="text-xs text-slate-400">Onboard new client workshops, configure their logos, custom GST slabs, UPI VPAs, languages, and security PINs.</p>
+        </div>
+        <button onclick="document.getElementById('new-client-modal').classList.remove('hidden')" class="px-4 py-2.5 bg-gradient-to-r from-hq-600 to-indigo-600 hover:from-hq-500 hover:to-indigo-500 text-white font-bold text-xs md:text-sm rounded-xl shadow-lg shadow-hq-600/30 transition flex items-center gap-2">
+            <i data-lucide="plus-circle" class="w-4 h-4"></i>
+            <span>+ Onboard New Workshop</span>
+        </button>
+    </div>
+
+    {% if msg %}
+    <div class="p-3 bg-emerald-950/80 border border-emerald-800 rounded-xl text-xs text-emerald-300 font-semibold flex items-center gap-2">
+        <i data-lucide="check-circle-2" class="w-4 h-4"></i>
+        <span>{{ msg }}</span>
+    </div>
+    {% endif %}
+
+    <!-- Client Garages Cards Grid -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {% for t in tenants %}
+        <div class="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 shadow-xl space-y-5 relative overflow-hidden flex flex-col justify-between hover:border-slate-700 transition">
+            <div class="space-y-4">
+                <!-- Garage Header -->
+                <div class="flex items-start justify-between gap-3">
+                    <div class="flex items-center gap-3">
+                        <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-amber-500 to-yellow-300 flex items-center justify-center text-slate-950 font-black text-xl shadow-lg shrink-0">
+                            {% if t.logo_url %}
+                            <img src="{{ t.logo_url }}" alt="Logo" class="w-full h-full object-cover rounded-2xl">
+                            {% else %}
+                            ⚡
+                            {% endif %}
+                        </div>
+                        <div>
+                            <h3 class="font-bold text-white text-base leading-snug">{{ t.name }}</h3>
+                            <span class="text-xs text-hq-400 font-semibold">{{ t.owner_name or 'Owner' }}</span>
+                        </div>
+                    </div>
+                    {% if t.is_active %}
+                    <span class="px-2.5 py-1 rounded-full bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] font-bold shrink-0">ACTIVE</span>
+                    {% else %}
+                    <span class="px-2.5 py-1 rounded-full bg-rose-950 text-rose-400 border border-rose-800 text-[10px] font-bold shrink-0">LOCKED</span>
+                    {% endif %}
+                </div>
+
+                <!-- Contact & WhatsApp Details -->
+                <div class="p-3 bg-slate-950/60 rounded-xl border border-slate-800/80 text-xs space-y-1.5">
+                    <div class="flex items-center justify-between text-slate-400">
+                        <span>WhatsApp / Phone:</span>
+                        <a href="https://wa.me/{{ t.whatsapp_mobile or t.phone | replace('+', '') | replace(' ', '') }}" target="_blank" class="text-emerald-400 font-bold hover:underline flex items-center gap-1">
+                            <i data-lucide="message-circle" class="w-3.5 h-3.5"></i>
+                            <span>{{ t.whatsapp_mobile or t.phone }}</span>
+                        </a>
+                    </div>
+                    <div class="flex items-center justify-between text-slate-400">
+                        <span>GSTIN:</span>
+                        <span class="font-mono text-slate-200 font-semibold">{{ t.gstin or 'Unregistered' }}</span>
+                    </div>
+                    <div class="flex items-center justify-between text-slate-400">
+                        <span>UPI VPA:</span>
+                        <span class="font-mono text-amber-400 font-bold">{{ t.upi_id }}</span>
+                    </div>
+                    <div class="flex items-center justify-between text-slate-400">
+                        <span>Language:</span>
+                        <span class="uppercase text-hq-300 font-bold text-[10px]">{{ t.language }}</span>
+                    </div>
+                    <div class="flex items-center justify-between text-slate-400">
+                        <span>Master Security PIN:</span>
+                        <span class="font-mono text-rose-300 font-bold tracking-widest">{{ t.master_pin or '1234' }}</span>
+                    </div>
+                </div>
+
+                <!-- Configured GST Slabs -->
+                <div class="space-y-1">
+                    <span class="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Active GST Slabs in POS</span>
+                    <div class="flex flex-wrap gap-1.5">
+                        {% for slab in t.gst_slabs_list %}
+                        <span class="px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono text-[10px] font-bold border border-slate-700">{{ slab }}%</span>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <!-- Subscription Expiry -->
+                <div class="p-3 bg-slate-950/40 rounded-xl border border-slate-800 text-xs flex items-center justify-between">
+                    <div>
+                        <span class="text-[10px] text-slate-400 uppercase block font-bold">Valid Until</span>
+                        <span class="font-mono font-bold text-white">{{ t.subscription_end_date or 'N/A' }}</span>
+                    </div>
+                    <div class="text-right">
+                        <span class="text-[10px] text-slate-400 uppercase block font-bold">Plan</span>
+                        <span class="text-hq-300 font-bold text-xs">{{ t.subscription_plan or 'YEARLY' }}</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="pt-4 border-t border-slate-800 flex items-center justify-between gap-2">
+                <form action="/api/admin/toggle-tenant-status" method="POST" class="inline">
+                    <input type="hidden" name="tenant_id" value="{{ t.id }}">
+                    <input type="hidden" name="new_status" value="{% if t.status == 'ACTIVE' %}LOCKED{% else %}ACTIVE{% endif %}">
+                    <button type="submit" class="px-3 py-1.5 rounded-xl border text-[11px] font-bold transition {% if t.status == 'ACTIVE' %}border-rose-800 text-rose-400 hover:bg-rose-950/50{% else %}border-emerald-800 text-emerald-400 hover:bg-emerald-950/50{% endif %}">
+                        {% if t.status == 'ACTIVE' %}🔒 Lock Access{% else %}🔓 Unlock Access{% endif %}
+                    </button>
+                </form>
+
+                <div class="flex items-center gap-1.5">
+                    <button onclick="openEditModal('{{ t.id }}', '{{ t.name }}', '{{ t.owner_name }}', '{{ t.phone }}', '{{ t.whatsapp_mobile }}', '{{ t.email }}', '{{ t.address | replace('\n', ' ') }}', '{{ t.gstin }}', '{{ t.logo_url }}', '{{ t.upi_id }}', '{{ t.upi_payee_name }}', '{{ t.bank_name }}', '{{ t.bank_account_no }}', '{{ t.bank_ifsc }}', '{{ t.language }}', '{{ t.master_pin }}')" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-[11px] rounded-xl border border-slate-700 transition">
+                        ✏️ Edit Config
+                    </button>
+                    <a href="/subscriptions?tenant_id={{ t.id }}" class="px-3 py-1.5 bg-hq-600 hover:bg-hq-500 text-white font-bold text-[11px] rounded-xl shadow transition">
+                        🔑 License
+                    </a>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+</div>
+
+<!-- ========================================================= -->
+<!-- ➕ ONBOARD NEW WORKSHOP MODAL -->
+<!-- ========================================================= -->
+<div id="new-client-modal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4 overflow-y-auto">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-2xl w-full p-6 md:p-8 shadow-2xl space-y-6 my-8">
+        <div class="flex items-center justify-between border-b border-slate-800 pb-4">
+            <div>
+                <h2 class="text-xl font-bold text-white flex items-center gap-2">
+                    <i data-lucide="plus-circle" class="w-5 h-5 text-hq-400"></i>
+                    <span>Onboard New Client Workshop</span>
+                </h2>
+                <p class="text-xs text-slate-400">Setup shop details, payment gateway, custom GST slabs, and initial credentials.</p>
+            </div>
+            <button onclick="document.getElementById('new-client-modal').classList.add('hidden')" class="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white">
+                <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+        </div>
+
+        <form action="/api/admin/clients/create" method="POST" class="space-y-5 text-xs">
+            <!-- Basic Shop Info -->
+            <div class="space-y-3">
+                <h3 class="text-xs font-bold text-hq-300 uppercase tracking-wider">1. Workshop & Owner Information</h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-slate-300 font-bold mb-1">Workshop / Business Name *</label>
+                        <input type="text" name="name" required placeholder="e.g. Apex Auto Electricals" class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium focus:ring-2 focus:ring-hq-500">
+                    </div>
+                    <div>
+                        <label class="block text-slate-300 font-bold mb-1">Owner / Contact Person *</label>
+                        <input type="text" name="owner_name" required placeholder="e.g. Ramesh Kumar" class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium focus:ring-2 focus:ring-hq-500">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-slate-300 font-bold mb-1">WhatsApp Mobile Number *</label>
+                        <input type="text" name="whatsapp_mobile" required placeholder="+91 98470 12345" class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium focus:ring-2 focus:ring-hq-500">
+                    </div>
+                    <div>
+                        <label class="block text-slate-300 font-bold mb-1">Email Address</label>
+                        <input type="email" name="email" placeholder="contact@apexautocare.com" class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium focus:ring-2 focus:ring-hq-500">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-slate-300 font-bold mb-1">Full Workshop Address *</label>
+                        <input type="text" name="address" required placeholder="Near Bypass, Kochi, Kerala - 682025" class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium focus:ring-2 focus:ring-hq-500">
+                    </div>
+                    <div>
+                        <label class="block text-slate-300 font-bold mb-1">GSTIN Number (Optional)</label>
+                        <input type="text" name="gstin" placeholder="32AAAAA0000A1Z5" class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium focus:ring-2 focus:ring-hq-500">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-slate-300 font-bold mb-1">Logo URL (Optional)</label>
+                    <input type="text" name="logo_url" placeholder="https://example.com/logo.png" class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium focus:ring-2 focus:ring-hq-500">
+                </div>
+            </div>
+
+            <!-- Payment Gateway & Configuration -->
+            <div class="space-y-3 pt-3 border-t border-slate-800">
+                <h3 class="text-xs font-bold text-hq-300 uppercase tracking-wider">2. Workshop Payment & Billing Configuration</h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-slate-300 font-bold mb-1">Workshop UPI VPA ID *</label>
+                        <input type="text" name="upi_id" required placeholder="apexauto@okaxis" class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium focus:ring-2 focus:ring-hq-500">
+                    </div>
+                    <div>
+                        <label class="block text-slate-300 font-bold mb-1">UPI Payee Display Name</label>
+                        <input type="text" name="upi_payee_name" placeholder="APEX AUTO ELECTRICALS" class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium focus:ring-2 focus:ring-hq-500">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div>
+                        <label class="block text-slate-300 font-bold mb-1">Bank Name</label>
+                        <input type="text" name="bank_name" placeholder="Federal Bank" class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
+                    </div>
+                    <div>
+                        <label class="block text-slate-300 font-bold mb-1">Account Number</label>
+                        <input type="text" name="bank_account_no" placeholder="1029384756" class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
+                    </div>
+                    <div>
+                        <label class="block text-slate-300 font-bold mb-1">IFSC Code</label>
+                        <input type="text" name="bank_ifsc" placeholder="FDRL0001234" class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
+                    </div>
+                </div>
+
+                <!-- Custom GST Slabs for Dropdown -->
+                <div>
+                    <label class="block text-slate-300 font-bold mb-1.5">GST Slabs Available in POS Dropdown *</label>
+                    <div class="flex flex-wrap gap-4 p-3 bg-slate-950 rounded-xl border border-slate-800">
+                        <label class="flex items-center gap-2 cursor-pointer text-slate-300">
+                            <input type="checkbox" name="gst_slabs" value="0" checked class="rounded bg-slate-800 border-slate-700 text-hq-600 focus:ring-hq-500">
+                            <span>0% (Exempt)</span>
+                        </label>
+                        <label class="flex items-center gap-2 cursor-pointer text-slate-300">
+                            <input type="checkbox" name="gst_slabs" value="5" checked class="rounded bg-slate-800 border-slate-700 text-hq-600 focus:ring-hq-500">
+                            <span>5%</span>
+                        </label>
+                        <label class="flex items-center gap-2 cursor-pointer text-slate-300">
+                            <input type="checkbox" name="gst_slabs" value="12" checked class="rounded bg-slate-800 border-slate-700 text-hq-600 focus:ring-hq-500">
+                            <span>12%</span>
+                        </label>
+                        <label class="flex items-center gap-2 cursor-pointer text-slate-300">
+                            <input type="checkbox" name="gst_slabs" value="18" checked class="rounded bg-slate-800 border-slate-700 text-hq-600 focus:ring-hq-500">
+                            <span>18% (Standard Auto Electricals)</span>
+                        </label>
+                        <label class="flex items-center gap-2 cursor-pointer text-slate-300">
+                            <input type="checkbox" name="gst_slabs" value="28" checked class="rounded bg-slate-800 border-slate-700 text-hq-600 focus:ring-hq-500">
+                            <span>28% (Batteries & High Tax)</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-slate-300 font-bold mb-1">Default WhatsApp Message Language</label>
+                        <select name="language" class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
+                            <option value="en">English (en)</option>
+                            <option value="ml" selected>Malayalam (ml)</option>
+                            <option value="ta">Tamil (ta)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-slate-300 font-bold mb-1">Owner Master Security PIN (4-digit) *</label>
+                        <input type="text" name="master_pin" value="1234" maxlength="6" required class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-mono font-bold tracking-widest text-center">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Initial Admin User & Subscription -->
+            <div class="space-y-3 pt-3 border-t border-slate-800">
+                <h3 class="text-xs font-bold text-hq-300 uppercase tracking-wider">3. Initial User Credentials & Subscription Plan</h3>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div>
+                        <label class="block text-slate-300 font-bold mb-1">Admin Username *</label>
+                        <input type="text" name="initial_username" required placeholder="e.g. apexadmin" class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
+                    </div>
+                    <div>
+                        <label class="block text-slate-300 font-bold mb-1">Initial Password *</label>
+                        <input type="password" name="initial_password" required placeholder="••••••••" class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
+                    </div>
+                    <div>
+                        <label class="block text-slate-300 font-bold mb-1">SaaS License Plan *</label>
+                        <select name="plan_type" class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
+                            <option value="YEARLY">1 Year Pro License (₹9,999 + GST)</option>
+                            <option value="MONTHLY">1 Month Pro License (₹999 + GST)</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div class="pt-4 border-t border-slate-800 flex items-center justify-end gap-3">
+                <button type="button" onclick="document.getElementById('new-client-modal').classList.add('hidden')" class="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition">
+                    Cancel
+                </button>
+                <button type="submit" class="px-6 py-2.5 bg-gradient-to-r from-hq-600 to-indigo-600 hover:from-hq-500 hover:to-indigo-500 text-white font-bold rounded-xl shadow-lg shadow-hq-600/30 transition">
+                    Create Client Workshop & Activate ⚡
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ========================================================= -->
+<!-- ✏️ EDIT WORKSHOP CONFIG MODAL -->
+<!-- ========================================================= -->
+<div id="edit-client-modal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4 overflow-y-auto">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-2xl w-full p-6 md:p-8 shadow-2xl space-y-6 my-8">
+        <div class="flex items-center justify-between border-b border-slate-800 pb-4">
+            <div>
+                <h2 class="text-xl font-bold text-white flex items-center gap-2">
+                    <i data-lucide="settings-2" class="w-5 h-5 text-hq-400"></i>
+                    <span>Edit Client Workshop Configuration</span>
+                </h2>
+                <p class="text-xs text-slate-400">Update logo, UPI VPA, custom GST slabs, language, and master PIN.</p>
+            </div>
+            <button onclick="document.getElementById('edit-client-modal').classList.add('hidden')" class="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white">
+                <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+        </div>
+
+        <form action="/api/admin/clients/update" method="POST" class="space-y-4 text-xs">
+            <input type="hidden" id="edit_tenant_id" name="tenant_id">
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                    <label class="block text-slate-300 font-bold mb-1">Workshop Name *</label>
+                    <input type="text" id="edit_name" name="name" required class="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
+                </div>
+                <div>
+                    <label class="block text-slate-300 font-bold mb-1">Owner Name *</label>
+                    <input type="text" id="edit_owner_name" name="owner_name" required class="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                    <label class="block text-slate-300 font-bold mb-1">WhatsApp Mobile *</label>
+                    <input type="text" id="edit_whatsapp_mobile" name="whatsapp_mobile" required class="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
+                </div>
+                <div>
+                    <label class="block text-slate-300 font-bold mb-1">Email</label>
+                    <input type="email" id="edit_email" name="email" class="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
+                </div>
+            </div>
+
+            <div>
+                <label class="block text-slate-300 font-bold mb-1">Address *</label>
+                <input type="text" id="edit_address" name="address" required class="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                    <label class="block text-slate-300 font-bold mb-1">GSTIN</label>
+                    <input type="text" id="edit_gstin" name="gstin" class="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
+                </div>
+                <div>
+                    <label class="block text-slate-300 font-bold mb-1">Logo URL</label>
+                    <input type="text" id="edit_logo_url" name="logo_url" class="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                    <label class="block text-slate-300 font-bold mb-1">UPI VPA ID *</label>
+                    <input type="text" id="edit_upi_id" name="upi_id" required class="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
+                </div>
+                <div>
+                    <label class="block text-slate-300 font-bold mb-1">UPI Payee Name</label>
+                    <input type="text" id="edit_upi_payee_name" name="upi_payee_name" class="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                    <label class="block text-slate-300 font-bold mb-1">Bank Name</label>
+                    <input type="text" id="edit_bank_name" name="bank_name" class="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
+                </div>
+                <div>
+                    <label class="block text-slate-300 font-bold mb-1">Account Number</label>
+                    <input type="text" id="edit_bank_account_no" name="bank_account_no" class="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
+                </div>
+                <div>
+                    <label class="block text-slate-300 font-bold mb-1">IFSC Code</label>
+                    <input type="text" id="edit_bank_ifsc" name="bank_ifsc" class="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
+                </div>
+            </div>
+
+            <!-- Custom GST Slabs -->
+            <div>
+                <label class="block text-slate-300 font-bold mb-1.5">GST Slabs Available in Billing Dropdown *</label>
+                <div class="flex flex-wrap gap-4 p-3 bg-slate-950 rounded-xl border border-slate-800">
+                    <label class="flex items-center gap-2 cursor-pointer text-slate-300">
+                        <input type="checkbox" name="gst_slabs" value="0" class="rounded bg-slate-800 border-slate-700 text-hq-600 focus:ring-hq-500">
+                        <span>0%</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer text-slate-300">
+                        <input type="checkbox" name="gst_slabs" value="5" class="rounded bg-slate-800 border-slate-700 text-hq-600 focus:ring-hq-500">
+                        <span>5%</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer text-slate-300">
+                        <input type="checkbox" name="gst_slabs" value="12" class="rounded bg-slate-800 border-slate-700 text-hq-600 focus:ring-hq-500">
+                        <span>12%</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer text-slate-300">
+                        <input type="checkbox" name="gst_slabs" value="18" class="rounded bg-slate-800 border-slate-700 text-hq-600 focus:ring-hq-500">
+                        <span>18%</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer text-slate-300">
+                        <input type="checkbox" name="gst_slabs" value="28" class="rounded bg-slate-800 border-slate-700 text-hq-600 focus:ring-hq-500">
+                        <span>28%</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                    <label class="block text-slate-300 font-bold mb-1">Language</label>
+                    <select id="edit_language" name="language" class="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
+                        <option value="en">English (en)</option>
+                        <option value="ml">Malayalam (ml)</option>
+                        <option value="ta">Tamil (ta)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-slate-300 font-bold mb-1">Master Security PIN</label>
+                    <input type="text" id="edit_master_pin" name="master_pin" required class="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white font-mono font-bold">
+                </div>
+            </div>
+
+            <div class="pt-4 border-t border-slate-800 flex items-center justify-end gap-3">
+                <button type="button" onclick="document.getElementById('edit-client-modal').classList.add('hidden')" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition">
+                    Cancel
+                </button>
+                <button type="submit" class="px-6 py-2 bg-hq-600 hover:bg-hq-500 text-white font-bold rounded-xl shadow-lg shadow-hq-600/30 transition">
+                    Save Changes ⚡
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function openEditModal(id, name, owner, phone, wa, email, addr, gstin, logo, upi, upiName, bank, acc, ifsc, lang, pin) {
+    document.getElementById('edit_tenant_id').value = id;
+    document.getElementById('edit_name').value = name;
+    document.getElementById('edit_owner_name').value = owner;
+    document.getElementById('edit_whatsapp_mobile').value = wa || phone;
+    document.getElementById('edit_email').value = email || '';
+    document.getElementById('edit_address').value = addr;
+    document.getElementById('edit_gstin').value = gstin || '';
+    document.getElementById('edit_logo_url').value = logo || '';
+    document.getElementById('edit_upi_id').value = upi;
+    document.getElementById('edit_upi_payee_name').value = upiName || '';
+    document.getElementById('edit_bank_name').value = bank || '';
+    document.getElementById('edit_bank_account_no').value = acc || '';
+    document.getElementById('edit_bank_ifsc').value = ifsc || '';
+    document.getElementById('edit_language').value = lang || 'en';
+    document.getElementById('edit_master_pin').value = pin || '1234';
+
+    document.getElementById('edit-client-modal').classList.remove('hidden');
+}
+</script>
+{% endblock %}

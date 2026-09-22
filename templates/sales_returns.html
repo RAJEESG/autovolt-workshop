@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+
+{% block title %}Sales Returns & Credit Notes — AutoVolt Pro{% endblock %}
+{% block header_title %}Customer Sales Returns (Credit Notes){% endblock %}
+
+{% block content %}
+<div class="space-y-6 max-w-7xl mx-auto">
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center font-bold text-lg">
+                🔄
+            </div>
+            <div>
+                <h2 class="font-extrabold text-slate-900 text-base">Customer Sales Returns & Credit Notes</h2>
+                <p class="text-xs text-slate-500">Record customer returned spare parts, restore stock, and issue refund/credit</p>
+            </div>
+        </div>
+
+        <button onclick="openModal('add-sales-return-modal')" class="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs rounded-xl shadow transition flex items-center gap-1.5">
+            <i data-lucide="plus" class="w-4 h-4"></i>
+            <span>+ Record Sales Return (Credit Note)</span>
+        </button>
+    </div>
+
+    <!-- Sales Returns Table -->
+    <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-4">
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+                <thead>
+                    <tr class="text-slate-400 uppercase tracking-wider font-semibold border-b border-slate-100 bg-slate-50">
+                        <th class="py-2.5 px-3">Credit Note #</th>
+                        <th class="py-2.5 px-3">Date</th>
+                        <th class="py-2.5 px-3">Invoice # & Customer</th>
+                        <th class="py-2.5 px-3">Item Returned</th>
+                        <th class="py-2.5 px-3">Qty</th>
+                        <th class="py-2.5 px-3">Refund Mode</th>
+                        <th class="py-2.5 px-3 text-right">Refund Amount (₹)</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 font-medium text-slate-700">
+                    {% for r in returns %}
+                    <tr class="hover:bg-slate-50 transition">
+                        <td class="py-3 px-3 font-bold text-slate-900">{{ r.return_number }}</td>
+                        <td class="py-3 px-3 text-slate-500">{{ r.return_date }}</td>
+                        <td class="py-3 px-3">
+                            <span class="font-bold text-slate-900 block">{{ r.customer_name }}</span>
+                            <span class="text-[11px] text-slate-400 font-mono">Inv: {{ r.invoice_id }}</span>
+                        </td>
+                        <td class="py-3 px-3 font-semibold text-slate-800">{{ r.name }}</td>
+                        <td class="py-3 px-3 font-bold text-emerald-700">+{{ r.quantity }} restored</td>
+                        <td class="py-3 px-3"><span class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100">{{ r.refund_mode }}</span></td>
+                        <td class="py-3 px-3 text-right font-black text-rose-600 text-sm">₹{{ "{:,.2f}".format(r.refund_amount) }}</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="7" class="text-center py-8 text-slate-400 text-xs">No customer sales returns recorded.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Record Sales Return -->
+<div id="add-sales-return-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+            <h3 class="font-bold text-slate-900 text-base">🔄 Record Customer Return</h3>
+            <button onclick="closeModal('add-sales-return-modal')" class="text-slate-400 hover:text-slate-700 text-xl font-bold">✕</button>
+        </div>
+
+        <form action="/api/sales-returns" method="POST" class="mt-4 space-y-3 text-xs font-medium text-slate-700">
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">Original Invoice # *</label>
+                    <input type="text" name="invoice_id" required placeholder="INV-2026-001" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">Customer Name *</label>
+                    <input type="text" name="customer_name" required placeholder="Customer Name" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                </div>
+            </div>
+
+            <div>
+                <label class="block font-bold text-slate-900 mb-1">Select Returned Inventory Part *</label>
+                <select name="item_id" required class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                    {% for item in inventory_items %}
+                    <option value="{{ item.id }}">{{ item.part_name }} (₹{{ item.selling_price }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">Qty Returned *</label>
+                    <input type="number" name="quantity" value="1" min="1" required class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">Refund Amount (₹) *</label>
+                    <input type="number" step="0.01" name="refund_amount" required placeholder="140.00" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">Refund Mode</label>
+                    <select name="refund_mode" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                        <option value="CASH">Cash Refund</option>
+                        <option value="UPI">UPI Transfer</option>
+                        <option value="CREDIT_ADJUSTMENT">Adjust in Customer Khata</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">Reason</label>
+                    <input type="text" name="reason" value="Unopened box returned" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                </div>
+            </div>
+
+            <div class="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+                <button type="button" onclick="closeModal('add-sales-return-modal')" class="px-4 py-2 text-slate-600 font-bold">Cancel</button>
+                <button type="submit" class="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded-xl shadow">Restore Stock & Issue Credit</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

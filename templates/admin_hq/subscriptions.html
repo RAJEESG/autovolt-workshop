@@ -1,0 +1,168 @@
+{% extends "admin_hq/base_admin.html" %}
+
+{% block title %}SaaS Subscriptions & Licenses — AutoVolt Cloud HQ{% endblock %}
+
+{% block content %}
+<div class="space-y-6 max-w-7xl mx-auto">
+
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+            <h1 class="text-2xl font-black text-white tracking-tight flex items-center gap-2.5">
+                <i data-lucide="key-round" class="w-7 h-7 text-hq-400"></i>
+                <span>SaaS Licenses & Subscription Renewals</span>
+            </h1>
+            <p class="text-xs text-slate-400">Grant monthly and annual software licenses, track renewals, and auto-generate subscription tax invoices.</p>
+        </div>
+        <button onclick="document.getElementById('renew-license-modal').classList.remove('hidden')" class="px-4 py-2.5 bg-gradient-to-r from-hq-600 to-indigo-600 hover:from-hq-500 hover:to-indigo-500 text-white font-bold text-xs md:text-sm rounded-xl shadow-lg shadow-hq-600/30 transition flex items-center gap-2">
+            <i data-lucide="sparkles" class="w-4 h-4"></i>
+            <span>+ Renew / Extend License</span>
+        </button>
+    </div>
+
+    {% if msg %}
+    <div class="p-3 bg-emerald-950/80 border border-emerald-800 rounded-xl text-xs text-emerald-300 font-semibold flex items-center gap-2">
+        <i data-lucide="check-circle-2" class="w-4 h-4"></i>
+        <span>{{ msg }}</span>
+    </div>
+    {% endif %}
+
+    <!-- Subscriptions Table -->
+    <div class="bg-slate-900/90 border border-slate-800 rounded-3xl shadow-xl overflow-hidden">
+        <div class="p-6 border-b border-slate-800 flex items-center justify-between">
+            <h2 class="text-base font-bold text-white flex items-center gap-2">
+                <i data-lucide="history" class="w-5 h-5 text-hq-400"></i>
+                <span>License History & Grant Logs</span>
+            </h2>
+            <span class="text-xs text-slate-400">{{ subscriptions|length }} Total Records</span>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs text-slate-300">
+                <thead class="bg-slate-950/80 text-[11px] text-slate-400 uppercase tracking-wider border-b border-slate-800">
+                    <tr>
+                        <th class="px-6 py-4 font-semibold">Client Workshop</th>
+                        <th class="px-6 py-4 font-semibold">Plan / Billing Cycle</th>
+                        <th class="px-6 py-4 font-semibold">Start Date</th>
+                        <th class="px-6 py-4 font-semibold">Expiry Date</th>
+                        <th class="px-6 py-4 font-semibold">Fee Paid (Inc. GST)</th>
+                        <th class="px-6 py-4 font-semibold">Status</th>
+                        <th class="px-6 py-4 font-semibold">Notes</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-800/60 font-medium">
+                    {% for sub in subscriptions %}
+                    <tr class="hover:bg-slate-800/40 transition">
+                        <td class="px-6 py-4">
+                            <span class="font-bold text-white block">{{ sub.tenant_name }}</span>
+                            <span class="text-[10px] text-slate-400 font-mono">{{ sub.tenant_id }}</span>
+                        </td>
+                        <td class="px-6 py-4">
+                            <span class="px-2.5 py-1 rounded-full bg-hq-500/20 text-hq-300 font-bold text-[10px] border border-hq-500/30">
+                                {{ sub.plan_name }} ({{ sub.billing_cycle }})
+                            </span>
+                        </td>
+                        <td class="px-6 py-4 font-mono text-slate-300">{{ sub.start_date }}</td>
+                        <td class="px-6 py-4 font-mono font-bold text-white">{{ sub.end_date }}</td>
+                        <td class="px-6 py-4 font-mono font-bold text-emerald-400">₹{{ "{:,.2f}".format(sub.price_paid) }}</td>
+                        <td class="px-6 py-4">
+                            {% if sub.is_active %}
+                            <span class="px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] font-bold">ACTIVE</span>
+                            {% else %}
+                            <span class="px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 text-[10px]">EXPIRED</span>
+                            {% endif %}
+                        </td>
+                        <td class="px-6 py-4 text-slate-400 text-[11px]">{{ sub.notes or '—' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+<!-- 🔑 RENEW LICENSE MODAL -->
+<div id="renew-license-modal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-5">
+        <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+            <h3 class="text-base font-bold text-white flex items-center gap-2">
+                <i data-lucide="sparkles" class="w-5 h-5 text-hq-400"></i>
+                <span>Renew / Grant Workshop License</span>
+            </h3>
+            <button onclick="document.getElementById('renew-license-modal').classList.add('hidden')" class="p-1 rounded bg-slate-800 text-slate-400 hover:text-white">
+                <i data-lucide="x" class="w-4 h-4"></i>
+            </button>
+        </div>
+
+        <form action="/api/admin/subscriptions/renew" method="POST" class="space-y-4 text-xs">
+            <div>
+                <label class="block text-slate-300 font-bold mb-1">Select Workshop *</label>
+                <select name="tenant_id" required class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
+                    {% for t in tenants %}
+                    <option value="{{ t.id }}">{{ t.name }} (Valid until: {{ t.subscription_end_date or 'None' }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="block text-slate-300 font-bold mb-1">License Plan *</label>
+                    <select name="billing_cycle" id="plan_select" onchange="updatePlanPrice()" class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
+                        <option value="YEARLY" selected>1 Year License (365 Days)</option>
+                        <option value="MONTHLY">1 Month License (30 Days)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-slate-300 font-bold mb-1">Payment Mode *</label>
+                    <select name="payment_mode" class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
+                        <option value="UPI">UPI / GPay / PhonePe</option>
+                        <option value="BANK">Bank Transfer / NEFT</option>
+                        <option value="CASH">Cash</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="block text-slate-300 font-bold mb-1">Taxable Base Amount (₹) *</label>
+                    <input type="number" step="0.01" id="taxable_amount" name="taxable_amount" value="9999.00" required class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-mono font-bold">
+                </div>
+                <div>
+                    <label class="block text-slate-300 font-bold mb-1">GST (18% Total = 9% CGST + 9% SGST)</label>
+                    <input type="text" id="gst_display" readonly value="₹1,799.82 (18%)" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-400 font-mono">
+                </div>
+            </div>
+
+            <div class="p-3 bg-slate-950/80 rounded-xl border border-slate-800 flex items-center justify-between">
+                <span class="text-slate-400 font-bold">Total Invoice Amount (Inc. GST):</span>
+                <span id="total_display" class="text-base font-black text-emerald-400 font-mono">₹11,798.82</span>
+            </div>
+
+            <div>
+                <label class="block text-slate-300 font-bold mb-1">Payment Reference / Transaction ID</label>
+                <input type="text" name="payment_ref" placeholder="UPI-TXN-123456789" class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
+            </div>
+
+            <div class="pt-3 border-t border-slate-800 flex items-center justify-end gap-2">
+                <button type="button" onclick="document.getElementById('renew-license-modal').classList.add('hidden')" class="px-4 py-2 bg-slate-800 text-slate-300 font-bold rounded-xl">Cancel</button>
+                <button type="submit" class="px-6 py-2 bg-gradient-to-r from-hq-600 to-indigo-600 hover:from-hq-500 hover:to-indigo-500 text-white font-bold rounded-xl shadow-lg shadow-hq-600/30">
+                    Activate License & Issue SaaS Invoice ⚡
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function updatePlanPrice() {
+    var plan = document.getElementById('plan_select').value;
+    var base = plan === 'YEARLY' ? 9999.00 : 999.00;
+    var gst = base * 0.18;
+    var total = base + gst;
+    document.getElementById('taxable_amount').value = base.toFixed(2);
+    document.getElementById('gst_display').value = '₹' + gst.toFixed(2) + ' (18%)';
+    document.getElementById('total_display').innerText = '₹' + total.toFixed(2);
+}
+</script>
+{% endblock %}

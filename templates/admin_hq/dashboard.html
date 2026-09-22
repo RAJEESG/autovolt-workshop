@@ -1,0 +1,226 @@
+{% extends "admin_hq/base_admin.html" %}
+
+{% block title %}SaaS Overview Dashboard — AutoVolt Cloud HQ{% endblock %}
+
+{% block content %}
+<div class="space-y-8 max-w-7xl mx-auto">
+
+    <!-- Top Hero Banner -->
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 p-6 bg-gradient-to-r from-slate-900 via-hq-950 to-slate-900 border border-slate-800 rounded-3xl shadow-2xl relative overflow-hidden">
+        <div class="absolute -right-10 -top-10 w-48 h-48 bg-hq-600/10 rounded-full blur-3xl pointer-events-none"></div>
+        <div class="space-y-1 relative z-10">
+            <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-hq-500/20 text-hq-300 border border-hq-500/30 text-xs font-semibold">
+                <span>⚡ AutoVolt Cloud SaaS Operations</span>
+            </div>
+            <h1 class="text-2xl md:text-3xl font-black text-white tracking-tight">AutoVolt Cloud HQ Master Dashboard</h1>
+            <p class="text-slate-400 text-xs md:text-sm">Manage multi-tenant workshop clients, subscription lifecycles, and software revenue.</p>
+        </div>
+        <div class="flex items-center gap-3 relative z-10">
+            <a href="/clients?action=new" class="px-4 py-2.5 bg-gradient-to-r from-hq-600 to-indigo-600 hover:from-hq-500 hover:to-indigo-500 text-white font-bold text-xs md:text-sm rounded-xl shadow-lg shadow-hq-600/30 transition flex items-center gap-2">
+                <i data-lucide="plus-circle" class="w-4 h-4"></i>
+                <span>Onboard New Workshop</span>
+            </a>
+            <a href="/accounting" class="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs md:text-sm rounded-xl border border-slate-700 transition flex items-center gap-2">
+                <i data-lucide="receipt" class="w-4 h-4"></i>
+                <span>SaaS Revenue</span>
+            </a>
+        </div>
+    </div>
+
+    <!-- Key SaaS Metrics Cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+        <!-- Total Garages -->
+        <div class="p-5 bg-slate-900/90 border border-slate-800 rounded-2xl shadow-lg space-y-2">
+            <div class="flex items-center justify-between text-slate-400">
+                <span class="text-xs font-semibold uppercase tracking-wider">Client Garages</span>
+                <div class="p-2 rounded-xl bg-hq-500/10 text-hq-400">
+                    <i data-lucide="warehouse" class="w-5 h-5"></i>
+                </div>
+            </div>
+            <div class="text-3xl font-black text-white">{{ stats.total_tenants }}</div>
+            <div class="text-xs text-slate-400 flex items-center gap-1.5">
+                <span class="text-emerald-400 font-bold">● {{ stats.active_tenants }} Active</span>
+                <span>/</span>
+                <span class="text-rose-400 font-bold">● {{ stats.expired_tenants }} Expired</span>
+            </div>
+        </div>
+
+        <!-- Monthly Recurring Revenue (MRR) -->
+        <div class="p-5 bg-slate-900/90 border border-slate-800 rounded-2xl shadow-lg space-y-2">
+            <div class="flex items-center justify-between text-slate-400">
+                <span class="text-xs font-semibold uppercase tracking-wider">Estimated MRR</span>
+                <div class="p-2 rounded-xl bg-emerald-500/10 text-emerald-400">
+                    <i data-lucide="trending-up" class="w-5 h-5"></i>
+                </div>
+            </div>
+            <div class="text-3xl font-black text-emerald-400">₹{{ "{:,.2f}".format(stats.mrr) }}</div>
+            <div class="text-xs text-slate-400">Monthly normalized software revenue</div>
+        </div>
+
+        <!-- Total SaaS Collection (ARR) -->
+        <div class="p-5 bg-slate-900/90 border border-slate-800 rounded-2xl shadow-lg space-y-2">
+            <div class="flex items-center justify-between text-slate-400">
+                <span class="text-xs font-semibold uppercase tracking-wider">Total SaaS Collections</span>
+                <div class="p-2 rounded-xl bg-amber-500/10 text-amber-400">
+                    <i data-lucide="badge-indian-rupee" class="w-5 h-5"></i>
+                </div>
+            </div>
+            <div class="text-3xl font-black text-white">₹{{ "{:,.2f}".format(stats.total_revenue) }}</div>
+            <div class="text-xs text-slate-400">Lifetime subscription fees collected</div>
+        </div>
+
+        <!-- Expiring Soon / Overdue -->
+        <div class="p-5 bg-slate-900/90 border border-slate-800 rounded-2xl shadow-lg space-y-2">
+            <div class="flex items-center justify-between text-slate-400">
+                <span class="text-xs font-semibold uppercase tracking-wider">Renewals Due (30d)</span>
+                <div class="p-2 rounded-xl bg-rose-500/10 text-rose-400">
+                    <i data-lucide="clock" class="w-5 h-5"></i>
+                </div>
+            </div>
+            <div class="text-3xl font-black text-amber-400">{{ stats.renewals_due_count }}</div>
+            <div class="text-xs text-slate-400">Garages approaching expiry</div>
+        </div>
+    </div>
+
+    <!-- Client Garages Table -->
+    <div class="bg-slate-900/90 border border-slate-800 rounded-3xl shadow-xl overflow-hidden">
+        <div class="p-6 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+                <h2 class="text-lg font-bold text-white flex items-center gap-2">
+                    <i data-lucide="shield-check" class="w-5 h-5 text-hq-400"></i>
+                    <span>Registered Client Garages & Subscription Status</span>
+                </h2>
+                <p class="text-xs text-slate-400">Live overview of customer workshops, configuration, and license validity.</p>
+            </div>
+            <a href="/clients" class="text-xs font-bold text-hq-400 hover:text-hq-300 flex items-center gap-1">
+                <span>View All Garages & Config</span>
+                <i data-lucide="chevron-right" class="w-4 h-4"></i>
+            </a>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs text-slate-300">
+                <thead class="bg-slate-950/80 text-[11px] text-slate-400 uppercase tracking-wider border-b border-slate-800">
+                    <tr>
+                        <th class="px-6 py-4 font-semibold">Workshop / Client</th>
+                        <th class="px-6 py-4 font-semibold">Contact / WhatsApp</th>
+                        <th class="px-6 py-4 font-semibold">Location</th>
+                        <th class="px-6 py-4 font-semibold">License Validity</th>
+                        <th class="px-6 py-4 font-semibold">Status</th>
+                        <th class="px-6 py-4 font-semibold text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-800/60 font-medium">
+                    {% for t in tenants %}
+                    <tr class="hover:bg-slate-800/40 transition">
+                        <td class="px-6 py-4">
+                            <div class="flex items-center gap-3">
+                                <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-amber-500 to-yellow-300 flex items-center justify-center text-slate-950 font-black text-sm shadow-md">
+                                    ⚡
+                                </div>
+                                <div>
+                                    <span class="font-bold text-white block text-sm">{{ t.name }}</span>
+                                    <span class="text-[11px] text-slate-400">Owner: {{ t.owner_name or 'N/A' }} | GSTIN: {{ t.gstin or 'Unregistered' }}</span>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="px-6 py-4">
+                            <div class="space-y-0.5">
+                                <a href="https://wa.me/{{ t.whatsapp_mobile or t.phone | replace('+', '') | replace(' ', '') }}" target="_blank" class="text-emerald-400 hover:underline flex items-center gap-1 font-semibold">
+                                    <i data-lucide="phone-call" class="w-3.5 h-3.5"></i>
+                                    <span>{{ t.whatsapp_mobile or t.phone }}</span>
+                                </a>
+                                <span class="text-[10px] text-slate-400 block">{{ t.email or '' }}</span>
+                            </div>
+                        </td>
+                        <td class="px-6 py-4 text-slate-300">
+                            {{ t.address[:35] }}{% if t.address|length > 35 %}...{% endif %}
+                        </td>
+                        <td class="px-6 py-4">
+                            <div class="space-y-0.5">
+                                <span class="font-mono text-slate-200 font-bold">{{ t.subscription_end_date or 'No Expiry' }}</span>
+                                <span class="text-[10px] block {% if t.is_active %}text-emerald-400{% else %}text-rose-400 font-bold{% endif %}">
+                                    {{ t.days_left_text }}
+                                </span>
+                            </div>
+                        </td>
+                        <td class="px-6 py-4">
+                            {% if t.is_active %}
+                            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-950/80 text-emerald-400 border border-emerald-800 text-[10px] font-bold">
+                                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                                ACTIVE LICENSE
+                            </span>
+                            {% else %}
+                            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-rose-950/80 text-rose-400 border border-rose-800 text-[10px] font-bold">
+                                ⚠️ EXPIRED / LOCKED
+                            </span>
+                            {% endif %}
+                        </td>
+                        <td class="px-6 py-4 text-right">
+                            <div class="flex items-center justify-end gap-2">
+                                <a href="/clients?edit={{ t.id }}" class="p-2 rounded-xl bg-slate-800 text-hq-400 hover:bg-slate-700 hover:text-white border border-slate-700 transition" title="Configure Garage">
+                                    <i data-lucide="settings-2" class="w-4 h-4"></i>
+                                </a>
+                                <a href="/subscriptions?tenant_id={{ t.id }}" class="px-3 py-1.5 rounded-xl bg-hq-600 hover:bg-hq-500 text-white font-bold text-[11px] transition shadow-md shadow-hq-600/20">
+                                    Renew
+                                </a>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Recent SaaS Vendor Billing & Invoices -->
+    <div class="bg-slate-900/90 border border-slate-800 rounded-3xl shadow-xl p-6 space-y-4">
+        <div class="flex items-center justify-between">
+            <div>
+                <h2 class="text-base font-bold text-white flex items-center gap-2">
+                    <i data-lucide="receipt" class="w-5 h-5 text-emerald-400"></i>
+                    <span>Recent SaaS Invoices Issued to Garages</span>
+                </h2>
+                <p class="text-xs text-slate-400">Subscription revenue and tax invoices generated by your software company.</p>
+            </div>
+            <a href="/accounting" class="text-xs font-bold text-emerald-400 hover:underline">View All Invoices & GSTR-1 →</a>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs text-slate-300">
+                <thead class="bg-slate-950 text-[11px] text-slate-400 uppercase tracking-wider border-b border-slate-800">
+                    <tr>
+                        <th class="px-4 py-3 font-semibold">Invoice #</th>
+                        <th class="px-4 py-3 font-semibold">Client Garage</th>
+                        <th class="px-4 py-3 font-semibold">Date</th>
+                        <th class="px-4 py-3 font-semibold">Plan</th>
+                        <th class="px-4 py-3 font-semibold">Taxable</th>
+                        <th class="px-4 py-3 font-semibold">GST (18%)</th>
+                        <th class="px-4 py-3 font-semibold">Total Amount</th>
+                        <th class="px-4 py-3 font-semibold">Status</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-800 font-medium">
+                    {% for inv in recent_invoices %}
+                    <tr class="hover:bg-slate-800/30">
+                        <td class="px-4 py-3 font-mono font-bold text-white">{{ inv.invoice_no }}</td>
+                        <td class="px-4 py-3 font-semibold text-slate-200">{{ inv.tenant_name }}</td>
+                        <td class="px-4 py-3 text-slate-400">{{ inv.invoice_date }}</td>
+                        <td class="px-4 py-3">
+                            <span class="px-2 py-0.5 rounded bg-hq-500/20 text-hq-300 text-[10px] font-bold">{{ inv.plan_type }}</span>
+                        </td>
+                        <td class="px-4 py-3 font-mono">₹{{ "{:,.2f}".format(inv.taxable_amount) }}</td>
+                        <td class="px-4 py-3 font-mono text-slate-400">₹{{ "{:,.2f}".format(inv.cgst_amount + inv.sgst_amount) }}</td>
+                        <td class="px-4 py-3 font-mono font-bold text-emerald-400">₹{{ "{:,.2f}".format(inv.total_amount) }}</td>
+                        <td class="px-4 py-3">
+                            <span class="px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] font-bold">PAID</span>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+{% endblock %}

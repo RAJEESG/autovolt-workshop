@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}AutoVolt Pro — Auto Electrical Workshop Management{% endblock %}</title>
+    <title>{% block title %}AutoVolt Pro Enterprise — Auto Electrical Workshop Management{% endblock %}</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -54,97 +54,123 @@
     <!-- Main Sidebar Navigation -->
     <aside id="sidebar-nav" class="hidden md:flex flex-col w-full md:w-64 bg-slate-900 text-slate-300 min-h-screen p-4 border-r border-slate-800 shrink-0 sticky top-0 h-screen overflow-y-auto">
         <!-- Logo & Garage Branding -->
-        <div class="flex items-center gap-3 px-2 py-3 mb-6 border-b border-slate-800">
+        <div class="flex items-center gap-3 px-2 py-3 mb-4 border-b border-slate-800">
             <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500 to-yellow-300 flex items-center justify-center text-slate-950 font-black shadow-lg shadow-amber-500/20 text-xl">
                 ⚡
             </div>
             <div>
                 <h2 class="font-bold text-white text-base tracking-tight leading-tight">SPARK AUTO</h2>
-                <p class="text-xs text-amber-400 font-medium">Electrical & Electronics</p>
+                <p class="text-xs text-amber-400 font-medium">Auto Electricals</p>
             </div>
         </div>
 
         <!-- Navigation Links -->
         <nav class="space-y-1 text-sm font-medium flex-1">
-            <a href="/" class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition {% if active_page == 'dashboard' %}bg-primary-600 text-white font-semibold shadow-md shadow-primary-600/30{% else %}hover:bg-slate-800 text-slate-300 hover:text-white{% endif %}">
+            <a href="/" class="flex items-center gap-3 px-3 py-2 rounded-xl transition {% if active_page == 'dashboard' %}bg-primary-600 text-white font-semibold shadow-md shadow-primary-600/30{% else %}hover:bg-slate-800 text-slate-300 hover:text-white{% endif %}">
                 <i data-lucide="layout-dashboard" class="w-5 h-5"></i>
                 <span>Dashboard</span>
             </a>
 
-            <a href="/job-cards" class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition {% if active_page == 'job_cards' %}bg-primary-600 text-white font-semibold shadow-md shadow-primary-600/30{% else %}hover:bg-slate-800 text-slate-300 hover:text-white{% endif %}">
+            <a href="/job-cards" class="flex items-center gap-3 px-3 py-2 rounded-xl transition {% if active_page == 'job_cards' %}bg-primary-600 text-white font-semibold shadow-md shadow-primary-600/30{% else %}hover:bg-slate-800 text-slate-300 hover:text-white{% endif %}">
                 <i data-lucide="clipboard-list" class="w-5 h-5"></i>
-                <span>Job Book / Cards</span>
-                <span class="ml-auto bg-amber-500/20 text-amber-300 text-xs px-2 py-0.5 rounded-full font-bold">Live</span>
+                <span>Job Book (Vehicles)</span>
+                <span class="ml-auto bg-amber-500/20 text-amber-300 text-[10px] px-2 py-0.5 rounded-full font-bold">List</span>
             </a>
 
-            <a href="/billing" class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition {% if active_page == 'billing' %}bg-primary-600 text-white font-semibold shadow-md shadow-primary-600/30{% else %}hover:bg-slate-800 text-slate-300 hover:text-white{% endif %}">
+            <a href="/billing" class="flex items-center gap-3 px-3 py-2 rounded-xl transition {% if active_page == 'billing' %}bg-primary-600 text-white font-semibold shadow-md shadow-primary-600/30{% else %}hover:bg-slate-800 text-slate-300 hover:text-white{% endif %}">
                 <i data-lucide="receipt" class="w-5 h-5"></i>
                 <span>Billing & POS</span>
                 <span class="ml-auto bg-emerald-500/20 text-emerald-400 text-[10px] px-1.5 py-0.5 rounded font-mono">SCAN</span>
             </a>
 
-            <a href="/inventory" class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition {% if active_page == 'inventory' %}bg-primary-600 text-white font-semibold shadow-md shadow-primary-600/30{% else %}hover:bg-slate-800 text-slate-300 hover:text-white{% endif %}">
+            <a href="/inventory" class="flex items-center gap-3 px-3 py-2 rounded-xl transition {% if active_page == 'inventory' %}bg-primary-600 text-white font-semibold shadow-md shadow-primary-600/30{% else %}hover:bg-slate-800 text-slate-300 hover:text-white{% endif %}">
                 <i data-lucide="boxes" class="w-5 h-5"></i>
                 <span>Parts & Inventory</span>
             </a>
 
-            <a href="/barcode-labels" class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition {% if active_page == 'barcode_labels' %}bg-primary-600 text-white font-semibold shadow-md shadow-primary-600/30{% else %}hover:bg-slate-800 text-slate-300 hover:text-white{% endif %}">
+            <a href="/barcode-labels" class="flex items-center gap-3 px-3 py-2 rounded-xl transition {% if active_page == 'barcode_labels' %}bg-primary-600 text-white font-semibold shadow-md shadow-primary-600/30{% else %}hover:bg-slate-800 text-slate-300 hover:text-white{% endif %}">
                 <i data-lucide="barcode" class="w-5 h-5"></i>
-                <span>Barcode Generator</span>
+                <span>Barcode Stickers</span>
             </a>
 
-            <a href="/technicians" class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition {% if active_page == 'technicians' %}bg-primary-600 text-white font-semibold shadow-md shadow-primary-600/30{% else %}hover:bg-slate-800 text-slate-300 hover:text-white{% endif %}">
+            <a href="/technicians" class="flex items-center gap-3 px-3 py-2 rounded-xl transition {% if active_page == 'technicians' %}bg-primary-600 text-white font-semibold shadow-md shadow-primary-600/30{% else %}hover:bg-slate-800 text-slate-300 hover:text-white{% endif %}">
                 <i data-lucide="users-round" class="w-5 h-5"></i>
-                <span>Staff & Mechanics</span>
+                <span>Staff, Wages & Leave</span>
             </a>
 
-            <a href="/customers" class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition {% if active_page == 'customers' %}bg-primary-600 text-white font-semibold shadow-md shadow-primary-600/30{% else %}hover:bg-slate-800 text-slate-300 hover:text-white{% endif %}">
+            <a href="/customers" class="flex items-center gap-3 px-3 py-2 rounded-xl transition {% if active_page == 'customers' %}bg-primary-600 text-white font-semibold shadow-md shadow-primary-600/30{% else %}hover:bg-slate-800 text-slate-300 hover:text-white{% endif %}">
                 <i data-lucide="car" class="w-5 h-5"></i>
-                <span>Vehicles & Customers</span>
+                <span>Vehicle Directory</span>
             </a>
 
-            <div class="pt-3 pb-1 border-t border-slate-800">
-                <span class="text-[11px] uppercase tracking-wider text-slate-500 font-semibold px-3">Finance & Accounts</span>
+            <div class="pt-2 pb-1 border-t border-slate-800">
+                <span class="text-[10px] uppercase tracking-wider text-slate-500 font-bold px-3">Purchases & Returns</span>
             </div>
 
-            <a href="/bank-accounts" class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition {% if active_page == 'bank_accounts' %}bg-primary-600 text-white font-semibold shadow-md shadow-primary-600/30{% else %}hover:bg-slate-800 text-slate-300 hover:text-white{% endif %}">
+            <a href="/purchases" class="flex items-center gap-3 px-3 py-2 rounded-xl transition {% if active_page == 'purchases' %}bg-primary-600 text-white font-semibold shadow-md shadow-primary-600/30{% else %}hover:bg-slate-800 text-slate-300 hover:text-white{% endif %}">
+                <i data-lucide="shopping-cart" class="w-5 h-5"></i>
+                <span>Purchase Register</span>
+            </a>
+
+            <a href="/sales-returns" class="flex items-center gap-3 px-3 py-2 rounded-xl transition {% if active_page == 'sales_returns' %}bg-primary-600 text-white font-semibold shadow-md shadow-primary-600/30{% else %}hover:bg-slate-800 text-slate-300 hover:text-white{% endif %}">
+                <i data-lucide="corner-down-left" class="w-5 h-5"></i>
+                <span>Sales Returns</span>
+            </a>
+
+            <div class="pt-2 pb-1 border-t border-slate-800">
+                <span class="text-[10px] uppercase tracking-wider text-slate-500 font-bold px-3">Finance & CA Audit</span>
+            </div>
+
+            <a href="/bank-accounts" class="flex items-center gap-3 px-3 py-2 rounded-xl transition {% if active_page == 'bank_accounts' %}bg-primary-600 text-white font-semibold shadow-md shadow-primary-600/30{% else %}hover:bg-slate-800 text-slate-300 hover:text-white{% endif %}">
                 <i data-lucide="landmark" class="w-5 h-5"></i>
                 <span>Bank & Cash Ledger</span>
             </a>
 
-            <a href="/expenses" class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition {% if active_page == 'expenses' %}bg-primary-600 text-white font-semibold shadow-md shadow-primary-600/30{% else %}hover:bg-slate-800 text-slate-300 hover:text-white{% endif %}">
+            <a href="/expenses" class="flex items-center gap-3 px-3 py-2 rounded-xl transition {% if active_page == 'expenses' %}bg-primary-600 text-white font-semibold shadow-md shadow-primary-600/30{% else %}hover:bg-slate-800 text-slate-300 hover:text-white{% endif %}">
                 <i data-lucide="wallet-cards" class="w-5 h-5"></i>
                 <span>Workshop Expenses</span>
             </a>
 
-            <a href="/khata" class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition {% if active_page == 'khata' %}bg-primary-600 text-white font-semibold shadow-md shadow-primary-600/30{% else %}hover:bg-slate-800 text-slate-300 hover:text-white{% endif %}">
+            <a href="/khata" class="flex items-center gap-3 px-3 py-2 rounded-xl transition {% if active_page == 'khata' %}bg-primary-600 text-white font-semibold shadow-md shadow-primary-600/30{% else %}hover:bg-slate-800 text-slate-300 hover:text-white{% endif %}">
                 <i data-lucide="hand-coins" class="w-5 h-5"></i>
-                <span>Customer Dues / Khata</span>
+                <span>Customer Dues (Khata)</span>
             </a>
 
-            <a href="/ca-reports" class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition {% if active_page == 'ca_reports' %}bg-primary-600 text-white font-semibold shadow-md shadow-primary-600/30{% else %}hover:bg-slate-800 text-slate-300 hover:text-white{% endif %}">
+            <a href="/ca-reports" class="flex items-center gap-3 px-3 py-2 rounded-xl transition {% if active_page == 'ca_reports' %}bg-primary-600 text-white font-semibold shadow-md shadow-primary-600/30{% else %}hover:bg-slate-800 text-slate-300 hover:text-white{% endif %}">
                 <i data-lucide="file-spreadsheet" class="w-5 h-5"></i>
                 <span>CA Audit & GSTR-1</span>
-                <span class="ml-auto bg-blue-500/20 text-blue-300 text-[10px] px-1.5 py-0.5 rounded font-bold">TAX</span>
+                <span class="ml-auto bg-blue-500/20 text-blue-300 text-[10px] px-1.5 py-0.5 rounded font-bold">FY</span>
             </a>
 
-            <div class="pt-3 pb-1 border-t border-slate-800">
-                <span class="text-[11px] uppercase tracking-wider text-slate-500 font-semibold px-3">System</span>
+            <div class="pt-2 pb-1 border-t border-slate-800">
+                <span class="text-[10px] uppercase tracking-wider text-slate-500 font-bold px-3">System & Control</span>
             </div>
 
-            <a href="/settings" class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition {% if active_page == 'settings' %}bg-primary-600 text-white font-semibold shadow-md shadow-primary-600/30{% else %}hover:bg-slate-800 text-slate-300 hover:text-white{% endif %}">
+            <a href="/activity-logs" class="flex items-center gap-3 px-3 py-2 rounded-xl transition {% if active_page == 'activity_logs' %}bg-primary-600 text-white font-semibold shadow-md shadow-primary-600/30{% else %}hover:bg-slate-800 text-slate-300 hover:text-white{% endif %}">
+                <i data-lucide="scroll-text" class="w-5 h-5"></i>
+                <span>Activity Audit Logs</span>
+            </a>
+
+            <a href="/settings" class="flex items-center gap-3 px-3 py-2 rounded-xl transition {% if active_page == 'settings' %}bg-primary-600 text-white font-semibold shadow-md shadow-primary-600/30{% else %}hover:bg-slate-800 text-slate-300 hover:text-white{% endif %}">
                 <i data-lucide="settings" class="w-5 h-5"></i>
                 <span>Workshop Settings</span>
             </a>
         </nav>
 
-        <!-- Quick Barcode Hardware Scanner Active Indicator -->
-        <div class="mt-4 p-3 rounded-xl bg-slate-800/80 border border-slate-700/60 text-xs">
-            <div class="flex items-center gap-2 text-emerald-400 font-semibold mb-1">
-                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
-                <span>Barcode Gun Active</span>
+        <!-- User Profile & Sign Out -->
+        <div class="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between text-xs">
+            <div class="flex items-center gap-2">
+                <div class="w-8 h-8 rounded-full bg-slate-800 text-amber-400 flex items-center justify-center font-bold">
+                    👤
+                </div>
+                <div>
+                    <span class="font-bold text-white block">{{ current_user.username if current_user else 'Admin' }}</span>
+                    <span class="text-[10px] text-slate-400 uppercase">{{ current_user.role if current_user else 'OWNER' }}</span>
+                </div>
             </div>
-            <p class="text-slate-400 text-[11px]">Ready to scan item boxes instantly anywhere in the app.</p>
+            <a href="/logout" class="p-1.5 rounded-lg bg-slate-800 text-rose-400 hover:text-rose-300 hover:bg-slate-700 transition" title="Sign Out">
+                <i data-lucide="log-out" class="w-4 h-4"></i>
+            </a>
         </div>
     </aside>
 
@@ -154,18 +180,18 @@
         <header class="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between shadow-sm">
             <div class="flex items-center gap-3">
                 <h1 class="text-xl font-bold text-slate-900 tracking-tight">{% block header_title %}Dashboard{% endblock %}</h1>
-                <span class="text-xs px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 font-medium">Auto Electrical Pro</span>
+                <span class="text-xs px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 font-medium">AutoVolt Pro Enterprise</span>
             </div>
 
             <div class="flex items-center gap-3">
-                <!-- Quick New Job Card Button -->
+                <!-- Quick New Vehicle Inward Button -->
                 <a href="/job-cards?new=1" class="hidden sm:inline-flex items-center gap-2 px-3.5 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs rounded-xl shadow-sm transition">
                     <i data-lucide="plus" class="w-4 h-4"></i>
-                    <span>New Vehicle Entry</span>
+                    <span>+ Vehicle Inward</span>
                 </a>
                 
                 <!-- Quick POS Bill Button -->
-                <a href="/billing?new=1" class="inline-flex items-center gap-2 px-3.5 py-2 bg-primary-600 hover:bg-primary-700 text-white font-semibold text-xs rounded-xl shadow-sm transition">
+                <a href="/billing" class="inline-flex items-center gap-2 px-3.5 py-2 bg-primary-600 hover:bg-primary-700 text-white font-semibold text-xs rounded-xl shadow-sm transition">
                     <i data-lucide="barcode" class="w-4 h-4"></i>
                     <span>Scan POS Bill</span>
                 </a>

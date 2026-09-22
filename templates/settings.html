@@ -52,6 +52,24 @@
                 <input type="text" name="address" value="{{ profile.address }}" required class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500">
             </div>
 
+            <!-- Multilingual WhatsApp & Master PIN Settings -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 bg-amber-50/60 rounded-2xl border border-amber-200/80">
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">WhatsApp Message Language</label>
+                    <select name="whatsapp_lang" class="w-full px-3 py-2 rounded-xl border border-amber-300 bg-white focus:outline-none">
+                        <option value="en" {% if profile.whatsapp_lang == 'en' or not profile.whatsapp_lang %}selected{% endif %}>🇬🇧 English (Standard)</option>
+                        <option value="ml" {% if profile.whatsapp_lang == 'ml' %}selected{% endif %}>🌴 Malayalam (മലയാളം)</option>
+                        <option value="ta" {% if profile.whatsapp_lang == 'ta' %}selected{% endif %}>🇮🇳 Tamil (தமிழ்)</option>
+                    </select>
+                    <p class="text-[10px] text-slate-500 mt-1">Language used for customer invoice & job status WhatsApp messages</p>
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">Owner Master Security PIN</label>
+                    <input type="password" name="master_pin" value="{{ profile.master_pin or '1234' }}" maxlength="8" class="w-full font-mono px-3 py-2 rounded-xl border border-amber-300 bg-white focus:outline-none">
+                    <p class="text-[10px] text-slate-500 mt-1">4-digit security PIN required to delete or alter finalized bills</p>
+                </div>
+            </div>
+
             <!-- Primary UPI & Bank Account Info -->
             <div class="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
                 <h3 class="font-bold text-slate-900 text-xs uppercase tracking-wider flex items-center gap-1.5">
@@ -98,6 +116,34 @@
                 </button>
             </div>
         </form>
+    </div>
+
+    <!-- SaaS Subscription & License Information -->
+    <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-4">
+        <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div class="flex items-center gap-2">
+                <i data-lucide="shield-check" class="w-5 h-5 text-emerald-600"></i>
+                <h3 class="font-bold text-slate-900 text-sm">SaaS License & Subscription</h3>
+            </div>
+            <span class="px-2.5 py-1 bg-emerald-100 text-emerald-800 font-black rounded-full text-[10px]">
+                ACTIVE LICENSE
+            </span>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+            <div class="p-3 bg-slate-50 rounded-2xl border border-slate-100">
+                <span class="text-slate-400 block mb-1">Client Tenant ID</span>
+                <span class="font-bold font-mono text-slate-900">{{ tenant.id if tenant else 'default-workshop' }}</span>
+            </div>
+            <div class="p-3 bg-slate-50 rounded-2xl border border-slate-100">
+                <span class="text-slate-400 block mb-1">Plan Period</span>
+                <span class="font-bold text-slate-900">{{ subscription.plan_type if subscription else 'YEARLY' }} (1 Year Period)</span>
+            </div>
+            <div class="p-3 bg-slate-50 rounded-2xl border border-slate-100">
+                <span class="text-slate-400 block mb-1">Subscription Expiry Date</span>
+                <span class="font-bold text-emerald-700 font-mono">{{ subscription.end_date if subscription else '2027-03-31' }}</span>
+            </div>
+        </div>
     </div>
 
     <!-- Cloud Database (Supabase) Connection Status -->

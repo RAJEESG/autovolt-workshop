@@ -1,0 +1,202 @@
+{% extends "admin_hq/base_admin.html" %}
+
+{% block title %}Workshop Users & OTP Management — AutoVolt Cloud HQ{% endblock %}
+
+{% block content %}
+<div class="space-y-6 max-w-7xl mx-auto">
+
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+            <h1 class="text-2xl font-black text-white tracking-tight flex items-center gap-2.5">
+                <i data-lucide="users" class="w-7 h-7 text-hq-400"></i>
+                <span>Client Workshop Users & Password Management</span>
+            </h1>
+            <p class="text-xs text-slate-400">Create login accounts for workshop staff, assign WhatsApp mobile numbers for OTP, and reset passwords.</p>
+        </div>
+        <button onclick="document.getElementById('add-user-modal').classList.remove('hidden')" class="px-4 py-2.5 bg-gradient-to-r from-hq-600 to-indigo-600 hover:from-hq-500 hover:to-indigo-500 text-white font-bold text-xs md:text-sm rounded-xl shadow-lg shadow-hq-600/30 transition flex items-center gap-2">
+            <i data-lucide="user-plus" class="w-4 h-4"></i>
+            <span>+ Create Workshop User</span>
+        </button>
+    </div>
+
+    {% if msg %}
+    <div class="p-3 bg-emerald-950/80 border border-emerald-800 rounded-xl text-xs text-emerald-300 font-semibold flex items-center gap-2">
+        <i data-lucide="check-circle-2" class="w-4 h-4"></i>
+        <span>{{ msg }}</span>
+    </div>
+    {% endif %}
+
+    <!-- Users Table -->
+    <div class="bg-slate-900/90 border border-slate-800 rounded-3xl shadow-xl overflow-hidden">
+        <div class="p-6 border-b border-slate-800 flex items-center justify-between">
+            <h2 class="text-base font-bold text-white flex items-center gap-2">
+                <i data-lucide="shield" class="w-5 h-5 text-hq-400"></i>
+                <span>Active User Accounts</span>
+            </h2>
+            <span class="text-xs text-slate-400">{{ users|length }} Total Registered Users</span>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs text-slate-300">
+                <thead class="bg-slate-950/80 text-[11px] text-slate-400 uppercase tracking-wider border-b border-slate-800">
+                    <tr>
+                        <th class="px-6 py-4 font-semibold">User</th>
+                        <th class="px-6 py-4 font-semibold">Assigned Workshop</th>
+                        <th class="px-6 py-4 font-semibold">WhatsApp Mobile (for OTP)</th>
+                        <th class="px-6 py-4 font-semibold">Role</th>
+                        <th class="px-6 py-4 font-semibold">Status</th>
+                        <th class="px-6 py-4 font-semibold text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-800/60 font-medium">
+                    {% for u in users %}
+                    <tr class="hover:bg-slate-800/40 transition">
+                        <td class="px-6 py-4">
+                            <div class="flex items-center gap-3">
+                                <div class="w-9 h-9 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-slate-200">
+                                    👤
+                                </div>
+                                <div>
+                                    <span class="font-bold text-white block">{{ u.full_name }}</span>
+                                    <span class="text-[11px] font-mono text-hq-400">@{{ u.username }}</span>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="px-6 py-4 text-slate-200 font-semibold">
+                            {{ u.tenant_name or 'Default Workshop' }}
+                        </td>
+                        <td class="px-6 py-4">
+                            {% if u.whatsapp_mobile %}
+                            <a href="https://wa.me/{{ u.whatsapp_mobile | replace('+', '') | replace(' ', '') }}" target="_blank" class="text-emerald-400 font-bold hover:underline flex items-center gap-1">
+                                <i data-lucide="message-circle" class="w-3.5 h-3.5"></i>
+                                <span>{{ u.whatsapp_mobile }}</span>
+                            </a>
+                            {% else %}
+                            <span class="text-slate-500 italic">No WhatsApp set</span>
+                            {% endif %}
+                        </td>
+                        <td class="px-6 py-4">
+                            {% if u.role == 'SUPER_ADMIN' %}
+                            <span class="px-2.5 py-1 rounded-full bg-purple-950 text-purple-300 border border-purple-800 text-[10px] font-bold">SUPER ADMIN</span>
+                            {% elif u.role == 'ADMIN' %}
+                            <span class="px-2.5 py-1 rounded-full bg-amber-950 text-amber-300 border border-amber-800 text-[10px] font-bold">WORKSHOP OWNER</span>
+                            {% else %}
+                            <span class="px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 border border-slate-700 text-[10px] font-bold">STAFF / DESK</span>
+                            {% endif %}
+                        </td>
+                        <td class="px-6 py-4">
+                            <span class="px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] font-bold">ACTIVE</span>
+                        </td>
+                        <td class="px-6 py-4 text-right">
+                            <button onclick="openResetModal('{{ u.id }}', '{{ u.username }}', '{{ u.whatsapp_mobile or '' }}')" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-amber-400 font-bold text-[11px] rounded-xl border border-slate-700 transition">
+                                🔑 Reset Password
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+<!-- ➕ ADD USER MODAL -->
+<div id="add-user-modal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5">
+        <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+            <h3 class="text-base font-bold text-white flex items-center gap-2">
+                <i data-lucide="user-plus" class="w-5 h-5 text-hq-400"></i>
+                <span>Create User Account</span>
+            </h3>
+            <button onclick="document.getElementById('add-user-modal').classList.add('hidden')" class="p-1 rounded bg-slate-800 text-slate-400 hover:text-white">
+                <i data-lucide="x" class="w-4 h-4"></i>
+            </button>
+        </div>
+
+        <form action="/api/admin/users/create" method="POST" class="space-y-4 text-xs">
+            <div>
+                <label class="block text-slate-300 font-bold mb-1">Assign to Workshop *</label>
+                <select name="tenant_id" required class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
+                    {% for t in tenants %}
+                    <option value="{{ t.id }}">{{ t.name }} ({{ t.owner_name }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-slate-300 font-bold mb-1">Full Name *</label>
+                <input type="text" name="full_name" required placeholder="e.g. Rahul S." class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
+            </div>
+
+            <div>
+                <label class="block text-slate-300 font-bold mb-1">Username *</label>
+                <input type="text" name="username" required placeholder="e.g. rahul_spark" class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
+            </div>
+
+            <div>
+                <label class="block text-slate-300 font-bold mb-1">WhatsApp Mobile Number (for OTP Reset) *</label>
+                <input type="text" name="whatsapp_mobile" required placeholder="+91 98470 12345" class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
+            </div>
+
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="block text-slate-300 font-bold mb-1">Role *</label>
+                    <select name="role" class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
+                        <option value="ADMIN">Workshop Admin</option>
+                        <option value="STAFF" selected>Workshop Staff</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-slate-300 font-bold mb-1">Password *</label>
+                    <input type="password" name="password" required placeholder="••••••••" class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
+                </div>
+            </div>
+
+            <div class="pt-3 border-t border-slate-800 flex items-center justify-end gap-2">
+                <button type="button" onclick="document.getElementById('add-user-modal').classList.add('hidden')" class="px-4 py-2 bg-slate-800 text-slate-300 font-bold rounded-xl">Cancel</button>
+                <button type="submit" class="px-5 py-2 bg-hq-600 hover:bg-hq-500 text-white font-bold rounded-xl shadow">Create User</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 🔑 RESET PASSWORD MODAL -->
+<div id="reset-modal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-sm w-full p-6 shadow-2xl space-y-4">
+        <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+            <h3 class="text-sm font-bold text-white">Reset User Password</h3>
+            <button onclick="document.getElementById('reset-modal').classList.add('hidden')" class="p-1 rounded bg-slate-800 text-slate-400 hover:text-white">
+                <i data-lucide="x" class="w-4 h-4"></i>
+            </button>
+        </div>
+
+        <form action="/api/admin/users/reset-password" method="POST" class="space-y-4 text-xs">
+            <input type="hidden" id="reset_user_id" name="user_id">
+            <input type="hidden" id="reset_username" name="username">
+
+            <p class="text-slate-400">Set a new password for <b id="reset_user_label" class="text-white"></b>:</p>
+
+            <div>
+                <label class="block text-slate-300 font-bold mb-1">New Password *</label>
+                <input type="password" name="new_password" required placeholder="••••••••" class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
+            </div>
+
+            <div class="pt-3 border-t border-slate-800 flex items-center justify-end gap-2">
+                <button type="button" onclick="document.getElementById('reset-modal').classList.add('hidden')" class="px-4 py-2 bg-slate-800 text-slate-300 font-bold rounded-xl">Cancel</button>
+                <button type="submit" class="px-5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl shadow">Save & Reset</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function openResetModal(userId, username, wa) {
+    document.getElementById('reset_user_id').value = userId;
+    document.getElementById('reset_username').value = username;
+    document.getElementById('reset_user_label').innerText = '@' + username;
+    document.getElementById('reset-modal').classList.remove('hidden');
+}
+</script>
+{% endblock %}

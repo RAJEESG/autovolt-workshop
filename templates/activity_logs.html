@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}Activity Audit Logs — AutoVolt Pro{% endblock %}
+{% block header_title %}System Activity Audit Trail{% endblock %}
+
+{% block content %}
+<div class="space-y-6 max-w-7xl mx-auto">
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-2xl bg-slate-900 text-amber-400 flex items-center justify-center font-bold text-lg">
+                📜
+            </div>
+            <div>
+                <h2 class="font-extrabold text-slate-900 text-base">User Activity & Audit Trail</h2>
+                <p class="text-xs text-slate-500">Track all logins, invoice creations, edits, deletions, and stock updates</p>
+            </div>
+        </div>
+
+        <input type="text" id="log-search-input" oninput="filterLogsTable()" placeholder="Search action, user, or details..." class="px-4 py-2 rounded-xl border border-slate-200 text-xs w-full sm:w-72 focus:outline-none focus:ring-2 focus:ring-primary-500">
+    </div>
+
+    <!-- Logs Table -->
+    <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-4">
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs" id="logs-table">
+                <thead>
+                    <tr class="text-slate-400 uppercase tracking-wider font-semibold border-b border-slate-100 bg-slate-50">
+                        <th class="py-2.5 px-3">Timestamp</th>
+                        <th class="py-2.5 px-3">User</th>
+                        <th class="py-2.5 px-3">Action</th>
+                        <th class="py-2.5 px-3">Entity Type</th>
+                        <th class="py-2.5 px-3">Audit Details</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 font-medium text-slate-700">
+                    {% for log in logs %}
+                    <tr class="hover:bg-slate-50 transition log-row">
+                        <td class="py-3 px-3 text-slate-500 font-mono text-[11px]">{{ log.created_at }}</td>
+                        <td class="py-3 px-3 font-bold text-slate-900">{{ log.username }}</td>
+                        <td class="py-3 px-3">
+                            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-800">
+                                {{ log.action }}
+                            </span>
+                        </td>
+                        <td class="py-3 px-3 text-slate-500 font-mono">{{ log.entity_type or '-' }}</td>
+                        <td class="py-3 px-3 text-slate-800">{{ log.details }}</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="5" class="text-center py-8 text-slate-400 text-xs">No activity logs recorded yet.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function filterLogsTable() {
+        const q = document.getElementById('log-search-input').value.toLowerCase();
+        document.querySelectorAll('.log-row').forEach(row => {
+            row.style.display = row.innerText.toLowerCase().includes(q) ? '' : 'none';
+        });
+    }
+</script>
+{% endblock %}

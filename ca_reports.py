@@ -5,11 +5,39 @@ from datetime import datetime, date
 from typing import Dict, Any, List, Optional
 from database import get_db_connection
 
-def generate_gstr1_report(start_date: Optional[str] = None, end_date: Optional[str] = None) -> Dict[str, Any]:
-    """
-    Generate GSTR-1 Sales & Tax Audit Report for Chartered Accountant
-    Includes B2B, B2C, Taxable Values, CGST, SGST, and HSN Summary
-    """
+def get_financial_year_dates(fy_str: Optional[str] = None) -> Dict[str, str]:
+    """Return {start_date, end_date, financial_year} for Indian Financial Year (Apr 1 to Mar 31)"""
+    today = date.today()
+    if not fy_str or fy_str == "current":
+        curr_year = today.year if today.month >= 4 else today.year - 1
+    elif fy_str == "prev":
+        curr_year = (today.year if today.month >= 4 else today.year - 1) - 1
+    elif "-" in str(fy_str):
+        try:
+            curr_year = int(fy_str.split("-")[0].strip())
+        except Exception:
+            curr_year = today.year if today.month >= 4 else today.year - 1
+    else:
+        try:
+            curr_year = int(str(fy_str).strip())
+        except Exception:
+            curr_year = today.year if today.month >= 4 else today.year - 1
+
+    start_date = f"{curr_year}-04-01"
+    end_date = f"{curr_year + 1}-03-31"
+    fy_label = f"{curr_year}-{curr_year + 1}"
+    return {
+        "start_date": start_date,
+        "end_date": end_date,
+        "financial_year": fy_label
+    }
+
+def generate_gstr1_report(start_date: Optional[str] = None, end_date: Optional[str] = None, fy: Optional[str] = None) -> Dict[str, Any]:
+    """Generate GSTR-1 Sales & Tax Audit Report with FY support"""
+    if fy and not start_date and not end_date:
+        fy_dates = get_financial_year_dates(fy)
+        start_date, end_date = fy_dates["start_date"], fy_dates["end_date"]
+
     conn = get_db_connection()
     cursor = conn.cursor()
     
@@ -35,7 +63,6 @@ def generate_gstr1_report(start_date: Optional[str] = None, end_date: Optional[s
     cursor.execute(query, params)
     invoices = [dict(row) for row in cursor.fetchall()]
     
-    # Calculate totals
     total_sales = sum(inv["grand_total"] for inv in invoices)
     total_taxable = sum(inv["taxable_subtotal"] for inv in invoices)
     total_cgst = sum(inv["cgst_total"] for inv in invoices)
@@ -85,15 +112,15 @@ def generate_gstr1_report(start_date: Optional[str] = None, end_date: Optional[s
         "hsn_summary": hsn_summary,
     }
 
-def generate_profit_and_loss_report(start_date: Optional[str] = None, end_date: Optional[str] = None) -> Dict[str, Any]:
-    """
-    Generate P&L Financial Statement:
-    Revenue (Labor + Spares) - COGS (Parts Cost) - Operating Expenses = Net Profit
-    """
+def generate_profit_and_loss_report(start_date: Optional[str] = None, end_date: Optional[str] = None, fy: Optional[str] = None) -> Dict[str, Any]:
+    """Generate P&L Financial Statement with FY support"""
+    if fy and not start_date and not end_date:
+        fy_dates = get_financial_year_dates(fy)
+        start_date, end_date = fy_dates["start_date"], fy_dates["end_date"]
+
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # 1. Revenue & Cost of Goods Sold
     inv_query = """
     SELECT 
         COUNT(*) as count,
@@ -115,7 +142,6 @@ def generate_profit_and_loss_report(start_date: Optional[str] = None, end_date: 
     cursor.execute(inv_query, params)
     rev_data = dict(cursor.fetchone())
     
-    # Calculate COGS (Cost of parts used/sold)
     cogs_query = """
     SELECT 
         COALESCE(SUM(ii.quantity * COALESCE(inv.cost_price, 0)), 0) as total_cogs
@@ -136,7 +162,6 @@ def generate_profit_and_loss_report(start_date: Optional[str] = None, end_date: 
     cogs_data = cursor.fetchone()
     total_cogs = cogs_data[0] if cogs_data else 0.0
     
-    # 2. Operating Expenses
     exp_query = """
     SELECT 
         category,
@@ -171,6 +196,7 @@ def generate_profit_and_loss_report(start_date: Optional[str] = None, end_date: 
         "labor_revenue": rev_data["labor_revenue"],
         "parts_revenue": rev_data["parts_revenue"],
         "total_revenue": gross_revenue,
+        "sales_revenue": gross_revenue,
         "discounts": rev_data["total_discounts"],
         "cogs": total_cogs,
         "gross_profit": gross_profit,
@@ -181,8 +207,45 @@ def generate_profit_and_loss_report(start_date: Optional[str] = None, end_date: 
         "net_margin_pct": net_margin_pct,
     }
 
+def generate_daily_collection_register(start_date: Optional[str] = None, end_date: Optional[str] = None) -> Dict[str, Any]:
+    """Detailed Daily Collection Register breakdown by Cash, UPI, Bank, and Card"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    query = """
+    SELECT 
+        date(invoice_date) as day,
+        COALESCE(SUM(CASE WHEN payment_mode = 'CASH' THEN amount_paid ELSE 0 END), 0) as cash_total,
+        COALESCE(SUM(CASE WHEN payment_mode = 'UPI' THEN amount_paid ELSE 0 END), 0) as upi_total,
+        COALESCE(SUM(CASE WHEN payment_mode = 'BANK_TRANSFER' THEN amount_paid ELSE 0 END), 0) as bank_total,
+        COALESCE(SUM(CASE WHEN payment_mode = 'CARD' THEN amount_paid ELSE 0 END), 0) as card_total,
+        COALESCE(SUM(amount_paid), 0) as day_total,
+        COUNT(*) as bill_count
+    FROM invoices
+    WHERE 1=1
+    """
+    params = []
+    if start_date:
+        query += " AND date(invoice_date) >= date(?)"
+        params.append(start_date)
+    if end_date:
+        query += " AND date(invoice_date) <= date(?)"
+        params.append(end_date)
+    query += " GROUP BY date(invoice_date) ORDER BY date(invoice_date) DESC"
+    cursor.execute(query, params)
+    registers = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+
+    return {
+        "registers": registers,
+        "grand_total_collected": sum(r["day_total"] for r in registers),
+        "total_cash": sum(r["cash_total"] for r in registers),
+        "total_upi": sum(r["upi_total"] for r in registers),
+        "total_bank": sum(r["bank_total"] for r in registers),
+        "total_card": sum(r["card_total"] for r in registers)
+    }
+
 def generate_inventory_valuation_report() -> Dict[str, Any]:
-    """Generate Stock Valuation Report for Balance Sheet / Audit"""
+    """Stock Valuation Report for Balance Sheet"""
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
@@ -197,79 +260,27 @@ def generate_inventory_valuation_report() -> Dict[str, Any]:
     items = [dict(row) for row in cursor.fetchall()]
     conn.close()
     
-    total_items_count = len(items)
-    total_stock_units = sum(i["stock_qty"] for i in items)
-    total_inventory_cost_value = sum(i["total_cost_value"] for i in items)
-    total_inventory_retail_value = sum(i["total_retail_value"] for i in items)
-    low_stock_count = sum(1 for i in items if i["stock_qty"] <= i["min_stock_alert"])
-    
     return {
-        "total_items_count": total_items_count,
-        "total_stock_units": total_stock_units,
-        "total_cost_value": total_inventory_cost_value,
-        "total_retail_value": total_inventory_retail_value,
-        "potential_profit": total_inventory_retail_value - total_inventory_cost_value,
-        "low_stock_count": low_stock_count,
+        "total_items_count": len(items),
+        "total_sku_count": len(items),
+        "total_stock_units": sum(i["stock_qty"] for i in items),
+        "total_cost_value": sum(i["total_cost_value"] for i in items),
+        "total_retail_value": sum(i["total_retail_value"] for i in items),
+        "potential_profit": sum(i["total_retail_value"] for i in items) - sum(i["total_cost_value"] for i in items),
+        "low_stock_count": sum(1 for i in items if i["stock_qty"] <= i["min_stock_alert"]),
         "items": items
     }
 
-def generate_daybook_report(report_date: Optional[str] = None) -> Dict[str, Any]:
-    """Generate Daily Cash & Bank Receipts and Payments Daybook"""
-    if not report_date:
-        report_date = datetime.now().strftime("%Y-%m-%d")
-        
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # Receipts (Invoices)
-    cursor.execute("""
-    SELECT 
-        invoice_number as doc_no, 'INVOICE' as doc_type, customer_name as party_name,
-        payment_mode, amount_paid as amount, created_at, notes
-    FROM invoices
-    WHERE date(invoice_date) = date(?) AND amount_paid > 0
-    ORDER BY created_at ASC
-    """, (report_date,))
-    receipts = [dict(row) for row in cursor.fetchall()]
-    
-    # Payments (Expenses)
-    cursor.execute("""
-    SELECT 
-        reference_no as doc_no, 'EXPENSE' as doc_type, title as party_name,
-        category, payment_mode, amount, created_at, notes
-    FROM expenses
-    WHERE date(expense_date) = date(?)
-    ORDER BY created_at ASC
-    """, (report_date,))
-    payments = [dict(row) for row in cursor.fetchall()]
-    
-    conn.close()
-    
-    total_receipts = sum(r["amount"] for r in receipts)
-    total_payments = sum(p["amount"] for p in payments)
-    net_daily_flow = total_receipts - total_payments
-    
-    return {
-        "report_date": report_date,
-        "receipts": receipts,
-        "payments": payments,
-        "total_receipts": total_receipts,
-        "total_payments": total_payments,
-        "net_daily_flow": net_daily_flow,
-    }
-
-def export_gstr1_excel(start_date: Optional[str] = None, end_date: Optional[str] = None) -> bytes:
-    """Export GSTR-1 Tax Audit Report to Excel (.xlsx) file for Chartered Accountant submission"""
-    report = generate_gstr1_report(start_date, end_date)
+def export_gstr1_excel(start_date: Optional[str] = None, end_date: Optional[str] = None, fy: Optional[str] = None) -> bytes:
+    """Export GSTR-1 Sales Report to Excel (.xlsx) for CA"""
+    report = generate_gstr1_report(start_date, end_date, fy)
     
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        # Invoices Sheet
         df_invoices = pd.DataFrame(report["invoices"])
         if not df_invoices.empty:
-            df_invoices.to_excel(writer, sheet_name='GSTR1_Sales_Invoices', index=False)
+            df_invoices.to_excel(writer, sheet_name='GSTR1_Sales', index=False)
             
-        # HSN Summary Sheet
         df_hsn = pd.DataFrame(report["hsn_summary"])
         if not df_hsn.empty:
             df_hsn.to_excel(writer, sheet_name='HSN_Summary', index=False)

@@ -1,105 +1,141 @@
 {% extends "base.html" %}
 
-{% block title %}Job Cards & Service Book — AutoVolt Pro{% endblock %}
-{% block header_title %}Service Center Job Book{% endblock %}
+{% block title %}Vehicle Job Book & Status — AutoVolt Pro{% endblock %}
+{% block header_title %}Vehicle Service Job Book{% endblock %}
 
 {% block content %}
 <div class="space-y-6 max-w-7xl mx-auto">
     <!-- Header Controls -->
-    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
         <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-600 flex items-center justify-center font-bold text-lg">
+            <div class="w-10 h-10 rounded-2xl bg-amber-500/10 text-amber-600 flex items-center justify-center font-bold text-lg">
                 📋
             </div>
             <div>
-                <h2 class="font-bold text-slate-900 text-base">Vehicle Inward & Job Cards</h2>
-                <p class="text-xs text-slate-500">Track vehicle electrical repairs from arrival to delivery</p>
+                <h2 class="font-extrabold text-slate-900 text-base">Vehicle Service Register & Status</h2>
+                <p class="text-xs text-slate-500">Track all incoming vehicles, assign electricians, and update live repair status</p>
             </div>
         </div>
 
-        <div class="flex items-center gap-2">
-            <button onclick="openModal('new-job-modal')" class="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs rounded-xl transition shadow flex items-center gap-2">
-                <i data-lucide="plus-circle" class="w-4 h-4"></i>
-                <span>New Vehicle Inward (Job Card)</span>
+        <div class="flex items-center gap-3">
+            <input type="text" id="job-search-input" oninput="filterJobTable()" placeholder="Search vehicle reg #, customer, or phone..." class="px-4 py-2 rounded-xl border border-slate-200 text-xs w-full sm:w-64 focus:outline-none focus:ring-2 focus:ring-amber-500">
+            <button onclick="openModal('new-job-modal')" class="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs rounded-xl shadow transition flex items-center gap-1.5 whitespace-nowrap">
+                <i data-lucide="plus" class="w-4 h-4"></i>
+                <span>+ Vehicle Inward</span>
             </button>
         </div>
     </div>
 
-    <!-- Kanban Board Columns (Received ➜ Inspection ➜ In Progress ➜ Completed ➜ Delivered) -->
-    <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
-        <!-- 1. RECEIVED -->
-        <div class="bg-slate-100/70 p-3.5 rounded-2xl border border-slate-200/80 flex flex-col kanban-col">
-            <div class="flex items-center justify-between mb-3 pb-2 border-b border-slate-200">
-                <span class="font-bold text-xs uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-                    <span class="w-2 h-2 rounded-full bg-slate-500"></span> Received
-                </span>
-                <span class="text-xs font-bold bg-white text-slate-700 px-2 py-0.5 rounded-full shadow-sm">{{ jobs_by_status['RECEIVED']|length }}</span>
-            </div>
-            <div class="space-y-3 flex-1 overflow-y-auto">
-                {% for job in jobs_by_status['RECEIVED'] %}
-                {% include "partials/job_card_item.html" %}
-                {% endfor %}
-            </div>
-        </div>
+    <!-- Quick Filter Tabs (All, Active in Workshop, Received, Inspection, Repairing, Ready, Delivered) -->
+    <div class="flex items-center gap-2 overflow-x-auto pb-1 text-xs font-semibold">
+        <a href="/job-cards?filter=active" class="px-4 py-2 rounded-xl transition whitespace-nowrap {% if filter_mode == 'active' %}bg-amber-500 text-slate-950 font-black shadow-sm{% else %}bg-white border border-slate-200 text-slate-700 hover:bg-slate-50{% endif %}">
+            🚗 Active In Workshop ({{ active_count }})
+        </a>
+        <a href="/job-cards" class="px-4 py-2 rounded-xl transition whitespace-nowrap {% if not filter_mode %}bg-slate-900 text-white font-bold{% else %}bg-white border border-slate-200 text-slate-700 hover:bg-slate-50{% endif %}">
+            All Records ({{ all_jobs|length }})
+        </a>
+        <a href="/job-cards?status=IN_PROGRESS" class="px-4 py-2 rounded-xl transition whitespace-nowrap {% if filter_status == 'IN_PROGRESS' %}bg-slate-900 text-white font-bold{% else %}bg-white border border-slate-200 text-slate-700 hover:bg-slate-50{% endif %}">
+            ⚡ Repairing
+        </a>
+        <a href="/job-cards?status=COMPLETED" class="px-4 py-2 rounded-xl transition whitespace-nowrap {% if filter_status == 'COMPLETED' %}bg-slate-900 text-white font-bold{% else %}bg-white border border-slate-200 text-slate-700 hover:bg-slate-50{% endif %}">
+            ✨ Ready for Delivery
+        </a>
+        <a href="/job-cards?status=DELIVERED" class="px-4 py-2 rounded-xl transition whitespace-nowrap {% if filter_status == 'DELIVERED' %}bg-slate-900 text-white font-bold{% else %}bg-white border border-slate-200 text-slate-700 hover:bg-slate-50{% endif %}">
+            🏁 Delivered
+        </a>
+    </div>
 
-        <!-- 2. INSPECTION -->
-        <div class="bg-blue-50/60 p-3.5 rounded-2xl border border-blue-200/60 flex flex-col kanban-col">
-            <div class="flex items-center justify-between mb-3 pb-2 border-b border-blue-200">
-                <span class="font-bold text-xs uppercase tracking-wider text-blue-700 flex items-center gap-1.5">
-                    <span class="w-2 h-2 rounded-full bg-blue-500"></span> Inspection
-                </span>
-                <span class="text-xs font-bold bg-white text-blue-700 px-2 py-0.5 rounded-full shadow-sm">{{ jobs_by_status['INSPECTION']|length }}</span>
-            </div>
-            <div class="space-y-3 flex-1 overflow-y-auto">
-                {% for job in jobs_by_status['INSPECTION'] %}
-                {% include "partials/job_card_item.html" %}
-                {% endfor %}
-            </div>
-        </div>
+    <!-- Vehicle Service Table (Clean Intuitive List View) -->
+    <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-5 space-y-4">
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs" id="job-table">
+                <thead>
+                    <tr class="text-slate-400 uppercase tracking-wider font-semibold border-b border-slate-100 bg-slate-50">
+                        <th class="py-2.5 px-3">Job # & Arrival</th>
+                        <th class="py-2.5 px-3">Vehicle Details</th>
+                        <th class="py-2.5 px-3">Customer & Phone</th>
+                        <th class="py-2.5 px-3">Assigned Electrician</th>
+                        <th class="py-2.5 px-3">Reported Faults</th>
+                        <th class="py-2.5 px-3 w-40">Live Status (1-Click Change)</th>
+                        <th class="py-2.5 px-3 text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 font-medium text-slate-700">
+                    {% for job in jobs %}
+                    <tr class="hover:bg-slate-50/80 transition job-row">
+                        <!-- Job # & Arrival Timer -->
+                        <td class="py-3.5 px-3">
+                            <span class="font-mono font-bold text-slate-900 block text-xs">#{{ job.job_number }}</span>
+                            <span class="text-[10px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded font-semibold inline-block mt-0.5">
+                                ⏱️ {{ job.elapsed_time_str }}
+                            </span>
+                        </td>
 
-        <!-- 3. IN_PROGRESS -->
-        <div class="bg-amber-50/60 p-3.5 rounded-2xl border border-amber-200/60 flex flex-col kanban-col">
-            <div class="flex items-center justify-between mb-3 pb-2 border-b border-amber-200">
-                <span class="font-bold text-xs uppercase tracking-wider text-amber-700 flex items-center gap-1.5">
-                    <span class="w-2 h-2 rounded-full bg-amber-500 animate-ping"></span> Repairing
-                </span>
-                <span class="text-xs font-bold bg-white text-amber-700 px-2 py-0.5 rounded-full shadow-sm">{{ jobs_by_status['IN_PROGRESS']|length }}</span>
-            </div>
-            <div class="space-y-3 flex-1 overflow-y-auto">
-                {% for job in jobs_by_status['IN_PROGRESS'] %}
-                {% include "partials/job_card_item.html" %}
-                {% endfor %}
-            </div>
-        </div>
+                        <!-- Vehicle Reg No -->
+                        <td class="py-3.5 px-3">
+                            <span class="font-mono font-black text-primary-700 text-sm block">{{ job.vehicle_reg_no }}</span>
+                            <span class="text-slate-500 font-semibold">{{ job.vehicle_make_model }}</span>
+                        </td>
 
-        <!-- 4. COMPLETED -->
-        <div class="bg-emerald-50/60 p-3.5 rounded-2xl border border-emerald-200/60 flex flex-col kanban-col">
-            <div class="flex items-center justify-between mb-3 pb-2 border-b border-emerald-200">
-                <span class="font-bold text-xs uppercase tracking-wider text-emerald-700 flex items-center gap-1.5">
-                    <span class="w-2 h-2 rounded-full bg-emerald-500"></span> Ready
-                </span>
-                <span class="text-xs font-bold bg-white text-emerald-700 px-2 py-0.5 rounded-full shadow-sm">{{ jobs_by_status['COMPLETED']|length }}</span>
-            </div>
-            <div class="space-y-3 flex-1 overflow-y-auto">
-                {% for job in jobs_by_status['COMPLETED'] %}
-                {% include "partials/job_card_item.html" %}
-                {% endfor %}
-            </div>
-        </div>
+                        <!-- Customer -->
+                        <td class="py-3.5 px-3">
+                            <span class="font-bold text-slate-900 block">{{ job.customer_name }}</span>
+                            <a href="https://wa.me/{{ job.customer_phone }}" target="_blank" class="text-emerald-700 font-mono text-[11px] hover:underline flex items-center gap-1">
+                                <span>💬 {{ job.customer_phone }}</span>
+                            </a>
+                        </td>
 
-        <!-- 5. DELIVERED -->
-        <div class="bg-purple-50/60 p-3.5 rounded-2xl border border-purple-200/60 flex flex-col kanban-col">
-            <div class="flex items-center justify-between mb-3 pb-2 border-b border-purple-200">
-                <span class="font-bold text-xs uppercase tracking-wider text-purple-700 flex items-center gap-1.5">
-                    <span class="w-2 h-2 rounded-full bg-purple-500"></span> Delivered
-                </span>
-                <span class="text-xs font-bold bg-white text-purple-700 px-2 py-0.5 rounded-full shadow-sm">{{ jobs_by_status['DELIVERED']|length }}</span>
-            </div>
-            <div class="space-y-3 flex-1 overflow-y-auto">
-                {% for job in jobs_by_status['DELIVERED'] %}
-                {% include "partials/job_card_item.html" %}
-                {% endfor %}
-            </div>
+                        <!-- Assigned Electrician / Technician -->
+                        <td class="py-3.5 px-3">
+                            {% if job.assigned_technician_name %}
+                            <span class="px-2.5 py-1 rounded-xl bg-slate-100 text-slate-800 font-bold flex items-center gap-1.5 w-max">
+                                <span>🔧 {{ job.assigned_technician_name }}</span>
+                            </span>
+                            {% else %}
+                            <span class="text-slate-400 italic">Unassigned</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Complaints -->
+                        <td class="py-3.5 px-3 max-w-xs">
+                            <span class="line-clamp-2 text-[11px] text-slate-600">
+                                {{ job.custom_complaint_notes or 'General Electrical Checkup' }}
+                            </span>
+                        </td>
+
+                        <!-- 1-Click Status Update Dropdown -->
+                        <td class="py-3.5 px-3">
+                            <form action="/api/job-cards/{{ job.id }}/status" method="POST" class="inline">
+                                <select name="status" onchange="this.form.submit()" class="w-full text-xs font-bold py-1.5 px-2.5 rounded-xl border focus:outline-none transition {% if job.status == 'COMPLETED' %}bg-emerald-50 text-emerald-800 border-emerald-300{% elif job.status == 'IN_PROGRESS' %}bg-amber-50 text-amber-800 border-amber-300{% elif job.status == 'INSPECTION' %}bg-blue-50 text-blue-800 border-blue-300{% elif job.status == 'DELIVERED' %}bg-purple-50 text-purple-800 border-purple-300{% else %}bg-slate-100 text-slate-700 border-slate-300{% endif %}">
+                                    <option value="RECEIVED" {% if job.status == 'RECEIVED' %}selected{% endif %}>📥 Received</option>
+                                    <option value="INSPECTION" {% if job.status == 'INSPECTION' %}selected{% endif %}>🔍 Inspection</option>
+                                    <option value="IN_PROGRESS" {% if job.status == 'IN_PROGRESS' %}selected{% endif %}>⚡ In Progress</option>
+                                    <option value="COMPLETED" {% if job.status == 'COMPLETED' %}selected{% endif %}>✨ Completed (Ready)</option>
+                                    <option value="DELIVERED" {% if job.status == 'DELIVERED' %}selected{% endif %}>🏁 Delivered</option>
+                                </select>
+                            </form>
+                        </td>
+
+                        <!-- Actions -->
+                        <td class="py-3.5 px-3 text-right space-x-1 whitespace-nowrap">
+                            <a href="/job-cards/{{ job.id }}" class="px-2.5 py-1.5 bg-primary-50 text-primary-700 hover:bg-primary-100 font-bold rounded-lg transition inline-block text-[11px]">
+                                Open Card ⚡
+                            </a>
+                            <button onclick="promptDeleteJob('{{ job.id }}')" class="p-1.5 text-slate-400 hover:text-rose-600 transition inline-block" title="Delete with Master PIN">
+                                🗑️
+                            </button>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="7" class="text-center py-10 text-slate-400 text-xs">
+                            <i data-lucide="car" class="w-8 h-8 mx-auto text-slate-300 mb-2"></i>
+                            No vehicle records match this filter.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
     </div>
 </div>
@@ -116,7 +152,6 @@
         </div>
 
         <form action="/api/job-cards" method="POST" class="mt-4 space-y-4 text-xs font-medium text-slate-700">
-            <!-- Vehicle & Customer Details Row -->
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                     <label class="block font-bold text-slate-900 mb-1">Vehicle Reg Number *</label>
@@ -139,14 +174,16 @@
                 </div>
             </div>
 
-            <!-- Technician & Odometer -->
+            <!-- Technician with Leave Indicator & Odometer -->
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                     <label class="block font-bold text-slate-900 mb-1">Assign Technician (Mechanic)</label>
-                    <select name="assigned_technician_id" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-amber-500 focus:outline-none">
+                    <select name="assigned_technician_id" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-amber-500 focus:outline-none font-medium">
                         <option value="">-- Select Technician --</option>
                         {% for tech in technicians %}
-                        <option value="{{ tech.id }}">{{ tech.name }} ({{ tech.role }})</option>
+                        <option value="{{ tech.id }}" {% if tech.is_on_leave %}disabled class="text-rose-500 bg-rose-50"{% endif %}>
+                            {{ tech.name }} ({{ tech.role }}) {% if tech.is_on_leave %}⛔ [ON LEAVE]{% endif %}
+                        </option>
                         {% endfor %}
                     </select>
                 </div>
@@ -158,57 +195,82 @@
 
             <!-- Auto Electrical Complaints Checklist -->
             <div>
-                <label class="block font-bold text-slate-900 mb-2">Common Electrical Complaints (Check all that apply):</label>
+                <label class="block font-bold text-slate-900 mb-2">Electrical Fault Checklist:</label>
                 <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 bg-slate-50 p-3 rounded-2xl border border-slate-200">
                     <label class="flex items-center gap-2 cursor-pointer text-slate-800">
-                        <input type="checkbox" name="complaints" value="Starting Trouble / Starter Clicking" class="rounded text-amber-500 focus:ring-amber-400">
-                        <span>Starter Motor / Starting</span>
+                        <input type="checkbox" name="complaints" value="Starting Trouble / Starter Clicking" class="rounded text-amber-500">
+                        <span>Starter Motor</span>
                     </label>
                     <label class="flex items-center gap-2 cursor-pointer text-slate-800">
-                        <input type="checkbox" name="complaints" value="Alternator / Battery Light Glowing" class="rounded text-amber-500 focus:ring-amber-400">
-                        <span>Alternator / Charging</span>
+                        <input type="checkbox" name="complaints" value="Alternator / Battery Light Glowing" class="rounded text-amber-500">
+                        <span>Alternator Charging</span>
                     </label>
                     <label class="flex items-center gap-2 cursor-pointer text-slate-800">
-                        <input type="checkbox" name="complaints" value="Battery Discharge / Low Voltage" class="rounded text-amber-500 focus:ring-amber-400">
+                        <input type="checkbox" name="complaints" value="Battery Discharge / Low Voltage" class="rounded text-amber-500">
                         <span>Battery Discharge</span>
                     </label>
                     <label class="flex items-center gap-2 cursor-pointer text-slate-800">
-                        <input type="checkbox" name="complaints" value="AC Blower / Cooling Fan Dead" class="rounded text-amber-500 focus:ring-amber-400">
-                        <span>AC Electrical / Blower</span>
+                        <input type="checkbox" name="complaints" value="AC Blower / Cooling Fan Dead" class="rounded text-amber-500">
+                        <span>AC Electricals</span>
                     </label>
                     <label class="flex items-center gap-2 cursor-pointer text-slate-800">
-                        <input type="checkbox" name="complaints" value="Headlight Dim / Relay Cutout Issue" class="rounded text-amber-500 focus:ring-amber-400">
+                        <input type="checkbox" name="complaints" value="Headlight Dim / Relay Cutout Issue" class="rounded text-amber-500">
                         <span>Headlight / Lighting</span>
                     </label>
                     <label class="flex items-center gap-2 cursor-pointer text-slate-800">
-                        <input type="checkbox" name="complaints" value="Horn / Wiper / Power Window" class="rounded text-amber-500 focus:ring-amber-400">
-                        <span>Horn / Wiper / Windows</span>
-                    </label>
-                    <label class="flex items-center gap-2 cursor-pointer text-slate-800">
-                        <input type="checkbox" name="complaints" value="Wiring Short Circuit / Burning Smell" class="rounded text-amber-500 focus:ring-amber-400">
+                        <input type="checkbox" name="complaints" value="Wiring Short Circuit / Burning Smell" class="rounded text-amber-500">
                         <span>Wiring Short Circuit</span>
-                    </label>
-                    <label class="flex items-center gap-2 cursor-pointer text-slate-800">
-                        <input type="checkbox" name="complaints" value="OBD2 ECU Diagnostic Scanning" class="rounded text-amber-500 focus:ring-amber-400">
-                        <span>ECU OBD2 Scan</span>
                     </label>
                 </div>
             </div>
 
             <div>
-                <label class="block font-bold text-slate-900 mb-1">Additional Customer Notes / Complaints</label>
-                <textarea name="custom_complaint_notes" rows="2" placeholder="Specific notes from vehicle owner..." class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-amber-500 focus:outline-none"></textarea>
+                <label class="block font-bold text-slate-900 mb-1">Additional Owner Notes</label>
+                <textarea name="custom_complaint_notes" rows="2" placeholder="Describe customer complaints..." class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500"></textarea>
             </div>
 
             <div class="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
-                <button type="button" onclick="closeModal('new-job-modal')" class="px-4 py-2 text-slate-600 hover:bg-slate-100 font-bold rounded-xl transition">
+                <button type="button" onclick="closeModal('new-job-modal')" class="px-4 py-2 text-slate-600 font-bold rounded-xl transition">
                     Cancel
                 </button>
-                <button type="submit" class="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded-xl shadow-md transition">
+                <button type="submit" class="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black rounded-xl shadow-md transition">
                     ⚡ Create Job Card
                 </button>
             </div>
         </form>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function filterJobTable() {
+        const q = document.getElementById('job-search-input').value.toLowerCase();
+        document.querySelectorAll('.job-row').forEach(row => {
+            row.style.display = row.innerText.toLowerCase().includes(q) ? '' : 'none';
+        });
+    }
+
+    async function promptDeleteJob(jobId) {
+        const pin = prompt("🔐 Enter Master Security PIN to delete this job record:");
+        if (!pin) return;
+        
+        try {
+            const resp = await fetch(`/api/job-cards/${jobId}/delete`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pin: pin })
+            });
+            const data = await resp.json();
+            if (resp.ok && data.success) {
+                showToast("Job record deleted", "success");
+                setTimeout(() => window.location.reload(), 500);
+            } else {
+                showToast(data.detail || "Invalid Master PIN", "error");
+            }
+        } catch (e) {
+            showToast("Delete failed: " + e, "error");
+        }
+    }
+</script>
 {% endblock %}

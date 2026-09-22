@@ -42,19 +42,27 @@
                 </button>
             </div>
 
-            <!-- Customer & Vehicle Info Inputs -->
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50 p-4 rounded-2xl border border-slate-100 text-xs">
-                <div>
-                    <label class="block font-bold text-slate-800 mb-1">Customer Name *</label>
-                    <input type="text" id="bill-cust-name" placeholder="Customer Name" class="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500">
+            <!-- Customer & Vehicle Info Inputs (With Searchable Picklist / Quick Select) -->
+            <div class="space-y-2 bg-slate-50 p-4 rounded-2xl border border-slate-100 text-xs">
+                <div class="flex items-center justify-between mb-1">
+                    <span class="font-bold text-slate-800 uppercase tracking-wider text-[11px]">Customer & Vehicle Details</span>
+                    <button type="button" onclick="openModal('select-customer-pos-modal')" class="text-primary-700 hover:text-primary-800 font-bold flex items-center gap-1">
+                        🔍 Select Existing Customer / Vehicle
+                    </button>
                 </div>
-                <div>
-                    <label class="block font-bold text-slate-800 mb-1">WhatsApp Phone *</label>
-                    <input type="tel" id="bill-cust-phone" placeholder="e.g. 9847012345" class="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500">
-                </div>
-                <div>
-                    <label class="block font-bold text-slate-800 mb-1">Vehicle Reg Number</label>
-                    <input type="text" id="bill-veh-no" placeholder="KL-07-XX-XXXX" class="w-full uppercase font-mono px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500">
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">Customer Name *</label>
+                        <input type="text" id="bill-cust-name" placeholder="Customer Name" class="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500">
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">WhatsApp Phone *</label>
+                        <input type="tel" id="bill-cust-phone" placeholder="e.g. 9847012345" class="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500">
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">Vehicle Reg Number</label>
+                        <input type="text" id="bill-veh-no" placeholder="KL-07-XX-XXXX" class="w-full uppercase font-mono px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500">
+                    </div>
                 </div>
             </div>
 
@@ -64,10 +72,10 @@
                     <h3 class="font-bold text-slate-900 text-xs uppercase tracking-wider">Bill Items (Labor & Parts)</h3>
                     <div class="flex items-center gap-2">
                         <button type="button" onclick="addCustomLaborRow()" class="px-2.5 py-1 bg-amber-100 hover:bg-amber-200 text-amber-900 font-bold text-xs rounded-lg transition">
-                            + Add Labor
+                            + Add Labor Charge
                         </button>
                         <button type="button" onclick="openModal('select-part-pos-modal')" class="px-2.5 py-1 bg-blue-100 hover:bg-blue-200 text-blue-900 font-bold text-xs rounded-lg transition">
-                            + Pick Part from List
+                            📦 Pick Part from List
                         </button>
                     </div>
                 </div>
@@ -121,20 +129,20 @@
                 </div>
 
                 <div class="pt-4 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4">
-                    <div class="flex items-center gap-3">
+                    <div class="flex flex-wrap items-center gap-3">
                         <div>
                             <span class="text-xs text-slate-400 block">Payment Mode:</span>
-                            <select id="pos-payment-mode" class="text-xs font-bold px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none">
+                            <select id="pos-payment-mode" onchange="onPaymentModeChange()" class="text-xs font-bold px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none">
                                 <option value="UPI">📱 UPI / GPay / PhonePe</option>
                                 <option value="CASH">💵 Cash In Hand</option>
                                 <option value="BANK_TRANSFER">🏦 Bank Transfer</option>
                                 <option value="CARD">💳 Card</option>
-                                <option value="KHATA_CREDIT">⏳ Credit / Khata Due</option>
+                                <option value="KHATA_CREDIT">⏳ Credit / Khata Due (Unpaid)</option>
                             </select>
                         </div>
                         <div>
-                            <span class="text-xs text-slate-400 block">Amount Paid (₹):</span>
-                            <input type="number" id="pos-amount-paid" placeholder="Full" class="w-28 text-xs font-bold px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none">
+                            <span class="text-xs text-slate-400 block">Amount Paid Now (₹):</span>
+                            <input type="number" id="pos-amount-paid" placeholder="0.00" class="w-28 text-xs font-bold px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none">
                         </div>
                     </div>
 
@@ -172,12 +180,20 @@
                             <span class="block text-[10px] font-bold {% if inv.payment_status == 'PAID' %}text-emerald-600{% elif inv.payment_status == 'PARTIAL' %}text-amber-600{% else %}text-rose-600{% endif %}">
                                 {{ inv.payment_status }}
                             </span>
+                            {% if inv.balance_due and inv.balance_due > 0 %}
+                            <span class="block text-[10px] font-bold text-rose-500">Due: ₹{{ "{:,.2f}".format(inv.balance_due) }}</span>
+                            {% endif %}
                         </div>
                     </div>
 
                     <div class="pt-2 border-t border-slate-200/60 flex items-center justify-between text-xs">
                         <span class="text-[10px] text-slate-400">{{ inv.invoice_date }}</span>
                         <div class="flex items-center gap-1">
+                            {% if inv.balance_due and inv.balance_due > 0 %}
+                            <button onclick="openRecordPaymentModal('{{ inv.id }}', '{{ inv.invoice_number }}', {{ inv.balance_due }})" class="p-1 rounded bg-amber-100 text-amber-800 hover:bg-amber-200 text-[11px] font-bold" title="Record Installment / Payment">
+                                💰 Pay
+                            </button>
+                            {% endif %}
                             <button onclick="shareInvoiceWhatsApp('{{ inv.id }}')" class="p-1 rounded bg-emerald-100 text-emerald-700 hover:bg-emerald-200" title="WhatsApp Share">
                                 💬
                             </button>
@@ -187,16 +203,21 @@
                             <a href="/api/invoices/{{ inv.id }}/pdf" target="_blank" class="p-1 rounded bg-blue-100 text-blue-700 hover:bg-blue-200" title="PDF">
                                 📄
                             </a>
+                            <button onclick="promptDeleteInvoice('{{ inv.id }}')" class="p-1 rounded bg-rose-50 text-rose-600 hover:bg-rose-100" title="Delete Bill (Master PIN Required)">
+                                🗑️
+                            </button>
                         </div>
                     </div>
                 </div>
+                {% else %}
+                <p class="text-xs text-slate-400 text-center py-8">No invoices recorded yet.</p>
                 {% endfor %}
             </div>
         </div>
     </div>
 </div>
 
-<!-- Modal: Select Part from List -->
+<!-- Modal: Select Part from List (Searchable Picklist) -->
 <div id="select-part-pos-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
     <div class="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-100">
         <div class="flex items-center justify-between pb-3 border-b border-slate-100">
@@ -204,19 +225,80 @@
             <button onclick="closeModal('select-part-pos-modal')" class="text-slate-400 hover:text-slate-700 text-lg font-bold">✕</button>
         </div>
         <div class="mt-4 space-y-3">
-            <input type="text" id="pos-part-search" placeholder="Search part name or category..." oninput="filterPartsList()" class="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500">
+            <input type="text" id="pos-part-search" placeholder="Search part name, category, or barcode..." oninput="filterPartsList()" class="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500">
             <div class="max-h-60 overflow-y-auto divide-y divide-slate-100 text-xs" id="parts-picker-list">
                 {% for p in inventory_items %}
                 <div class="py-2.5 px-3 flex items-center justify-between hover:bg-slate-50 cursor-pointer rounded-lg part-row" onclick="addPartToPOS('{{ p.id }}', '{{ p.part_name }}', '{{ p.barcode }}', '{{ p.hsn_code }}', {{ p.selling_price }}, {{ p.tax_rate }})">
                     <div>
                         <span class="font-bold text-slate-900">{{ p.part_name }}</span>
-                        <span class="block text-[10px] text-slate-400 font-mono">{{ p.barcode }} • Stock: {{ p.stock_qty }}</span>
+                        <span class="block text-[10px] text-slate-400 font-mono">{{ p.barcode }} • Stock: {{ p.stock_qty }} {{ p.unit }}</span>
                     </div>
-                    <span class="font-bold text-primary-700">₹{{ p.selling_price }}</span>
+                    <span class="font-bold text-primary-700">₹{{ "{:,.2f}".format(p.selling_price) }}</span>
                 </div>
                 {% endfor %}
             </div>
         </div>
+    </div>
+</div>
+
+<!-- Modal: Select Existing Customer / Vehicle -->
+<div id="select-customer-pos-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-100">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+            <h3 class="font-bold text-slate-900">🔍 Select Registered Vehicle / Customer</h3>
+            <button onclick="closeModal('select-customer-pos-modal')" class="text-slate-400 hover:text-slate-700 text-lg font-bold">✕</button>
+        </div>
+        <div class="mt-4 space-y-3">
+            <input type="text" id="pos-customer-search" placeholder="Search vehicle reg #, customer name, phone..." oninput="filterCustomerList()" class="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500">
+            <div class="max-h-64 overflow-y-auto divide-y divide-slate-100 text-xs" id="customer-picker-list">
+                {% if customers %}
+                    {% for c in customers %}
+                    <div class="py-2.5 px-3 flex items-center justify-between hover:bg-slate-50 cursor-pointer rounded-lg cust-row" onclick="selectCustomer('{{ c.name }}', '{{ c.phone }}', '{{ c.vehicle_reg_no or '' }}')">
+                        <div>
+                            <span class="font-bold text-slate-900">{{ c.name }}</span>
+                            <span class="block text-[10px] text-slate-500">{{ c.phone }} {% if c.vehicle_reg_no %}• <b class="font-mono text-primary-700">{{ c.vehicle_reg_no }}</b>{% endif %}</span>
+                        </div>
+                        <span class="text-xs text-primary-600 font-bold">Select →</span>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <p class="text-center py-6 text-slate-400 text-xs">No saved customer profiles yet.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Record Payment / Installment -->
+<div id="record-payment-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-100">
+        <h3 class="font-bold text-slate-900 text-sm">💰 Record Payment / Installment</h3>
+        <p id="pay-inv-title" class="text-xs text-slate-500 font-medium mt-0.5 mb-4"></p>
+        
+        <form id="record-payment-form" onsubmit="submitPaymentRecord(event)" class="space-y-3 text-xs">
+            <input type="hidden" id="pay-inv-id">
+            <div>
+                <label class="block font-bold text-slate-800 mb-1">Amount Paid (₹) *</label>
+                <input type="number" step="0.01" id="pay-amount" required class="w-full px-3 py-2 rounded-xl border border-slate-200 font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500">
+            </div>
+            <div>
+                <label class="block font-bold text-slate-800 mb-1">Payment Mode</label>
+                <select id="pay-mode" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                    <option value="UPI">📱 UPI / GPay / PhonePe</option>
+                    <option value="CASH">💵 Cash</option>
+                    <option value="BANK_TRANSFER">🏦 Bank Transfer</option>
+                    <option value="CARD">💳 Card</option>
+                </select>
+            </div>
+            <div>
+                <label class="block font-bold text-slate-800 mb-1">Notes / Transaction Ref</label>
+                <input type="text" id="pay-notes" placeholder="e.g. GPay Ref 202611" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+            </div>
+            <div class="flex justify-end gap-2 pt-3">
+                <button type="button" onclick="closeModal('record-payment-modal')" class="px-3 py-1.5 text-slate-600 font-bold">Cancel</button>
+                <button type="submit" class="px-4 py-2 bg-emerald-600 text-white font-bold rounded-xl shadow">Save Payment</button>
+            </div>
+        </form>
     </div>
 </div>
 {% endblock %}
@@ -240,7 +322,6 @@
     });
 
     function addPartToPOS(id, name, barcode, hsn, price, tax) {
-        // Check if item exists in bill already
         const existing = posItems.find(i => i.item_id === id && i.item_type === 'PART');
         if (existing) {
             existing.quantity += 1;
@@ -283,12 +364,15 @@
         renderPOSTable();
     }
 
+    const availableGSTSlabs = {{ gst_slabs_list | tojson if gst_slabs_list is defined else '["0", "5", "12", "18", "28"]' }};
+
     function renderPOSTable() {
         const tbody = document.getElementById('pos-table-body');
         if (posItems.length === 0) {
             tbody.innerHTML = `
                 <tr id="empty-table-row">
                     <td colspan="8" class="text-center py-8 text-slate-400">
+                        <i data-lucide="scan-line" class="w-8 h-8 mx-auto text-slate-300 mb-2"></i>
                         Scan box barcode or click buttons above to add items to bill.
                     </td>
                 </tr>
@@ -300,6 +384,13 @@
         tbody.innerHTML = posItems.map((item, idx) => {
             const lineTotal = item.quantity * item.unit_price;
             const badgeClass = item.item_type === 'LABOR' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800';
+            
+            const taxOptions = availableGSTSlabs.map(slab => {
+                const sNum = parseFloat(slab);
+                const selected = Math.abs(item.tax_rate - sNum) < 0.1 ? 'selected' : '';
+                return `<option value="${sNum}" ${selected}>${sNum}%</option>`;
+            }).join('');
+
             return `
                 <tr class="hover:bg-slate-50 transition">
                     <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded text-[10px] font-bold ${badgeClass}">${item.item_type}</span></td>
@@ -311,7 +402,11 @@
                     <td class="py-2.5 px-3">
                         <input type="number" step="0.01" value="${item.unit_price}" onchange="updatePrice(${idx}, this.value)" class="w-20 px-1.5 py-1 rounded border border-slate-200 font-bold">
                     </td>
-                    <td class="py-2.5 px-3 text-slate-500">${item.tax_rate}%</td>
+                    <td class="py-2.5 px-3">
+                        <select onchange="updateTax(${idx}, this.value)" class="px-1.5 py-1 rounded border border-slate-200 bg-white text-xs font-semibold text-slate-700">
+                            ${taxOptions}
+                        </select>
+                    </td>
                     <td class="py-2.5 px-3 text-right font-bold text-slate-900">₹${lineTotal.toFixed(2)}</td>
                     <td class="py-2.5 px-3 text-center">
                         <button onclick="removePOSItem(${idx})" class="text-rose-500 hover:text-rose-700 font-bold">✕</button>
@@ -330,6 +425,11 @@
 
     function updatePrice(idx, val) {
         posItems[idx].unit_price = parseFloat(val) || 0;
+        renderPOSTable();
+    }
+
+    function updateTax(idx, val) {
+        posItems[idx].tax_rate = parseFloat(val) || 0;
         renderPOSTable();
     }
 
@@ -356,11 +456,24 @@
         document.getElementById('pos-tax-total').innerText = `₹${taxTotal.toFixed(2)}`;
         document.getElementById('pos-grand-total').innerText = `₹${grandTotal.toFixed(2)}`;
 
-        // Default amount paid to grand total if empty
         const paidField = document.getElementById('pos-amount-paid');
-        if (!paidField.value || paidField.value === "0") {
+        const mode = document.getElementById('pos-payment-mode').value;
+        if (mode === 'KHATA_CREDIT') {
+            paidField.placeholder = "0.00";
+        } else if (!paidField.value) {
             paidField.placeholder = grandTotal.toFixed(2);
         }
+    }
+
+    function onPaymentModeChange() {
+        const mode = document.getElementById('pos-payment-mode').value;
+        const paidField = document.getElementById('pos-amount-paid');
+        if (mode === 'KHATA_CREDIT') {
+            paidField.value = "0.00";
+        } else {
+            paidField.value = "";
+        }
+        recalculateTotals();
     }
 
     async function submitPOSInvoice() {
@@ -386,7 +499,7 @@
         });
         const grandTotal = Math.max(0, (laborTotal + partsTotal + taxTotal) - discount);
         const amountPaidInput = document.getElementById('pos-amount-paid').value.trim();
-        const amountPaid = amountPaidInput ? parseFloat(amountPaidInput) : grandTotal;
+        const amountPaid = amountPaidInput ? parseFloat(amountPaidInput) : (paymentMode === 'KHATA_CREDIT' ? 0.0 : grandTotal);
 
         const payload = {
             customer_name: customerName,
@@ -435,6 +548,77 @@
         document.querySelectorAll('.part-row').forEach(row => {
             row.style.display = row.innerText.toLowerCase().includes(q) ? 'flex' : 'none';
         });
+    }
+
+    function filterCustomerList() {
+        const q = document.getElementById('pos-customer-search').value.toLowerCase();
+        document.querySelectorAll('.cust-row').forEach(row => {
+            row.style.display = row.innerText.toLowerCase().includes(q) ? 'flex' : 'none';
+        });
+    }
+
+    function selectCustomer(name, phone, vehNo) {
+        document.getElementById('bill-cust-name').value = name;
+        document.getElementById('bill-cust-phone').value = phone;
+        if (vehNo) {
+            document.getElementById('bill-veh-no').value = vehNo;
+        }
+        closeModal('select-customer-pos-modal');
+    }
+
+    function openRecordPaymentModal(invoiceId, invoiceNumber, balanceDue) {
+        document.getElementById('pay-inv-id').value = invoiceId;
+        document.getElementById('pay-inv-title').innerText = `Invoice #${invoiceNumber} (Outstanding Due: ₹${balanceDue.toFixed(2)})`;
+        document.getElementById('pay-amount').value = balanceDue.toFixed(2);
+        openModal('record-payment-modal');
+    }
+
+    async function submitPaymentRecord(e) {
+        e.preventDefault();
+        const invoiceId = document.getElementById('pay-inv-id').value;
+        const amount = parseFloat(document.getElementById('pay-amount').value) || 0;
+        const mode = document.getElementById('pay-mode').value;
+        const notes = document.getElementById('pay-notes').value;
+
+        try {
+            const resp = await fetch(`/api/invoices/${invoiceId}/record-payment`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ amount: amount, payment_mode: mode, notes: notes })
+            });
+            const data = await resp.json();
+            if (resp.ok && data.success) {
+                showToast("Payment recorded successfully", "success");
+                closeModal('record-payment-modal');
+                setTimeout(() => window.location.reload(), 600);
+            } else {
+                showToast(data.detail || "Payment record failed", "error");
+            }
+        } catch (err) {
+            showToast("Error: " + err, "error");
+        }
+    }
+
+    async function promptDeleteInvoice(invoiceId) {
+        const pin = prompt("🔐 Enter Master Security PIN (default: 1234) to delete this bill:");
+        if (!pin) return;
+
+        try {
+            const resp = await fetch(`/api/invoices/${invoiceId}/delete`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pin: pin })
+            });
+            const data = await resp.json();
+            if (resp.ok && data.success) {
+                showToast("Invoice deleted & stock restored", "success");
+                setTimeout(() => window.location.reload(), 600);
+            } else {
+                showToast(data.detail || "Invalid Master PIN", "error");
+            }
+        } catch (e) {
+            showToast("Delete failed: " + e, "error");
+        }
     }
 
     async function shareInvoiceWhatsApp(invoiceId) {
