@@ -161,10 +161,12 @@ def get_session_user(request: Request) -> Optional[dict]:
         return None
     conn = db.get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, username, role, full_name, email, phone, whatsapp_mobile FROM users WHERE username = ? AND status = 'ACTIVE'", (username,))
+    cursor.execute("SELECT id, username, role, full_name, email, phone, whatsapp_mobile, permissions FROM users WHERE username = ? AND status = 'ACTIVE'", (username,))
     row = cursor.fetchone()
     conn.close()
     return dict(row) if row else None
+
+templates.env.globals["get_session_user"] = get_session_user
 
 # Base URL for public links
 APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:8000")
@@ -824,8 +826,14 @@ async def save_or_update_pos_invoice(payload: Dict[str, Any], invoice_id: Option
         igst_total = 0.0
         
     discount = float(payload.get("discount_amount", 0.0))
-    grand_total = max(0.0, (subtotal_labor + subtotal_parts + total_tax) - discount)
-    amount_paid = float(payload.get("amount_paid", grand_total))
+    raw_grand_total = max(0.0, (subtotal_labor + subtotal_parts + total_tax) - discount)
+    rounded_grand_total = float(round(raw_grand_total))
+    round_off = round(rounded_grand_total - raw_grand_total, 2)
+    grand_total = rounded_grand_total
+
+    # Amount paid: if passed, use it; else default to rounded grand total
+    amount_paid_raw = payload.get("amount_paid")
+    amount_paid = float(amount_paid_raw) if (amount_paid_raw is not None and str(amount_paid_raw).strip() != "") else grand_total
     balance_due = max(0.0, grand_total - amount_paid)
     payment_status = "PAID" if balance_due <= 0 else ("PARTIAL" if amount_paid > 0 else "UNPAID")
     
@@ -868,7 +876,7 @@ async def save_or_update_pos_invoice(payload: Dict[str, Any], invoice_id: Option
             customer_name = ?, customer_phone = ?, vehicle_reg_no = ?,
             subtotal_labor = ?, subtotal_parts = ?, taxable_subtotal = ?,
             cgst_total = ?, sgst_total = ?, igst_total = ?, tax_total = ?,
-            discount_amount = ?, grand_total = ?, amount_paid = ?, balance_due = ?,
+            discount_amount = ?, round_off = ?, grand_total = ?, amount_paid = ?, balance_due = ?,
             payment_status = ?, payment_mode = ?, is_interstate = ?,
             upi_payment_link = ?, updated_at = ?
         WHERE id = ?
@@ -877,7 +885,7 @@ async def save_or_update_pos_invoice(payload: Dict[str, Any], invoice_id: Option
             payload.get("vehicle_reg_no", ""),
             subtotal_labor, subtotal_parts, taxable_subtotal,
             cgst_total, sgst_total, igst_total, total_tax,
-            discount, grand_total, amount_paid, balance_due,
+            discount, round_off, grand_total, amount_paid, balance_due,
             payment_status, payload.get("payment_mode", "UPI"), is_interstate,
             upi_link, now_ist, editing_id
         ))
@@ -903,9 +911,9 @@ async def save_or_update_pos_invoice(payload: Dict[str, Any], invoice_id: Option
             customer_name, customer_phone, vehicle_reg_no,
             subtotal_labor, subtotal_parts, taxable_subtotal,
             cgst_total, sgst_total, igst_total, tax_total, discount_amount,
-            grand_total, amount_paid, balance_due, payment_status, payment_mode,
+            round_off, grand_total, amount_paid, balance_due, payment_status, payment_mode,
             is_interstate, upi_payment_link, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             inv_id, inv_number, today_str, payload.get("invoice_type", "JOB_SERVICE" if job_card_id else "COUNTER_SALE"),
             job_card_id, job_number,
@@ -913,7 +921,7 @@ async def save_or_update_pos_invoice(payload: Dict[str, Any], invoice_id: Option
             payload.get("vehicle_reg_no", ""),
             subtotal_labor, subtotal_parts, taxable_subtotal,
             cgst_total, sgst_total, igst_total, total_tax, discount,
-            grand_total, amount_paid, balance_due, payment_status,
+            round_off, grand_total, amount_paid, balance_due, payment_status,
             payload.get("payment_mode", "UPI"), is_interstate, upi_link, now_ist
         ))
         
@@ -936,18 +944,33 @@ async def save_or_update_pos_invoice(payload: Dict[str, Any], invoice_id: Option
         inv_item_id = f"ii_{uuid.uuid4().hex[:8]}"
         u_price = float(i.get("unit_price") or 0.0)
         u_qty = int(i.get("quantity") or 1)
-        line_total = u_price * u_qty
+        line_base = u_price * u_qty
         t_rate = float(i.get("tax_rate") or 0.0)
+        line_tax = line_base * (t_rate / 100.0)
+        line_total = line_base + line_tax
+
+        unit_str = str(i.get("unit") or ("hrs" if i.get("item_type") == "LABOR" else "pcs")).lower()
+        part_no = str(i.get("part_number") or "").strip()
+
+        if is_interstate:
+            c_rate, s_rate, i_rate = 0.0, 0.0, t_rate
+            c_amt, s_amt, i_amt = 0.0, 0.0, line_tax
+        else:
+            c_rate, s_rate, i_rate = (t_rate / 2.0), (t_rate / 2.0), 0.0
+            c_amt, s_amt, i_amt = (line_tax / 2.0), (line_tax / 2.0), 0.0
+
         cursor.execute("""
         INSERT INTO invoice_items (
             id, invoice_id, item_type, item_id, barcode, name, hsn_sac,
-            quantity, unit_price, tax_rate, taxable_amount, total_price
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            quantity, unit_price, tax_rate, taxable_amount, total_price,
+            unit, part_number, cgst_rate, sgst_rate, igst_rate, cgst_amount, sgst_amount, igst_amount
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             inv_item_id, inv_id, i.get("item_type", "PART"), i.get("item_id"),
             i.get("barcode"), i.get("name", "Item"), i.get("hsn_sac", "8536"),
             u_qty, u_price, t_rate,
-            line_total, line_total
+            line_base, line_total,
+            unit_str, part_no, c_rate, s_rate, i_rate, c_amt, s_amt, i_amt
         ))
         
         if i.get("item_id") and not i.get("already_deducted"):
@@ -1358,6 +1381,7 @@ async def barcode_labels_page(request: Request):
 async def add_inventory_item(
     part_name: str = Form(...),
     barcode: str = Form(...),
+    part_number: Optional[str] = Form(None),
     category: str = Form("Relays & Fuses"),
     stock_qty: int = Form(10),
     cost_price: float = Form(0.0),
@@ -1369,15 +1393,16 @@ async def add_inventory_item(
     conn = db.get_db_connection()
     cursor = conn.cursor()
     item_id = f"item_{uuid.uuid4().hex[:8]}"
+    clean_pn = (part_number or "").strip().upper()
     cursor.execute("""
     INSERT INTO inventory_items (
-        id, part_name, sku, barcode, category, stock_qty, min_stock_alert,
+        id, part_name, part_number, sku, barcode, category, stock_qty, min_stock_alert,
         cost_price, selling_price, tax_rate, hsn_code, unit, warranty_months,
         created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-    """, (item_id, part_name, barcode, barcode, category, stock_qty, 5, cost_price, selling_price, tax_rate, hsn_code, "pcs", warranty_months))
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+    """, (item_id, part_name, clean_pn, barcode, barcode, category, stock_qty, 5, cost_price, selling_price, tax_rate, hsn_code, "pcs", warranty_months))
     
-    db.log_audit("ADD_INVENTORY_PART", "inventory_items", item_id, f"Added part: {part_name} (Barcode: {barcode})", cursor=cursor)
+    db.log_audit("ADD_INVENTORY_PART", "inventory_items", item_id, f"Added part: {part_name} (PN: {clean_pn}, Barcode: {barcode})", cursor=cursor)
     conn.commit()
     conn.close()
     return RedirectResponse(url="/inventory", status_code=303)
@@ -1386,8 +1411,13 @@ async def add_inventory_item(
 async def adjust_inventory_stock(
     item_id: str = Form(...),
     action_type: str = Form("PURCHASE"),
-    change_qty: int = Form(...)
+    change_qty: int = Form(...),
+    pin: str = Form("1234")
 ):
+    workshop = get_current_workshop()
+    if not verify_master_pin(pin, workshop.get("master_pin", "1234")):
+        raise HTTPException(status_code=403, detail="Invalid Master Security PIN. Stock adjustment not authorized.")
+
     conn = db.get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT stock_qty, part_name, barcode, cost_price FROM inventory_items WHERE id = ?", (item_id,))
@@ -1401,11 +1431,13 @@ async def adjust_inventory_stock(
     cursor.execute("UPDATE inventory_items SET stock_qty = ?, updated_at = datetime('now') WHERE id = ?", (new_qty, item_id))
     
     log_id = f"stk_{uuid.uuid4().hex[:8]}"
+    now_ist = get_ist_now_str()
     cursor.execute("""
     INSERT INTO stock_logs (id, item_id, part_name, barcode, change_qty, new_stock_qty, action_type, unit_cost, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-    """, (log_id, item_id, row["part_name"], row["barcode"], change_qty, new_qty, action_type, row["cost_price"]))
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (log_id, item_id, row["part_name"], row["barcode"], change_qty, new_qty, action_type, row["cost_price"], now_ist))
     
+    db.log_audit("ADJUST_STOCK", "inventory_items", item_id, f"Adjusted stock for {row['part_name']} by {change_qty:+d} (New: {new_qty}) using Master PIN", cursor=cursor)
     conn.commit()
     conn.close()
     return RedirectResponse(url="/inventory", status_code=303)
@@ -2089,6 +2121,9 @@ async def update_workshop_profile(
     bank_branch: Optional[str] = Form(None),
     whatsapp_lang: str = Form("en"),
     master_pin: str = Form("1234"),
+    default_state: str = Form("Kerala (32)"),
+    tax_regime: str = Form("REGULAR_GST"),
+    round_off_enabled: int = Form(1),
     terms: Optional[str] = Form(None)
 ):
     conn = db.get_db_connection()
@@ -2097,9 +2132,11 @@ async def update_workshop_profile(
     UPDATE workshop_profile SET
         name = ?, subtitle = ?, phone = ?, email = ?, address = ?, gstin = ?,
         upi_id = ?, bank_name = ?, bank_account_no = ?, bank_ifsc = ?, bank_branch = ?,
-        language = ?, master_pin = ?, terms = ?, updated_at = datetime('now')
+        language = ?, master_pin = ?, terms = ?,
+        default_state = ?, tax_regime = ?, round_off_enabled = ?,
+        updated_at = datetime('now')
     WHERE id = 'default'
-    """, (name, subtitle, phone, email, address, gstin, upi_id, bank_name, bank_account_no, bank_ifsc, bank_branch, whatsapp_lang, master_pin, terms))
+    """, (name, subtitle, phone, email, address, gstin, upi_id, bank_name, bank_account_no, bank_ifsc, bank_branch, whatsapp_lang, master_pin, terms, default_state, tax_regime, round_off_enabled))
     db.log_audit("UPDATE_PROFILE", "workshop_profile", "default", f"Updated garage profile ({name})", cursor=cursor)
     conn.commit()
     conn.close()

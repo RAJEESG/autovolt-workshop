@@ -143,14 +143,47 @@
             <div class="grid grid-cols-2 gap-3">
                 <div>
                     <label class="block text-slate-300 font-bold mb-1">Role *</label>
-                    <select name="role" class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
-                        <option value="ADMIN">Workshop Admin</option>
-                        <option value="STAFF" selected>Workshop Staff</option>
+                    <select name="role" id="user-role-select" onchange="autoSelectRolePerms(this.value)" class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
+                        <option value="ADMIN">Workshop Admin / Owner (All Access)</option>
+                        <option value="CASHIER" selected>Billing Cashier / Front Desk</option>
+                        <option value="STOREKEEPER">Store Keeper / Inventory Manager</option>
+                        <option value="STAFF">Standard Workshop Staff</option>
                     </select>
                 </div>
                 <div>
                     <label class="block text-slate-300 font-bold mb-1">Password *</label>
                     <input type="password" name="password" required placeholder="••••••••" class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
+                </div>
+            </div>
+
+            <!-- Granular Permissions -->
+            <div class="p-3 bg-slate-950/80 rounded-2xl border border-slate-800 space-y-2">
+                <span class="block text-slate-300 font-bold text-[11px] uppercase tracking-wider">Granular Staff Permissions</span>
+                <div class="grid grid-cols-2 gap-2 text-slate-300 text-[11px]">
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" name="permissions" value="can_bill" id="perm-bill" checked class="rounded bg-slate-800 border-slate-700 text-hq-500">
+                        <span>🧾 Billing & Invoicing</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" name="permissions" value="can_inventory" id="perm-inv" class="rounded bg-slate-800 border-slate-700 text-hq-500">
+                        <span>📦 Parts & Inventory</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" name="permissions" value="can_purchases" id="perm-pur" class="rounded bg-slate-800 border-slate-700 text-hq-500">
+                        <span>📥 Purchases & Stock In</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" name="permissions" value="can_wages" id="perm-wages" class="rounded bg-slate-800 border-slate-700 text-hq-500">
+                        <span>👨‍🔧 Technicians & Wages</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" name="permissions" value="can_reports" id="perm-reports" class="rounded bg-slate-800 border-slate-700 text-hq-500">
+                        <span>📊 Finance & CA Reports</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" name="permissions" value="can_settings" id="perm-settings" class="rounded bg-slate-800 border-slate-700 text-hq-500">
+                        <span>⚙️ Workshop Settings</span>
+                    </label>
                 </div>
             </div>
 
@@ -197,6 +230,27 @@ function openResetModal(userId, username, wa) {
     document.getElementById('reset_username').value = username;
     document.getElementById('reset_user_label').innerText = '@' + username;
     document.getElementById('reset-modal').classList.remove('hidden');
+}
+
+function autoSelectRolePerms(role) {
+    const bill = document.getElementById('perm-bill');
+    const inv = document.getElementById('perm-inv');
+    const pur = document.getElementById('perm-pur');
+    const wages = document.getElementById('perm-wages');
+    const reports = document.getElementById('perm-reports');
+    const settings = document.getElementById('perm-settings');
+
+    if (role === 'ADMIN') {
+        bill.checked = inv.checked = pur.checked = wages.checked = reports.checked = settings.checked = true;
+    } else if (role === 'CASHIER') {
+        bill.checked = true;
+        inv.checked = pur.checked = wages.checked = reports.checked = settings.checked = false;
+    } else if (role === 'STOREKEEPER') {
+        inv.checked = pur.checked = true;
+        bill.checked = wages.checked = reports.checked = settings.checked = false;
+    } else {
+        bill.checked = inv.checked = pur.checked = wages.checked = reports.checked = settings.checked = false;
+    }
 }
 </script>
 {% endblock %}

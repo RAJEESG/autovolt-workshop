@@ -265,7 +265,7 @@
                 <label class="block font-bold text-slate-900 mb-1">Select Inventory Part *</label>
                 <select name="item_id" required class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
                     {% for item in inventory_items %}
-                    <option value="{{ item.id }}" data-cost="{{ item.cost_price }}">{{ item.part_name }} (Stock: {{ item.stock_qty }})</option>
+                    <option value="{{ item.id }}" data-cost="{{ item.cost_price }}">{{ item.part_name }}{% if item.part_number %} [PN: {{ item.part_number }}]{% endif %} (Stock: {{ item.stock_qty }})</option>
                     {% endfor %}
                 </select>
             </div>
@@ -304,7 +304,7 @@
 <script>
     const availableInventory = [
         {% for itm in inventory_items %}
-        { id: "{{ itm.id }}", name: "{{ itm.part_name }}", barcode: "{{ itm.barcode }}", cost: {{ itm.cost_price }}, tax_rate: {{ itm.tax_rate or 18.0 }} },
+        { id: "{{ itm.id }}", name: "{{ itm.part_name }}", part_number: "{{ itm.part_number or '' }}", barcode: "{{ itm.barcode }}", cost: {{ itm.cost_price }}, tax_rate: {{ itm.tax_rate or 18.0 }} },
         {% endfor %}
     ];
 
@@ -363,7 +363,7 @@
             tr.innerHTML = `
                 <td class="py-2 px-2">
                     <select onchange="updatePurchaseItemPart(${idx}, this.value)" class="w-full text-xs px-2 py-1.5 rounded-lg border border-slate-200">
-                        ${availableInventory.map(inv => `<option value="${inv.id}" ${inv.id === r.item_id ? 'selected' : ''}>${inv.name}</option>`).join('')}
+                        ${availableInventory.map(inv => `<option value="${inv.id}" ${inv.id === r.item_id ? 'selected' : ''}>${inv.name}${inv.part_number ? ` [PN: ${inv.part_number}]` : ''}</option>`).join('')}
                     </select>
                 </td>
                 <td class="py-2 px-2">

@@ -64,6 +64,17 @@
             </div>
         </div>
 
+        {% set current_user = current_user or (get_session_user(request) if get_session_user is defined else None) %}
+        {% set user_role = current_user.role if current_user else 'OWNER' %}
+        {% set user_perms = (current_user.permissions or '').split(',') if current_user and current_user.permissions else [] %}
+        {% set is_admin = (not current_user) or (user_role in ['OWNER', 'ADMIN', 'SUPER_ADMIN']) %}
+        {% set can_bill = is_admin or ('can_bill' in user_perms) or (user_role == 'CASHIER') %}
+        {% set can_inv = is_admin or ('can_inventory' in user_perms) or (user_role == 'STOREKEEPER') %}
+        {% set can_pur = is_admin or ('can_purchases' in user_perms) or (user_role == 'STOREKEEPER') %}
+        {% set can_wages = is_admin or ('can_wages' in user_perms) %}
+        {% set can_reports = is_admin or ('can_reports' in user_perms) %}
+        {% set can_settings = is_admin or ('can_settings' in user_perms) %}
+
         <!-- Navigation Links -->
         <nav class="space-y-1 text-sm font-medium flex-1">
             <a href="/" class="flex items-center gap-3 px-3 py-2 rounded-xl transition {% if active_page == 'dashboard' %}bg-primary-600 text-white font-semibold shadow-md shadow-primary-600/30{% else %}hover:bg-slate-800 text-slate-300 hover:text-white{% endif %}">
@@ -77,12 +88,15 @@
                 <span class="ml-auto bg-amber-500/20 text-amber-300 text-[10px] px-2 py-0.5 rounded-full font-bold">List</span>
             </a>
 
+            {% if can_bill %}
             <a href="/billing" class="flex items-center gap-3 px-3 py-2 rounded-xl transition {% if active_page == 'billing' %}bg-primary-600 text-white font-semibold shadow-md shadow-primary-600/30{% else %}hover:bg-slate-800 text-slate-300 hover:text-white{% endif %}">
                 <i data-lucide="receipt" class="w-5 h-5"></i>
                 <span>Billing & POS</span>
                 <span class="ml-auto bg-emerald-500/20 text-emerald-400 text-[10px] px-1.5 py-0.5 rounded font-mono">SCAN</span>
             </a>
+            {% endif %}
 
+            {% if can_inv %}
             <a href="/inventory" class="flex items-center gap-3 px-3 py-2 rounded-xl transition {% if active_page == 'inventory' %}bg-primary-600 text-white font-semibold shadow-md shadow-primary-600/30{% else %}hover:bg-slate-800 text-slate-300 hover:text-white{% endif %}">
                 <i data-lucide="boxes" class="w-5 h-5"></i>
                 <span>Parts & Inventory</span>
@@ -92,17 +106,21 @@
                 <i data-lucide="barcode" class="w-5 h-5"></i>
                 <span>Barcode Stickers</span>
             </a>
+            {% endif %}
 
+            {% if can_wages %}
             <a href="/technicians" class="flex items-center gap-3 px-3 py-2 rounded-xl transition {% if active_page == 'technicians' %}bg-primary-600 text-white font-semibold shadow-md shadow-primary-600/30{% else %}hover:bg-slate-800 text-slate-300 hover:text-white{% endif %}">
                 <i data-lucide="users-round" class="w-5 h-5"></i>
                 <span>Staff, Wages & Leave</span>
             </a>
+            {% endif %}
 
             <a href="/customers" class="flex items-center gap-3 px-3 py-2 rounded-xl transition {% if active_page == 'customers' %}bg-primary-600 text-white font-semibold shadow-md shadow-primary-600/30{% else %}hover:bg-slate-800 text-slate-300 hover:text-white{% endif %}">
                 <i data-lucide="car" class="w-5 h-5"></i>
                 <span>Vehicle Directory</span>
             </a>
 
+            {% if can_pur %}
             <div class="pt-2 pb-1 border-t border-slate-800">
                 <span class="text-[10px] uppercase tracking-wider text-slate-500 font-bold px-3">Purchases & Returns</span>
             </div>
@@ -116,7 +134,9 @@
                 <i data-lucide="corner-down-left" class="w-5 h-5"></i>
                 <span>Sales Returns</span>
             </a>
+            {% endif %}
 
+            {% if can_reports %}
             <div class="pt-2 pb-1 border-t border-slate-800">
                 <span class="text-[10px] uppercase tracking-wider text-slate-500 font-bold px-3">Finance & CA Audit</span>
             </div>
@@ -141,7 +161,9 @@
                 <span>CA Audit & GSTR-1</span>
                 <span class="ml-auto bg-blue-500/20 text-blue-300 text-[10px] px-1.5 py-0.5 rounded font-bold">FY</span>
             </a>
+            {% endif %}
 
+            {% if can_settings %}
             <div class="pt-2 pb-1 border-t border-slate-800">
                 <span class="text-[10px] uppercase tracking-wider text-slate-500 font-bold px-3">System & Control</span>
             </div>
@@ -155,6 +177,7 @@
                 <i data-lucide="settings" class="w-5 h-5"></i>
                 <span>Workshop Settings</span>
             </a>
+            {% endif %}
         </nav>
 
         <!-- User Profile & Sign Out -->
@@ -164,8 +187,8 @@
                     👤
                 </div>
                 <div>
-                    <span class="font-bold text-white block">{{ current_user.username if current_user else 'Admin' }}</span>
-                    <span class="text-[10px] text-slate-400 uppercase">{{ current_user.role if current_user else 'OWNER' }}</span>
+                    <span class="font-bold text-white block">{{ current_user.full_name or current_user.username if current_user else 'Admin' }}</span>
+                    <span class="text-[10px] text-amber-400 uppercase font-mono font-bold">{{ current_user.role if current_user else 'OWNER' }}</span>
                 </div>
             </div>
             <a href="/logout" class="p-1.5 rounded-lg bg-slate-800 text-rose-400 hover:text-rose-300 hover:bg-slate-700 transition" title="Sign Out">

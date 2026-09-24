@@ -285,6 +285,7 @@ def init_db():
     CREATE TABLE IF NOT EXISTS inventory_items (
         id TEXT PRIMARY KEY,
         part_name TEXT NOT NULL,
+        part_number TEXT DEFAULT '',
         sku TEXT,
         barcode TEXT NOT NULL UNIQUE,
         category TEXT DEFAULT 'Relays & Fuses',
@@ -624,6 +625,19 @@ def run_schema_migrations(cursor, conn):
         ("purchase_bills", "igst_amount", "REAL DEFAULT 0.0"),
         ("purchase_bills", "is_interstate", "INTEGER DEFAULT 0"),
         ("purchase_bills", "supplier_state", "TEXT DEFAULT 'Kerala (32)'"),
+        ("inventory_items", "part_number", "TEXT DEFAULT ''"),
+        ("invoices", "round_off", "REAL DEFAULT 0.0"),
+        ("invoice_items", "unit", "TEXT DEFAULT 'pcs'"),
+        ("invoice_items", "part_number", "TEXT DEFAULT ''"),
+        ("invoice_items", "cgst_rate", "REAL DEFAULT 0.0"),
+        ("invoice_items", "sgst_rate", "REAL DEFAULT 0.0"),
+        ("invoice_items", "igst_rate", "REAL DEFAULT 0.0"),
+        ("invoice_items", "igst_amount", "REAL DEFAULT 0.0"),
+        ("workshop_profile", "default_state", "TEXT DEFAULT 'Kerala (32)'"),
+        ("workshop_profile", "default_gst_type", "TEXT DEFAULT 'INTRA_STATE'"),
+        ("workshop_profile", "tax_regime", "TEXT DEFAULT 'REGULAR_GST'"),
+        ("workshop_profile", "round_off_enabled", "INTEGER DEFAULT 1"),
+        ("users", "permissions", "TEXT DEFAULT ''"),
     ]
 
     for table, col, col_type in migrations:

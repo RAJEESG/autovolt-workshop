@@ -94,20 +94,16 @@
             <!-- Customer & Vehicle Info Inputs (With Searchable Picklist / Quick Select) -->
             <div class="space-y-3 bg-slate-50 p-4 rounded-2xl border border-slate-100 text-xs">
                 <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200/60 pb-2">
-                    <span class="font-bold text-slate-800 uppercase tracking-wider text-[11px]">Customer, Vehicle & GST Details</span>
                     <div class="flex items-center gap-2">
-                        <!-- GST Supply Type Toggle (Kerala Intra vs Tamil Nadu Inter) -->
-                        <div class="flex items-center gap-1.5 bg-white border border-slate-200 px-2.5 py-1 rounded-xl shadow-xs">
-                            <span class="text-slate-500 font-bold text-[11px]">GST Type:</span>
-                            <select id="pos-gst-type" onchange="onGstTypeChange()" class="bg-transparent font-bold text-primary-700 text-xs focus:outline-none cursor-pointer">
-                                <option value="INTRA_STATE" {% if not editing_invoice or not editing_invoice.is_interstate %}selected{% endif %}>🏛️ Kerala / Intra-State (CGST + SGST)</option>
-                                <option value="INTER_STATE" {% if editing_invoice and editing_invoice.is_interstate %}selected{% endif %}>🚛 Tamil Nadu / Inter-State (IGST)</option>
-                            </select>
-                        </div>
-                        <button type="button" onclick="openModal('select-customer-pos-modal')" class="text-primary-700 hover:text-primary-800 font-bold flex items-center gap-1 text-[11px] bg-primary-50 px-2.5 py-1 rounded-xl border border-primary-200">
-                            🔍 Select Existing
+                        <span class="font-bold text-slate-800 uppercase tracking-wider text-[11px]">Customer & Vehicle Details</span>
+                        <input type="hidden" id="pos-gst-type" value="{% if editing_invoice and editing_invoice.is_interstate %}INTER_STATE{% else %}INTRA_STATE{% endif %}">
+                        <button type="button" onclick="toggleGstInterstate()" id="btn-gst-toggle" class="text-[10px] text-slate-500 hover:text-indigo-600 underline font-medium">
+                            {% if editing_invoice and editing_invoice.is_interstate %}Switch to Kerala (CGST+SGST){% else %}Out-of-state Customer (IGST)?{% endif %}
                         </button>
                     </div>
+                    <button type="button" onclick="openModal('select-customer-pos-modal')" class="text-primary-700 hover:text-primary-800 font-bold flex items-center gap-1 text-[11px] bg-primary-50 px-2.5 py-1 rounded-xl border border-primary-200 w-max">
+                        🔍 Select Existing
+                    </button>
                 </div>
                 <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
@@ -147,17 +143,18 @@
                                 <th class="py-2.5 px-3">Type</th>
                                 <th class="py-2.5 px-3">Item / Service Description</th>
                                 <th class="py-2.5 px-3">HSN</th>
-                                <th class="py-2.5 px-3 w-16">Qty</th>
-                                <th class="py-2.5 px-3 w-24">Rate (₹)</th>
-                                <th class="py-2.5 px-3 w-16">Tax %</th>
+                                <th class="py-2.5 px-3 w-16">Unit</th>
+                                <th class="py-2.5 px-3 w-20">Rate (₹)</th>
+                                <th class="py-2.5 px-3 w-14">Qty</th>
+                                <th class="py-2.5 px-3 w-32">Tax (CGST/SGST)</th>
                                 <th class="py-2.5 px-3 text-right w-24">Total (₹)</th>
-                                <th class="py-2.5 px-3 text-center w-10">✕</th>
+                                <th class="py-2.5 px-3 text-center w-8">✕</th>
                             </tr>
                         </thead>
                         <tbody id="pos-table-body" class="divide-y divide-slate-100 font-medium text-slate-800">
                             <!-- Dynamic Rows Inserted Here -->
                             <tr id="empty-table-row">
-                                <td colspan="8" class="text-center py-8 text-slate-400">
+                                <td colspan="9" class="text-center py-8 text-slate-400">
                                     <i data-lucide="scan-line" class="w-8 h-8 mx-auto text-slate-300 mb-2"></i>
                                     Scan box barcode or click buttons above to add items to bill.
                                 </td>
@@ -169,7 +166,7 @@
 
             <!-- Billing Calculations & Submit Section -->
             <div class="bg-slate-900 text-white p-5 rounded-3xl space-y-4 shadow-lg">
-                <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 text-xs">
+                <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 text-xs items-center">
                     <div>
                         <label class="block text-slate-400 mb-1">Labor Subtotal</label>
                         <span class="text-base font-bold text-amber-400" id="pos-labor-total">₹0.00</span>
@@ -194,6 +191,10 @@
                         <label class="block text-slate-400 mb-1">Discount (₹)</label>
                         <input type="number" id="pos-discount" value="{% if editing_invoice %}{{ editing_invoice.discount_amount }}{% else %}0{% endif %}" min="0" oninput="recalculateTotals()" class="w-full px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-700 text-white focus:outline-none text-xs">
                     </div>
+                    <div>
+                        <label class="block text-slate-400 mb-1">Round Off (₹)</label>
+                        <span class="text-sm font-bold text-slate-300 font-mono" id="pos-round-off">₹0.00</span>
+                    </div>
                 </div>
 
                 <div class="pt-4 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4">
@@ -209,15 +210,21 @@
                             </select>
                         </div>
                         <div>
-                            <span class="text-xs text-slate-400 block">Amount Paid Now (₹):</span>
-                            <input type="number" id="pos-amount-paid" value="{% if editing_invoice %}{{ editing_invoice.amount_paid }}{% endif %}" placeholder="0.00" class="w-28 text-xs font-bold px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none">
+                            <div class="flex items-center justify-between gap-1 mb-1">
+                                <span class="text-[11px] text-slate-400">Amount Paid Now (₹):</span>
+                                <div class="flex items-center gap-1">
+                                    <button type="button" onclick="setFullPaid()" class="text-[10px] bg-emerald-600/80 hover:bg-emerald-500 text-white font-bold px-1.5 py-0.5 rounded transition">Full Paid</button>
+                                    <button type="button" onclick="setCreditUnpaid()" class="text-[10px] bg-amber-600/80 hover:bg-amber-500 text-white font-bold px-1.5 py-0.5 rounded transition">Credit (₹0)</button>
+                                </div>
+                            </div>
+                            <input type="number" id="pos-amount-paid" value="{% if editing_invoice %}{{ editing_invoice.amount_paid }}{% endif %}" placeholder="0.00" oninput="this.dataset.customSet = 'true'" class="w-full text-xs font-bold px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none">
                         </div>
                     </div>
 
                     <div class="text-right flex items-center gap-4">
                         <div>
-                            <span class="text-xs text-slate-400 block">Grand Total:</span>
-                            <span class="text-3xl font-black text-emerald-400" id="pos-grand-total">₹0.00</span>
+                            <span class="text-xs text-slate-400 block font-semibold">Grand Total:</span>
+                            <span class="text-3xl font-black text-emerald-400" id="pos-grand-total">₹0</span>
                         </div>
                         <button type="button" id="pos-submit-btn" onclick="submitPOSInvoice()" class="px-6 py-3 {% if editing_invoice %}bg-blue-600 hover:bg-blue-500 text-white{% else %}bg-emerald-500 hover:bg-emerald-400 text-slate-950{% endif %} font-black text-sm rounded-2xl shadow-lg transition flex items-center gap-2">
                             <span id="pos-submit-btn-text">{% if editing_invoice %}UPDATE INVOICE (#{{ editing_invoice.invoice_number }}) 🔄{% else %}SUBMIT & BILL ⚡{% endif %}</span>
@@ -304,13 +311,18 @@
             <button onclick="closeModal('select-part-pos-modal')" class="text-slate-400 hover:text-slate-700 text-lg font-bold">✕</button>
         </div>
         <div class="mt-4 space-y-3">
-            <input type="text" id="pos-part-search" placeholder="Search part name, category, or barcode..." oninput="filterPartsList()" class="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500">
+            <input type="text" id="pos-part-search" placeholder="Search part name, part number, category, or barcode..." oninput="filterPartsList()" class="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500">
             <div class="max-h-60 overflow-y-auto divide-y divide-slate-100 text-xs" id="parts-picker-list">
                 {% for p in inventory_items %}
-                <div class="py-2.5 px-3 flex items-center justify-between hover:bg-slate-50 cursor-pointer rounded-lg part-row" onclick="addPartToPOS('{{ p.id }}', '{{ p.part_name }}', '{{ p.barcode }}', '{{ p.hsn_code }}', {{ p.selling_price }}, {{ p.tax_rate }})">
+                <div class="py-2.5 px-3 flex items-center justify-between hover:bg-slate-50 cursor-pointer rounded-lg part-row" data-search="{{ p.part_name|lower }} {{ p.part_number|lower if p.part_number else '' }} {{ p.barcode }} {{ p.category|lower }}" onclick="addPartToPOS('{{ p.id }}', '{{ p.part_name }}', '{{ p.barcode }}', '{{ p.hsn_code }}', {{ p.selling_price }}, {{ p.tax_rate }}, '{{ p.unit }}', '{{ p.part_number or '' }}')">
                     <div>
-                        <span class="font-bold text-slate-900">{{ p.part_name }}</span>
-                        <span class="block text-[10px] text-slate-400 font-mono">{{ p.barcode }} • Stock: {{ p.stock_qty }} {{ p.unit }}</span>
+                        <div class="flex items-center gap-1.5 flex-wrap">
+                            <span class="font-bold text-slate-900">{{ p.part_name }}</span>
+                            {% if p.part_number %}
+                            <span class="text-[10px] bg-amber-100 text-amber-900 font-mono font-bold px-1.5 py-0.2 rounded">Part #: {{ p.part_number }}</span>
+                            {% endif %}
+                        </div>
+                        <span class="block text-[10px] text-slate-400 font-mono">{{ p.barcode }} • Stock: {{ p.stock_qty }} {{ p.unit }} • GST: {{ p.tax_rate }}%</span>
                     </div>
                     <span class="font-bold text-primary-700">₹{{ "{:,.2f}".format(p.selling_price) }}</span>
                 </div>
@@ -397,10 +409,26 @@
 
     // Barcode scanner auto-callback
     window.barcodeScanner.setScanCallback((item) => {
-        addPartToPOS(item.id, item.part_name, item.barcode, item.hsn_code, item.selling_price, item.tax_rate);
+        addPartToPOS(item.id, item.part_name, item.barcode, item.hsn_code, item.selling_price, item.tax_rate, item.unit || 'pcs', item.part_number || '');
     });
 
-    function addPartToPOS(id, name, barcode, hsn, price, tax) {
+    function toggleGstInterstate() {
+        const el = document.getElementById('pos-gst-type');
+        const btn = document.getElementById('btn-gst-toggle');
+        if (el.value === 'INTRA_STATE') {
+            el.value = 'INTER_STATE';
+            if (btn) btn.innerText = 'Switch to Kerala (CGST+SGST)';
+            showToast("Set to Inter-State (IGST)", "info");
+        } else {
+            el.value = 'INTRA_STATE';
+            if (btn) btn.innerText = 'Out-of-state Customer (IGST)?';
+            showToast("Set to Kerala (CGST+SGST)", "info");
+        }
+        renderPOSTable();
+        recalculateTotals();
+    }
+
+    function addPartToPOS(id, name, barcode, hsn, price, tax, unit = 'pcs', partNumber = '') {
         const existing = posItems.find(i => i.item_id === id && i.item_type === 'PART');
         if (existing) {
             existing.quantity += 1;
@@ -410,6 +438,8 @@
                 item_id: id,
                 name: name,
                 barcode: barcode,
+                part_number: partNumber || '',
+                unit: unit || 'pcs',
                 hsn_sac: hsn || '8536',
                 quantity: 1,
                 unit_price: parseFloat(price) || 0,
@@ -429,6 +459,8 @@
             item_type: 'LABOR',
             item_id: null,
             name: desc,
+            part_number: '',
+            unit: 'hrs',
             barcode: null,
             hsn_sac: '9987',
             quantity: 1,
@@ -443,6 +475,10 @@
         renderPOSTable();
     }
 
+    function updateUnit(idx, val) {
+        posItems[idx].unit = val || 'pcs';
+    }
+
     const availableGSTSlabs = {{ gst_slabs_list | tojson if gst_slabs_list is defined else '["0", "5", "12", "18", "28"]' }};
 
     function renderPOSTable() {
@@ -450,7 +486,7 @@
         if (posItems.length === 0) {
             tbody.innerHTML = `
                 <tr id="empty-table-row">
-                    <td colspan="8" class="text-center py-8 text-slate-400">
+                    <td colspan="9" class="text-center py-8 text-slate-400">
                         <i data-lucide="scan-line" class="w-8 h-8 mx-auto text-slate-300 mb-2"></i>
                         Scan box barcode or click buttons above to add items to bill.
                     </td>
@@ -460,33 +496,73 @@
             return;
         }
 
+        const isInter = document.getElementById('pos-gst-type')?.value === 'INTER_STATE';
+
         tbody.innerHTML = posItems.map((item, idx) => {
-            const lineTotal = item.quantity * item.unit_price;
+            const lineBase = item.quantity * item.unit_price;
+            const lineTax = lineBase * (item.tax_rate / 100);
+            const lineTotal = lineBase + lineTax;
             const badgeClass = item.item_type === 'LABOR' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800';
-            
+            const unitVal = (item.unit || (item.item_type === 'LABOR' ? 'hrs' : 'pcs')).toUpperCase();
+
             const taxOptions = availableGSTSlabs.map(slab => {
                 const sNum = parseFloat(slab);
                 const selected = Math.abs(item.tax_rate - sNum) < 0.1 ? 'selected' : '';
                 return `<option value="${sNum}" ${selected}>${sNum}%</option>`;
             }).join('');
 
+            let taxBreakdownHtml = '';
+            if (isInter) {
+                taxBreakdownHtml = `
+                    <div class="space-y-0.5">
+                        <select onchange="updateTax(${idx}, this.value)" class="px-1 py-0.5 rounded border border-slate-200 bg-white text-[11px] font-bold text-slate-700">
+                            ${taxOptions}
+                        </select>
+                        <span class="block text-[10px] text-indigo-600 font-mono font-bold">IGST: ₹${lineTax.toFixed(2)}</span>
+                    </div>
+                `;
+            } else {
+                const halfRate = item.tax_rate / 2;
+                const halfAmt = lineTax / 2;
+                taxBreakdownHtml = `
+                    <div class="space-y-0.5">
+                        <select onchange="updateTax(${idx}, this.value)" class="px-1 py-0.5 rounded border border-slate-200 bg-white text-[11px] font-bold text-slate-700">
+                            ${taxOptions}
+                        </select>
+                        <span class="block text-[10px] text-emerald-700 font-mono">CGST ${halfRate.toFixed(1)}%: ₹${halfAmt.toFixed(2)}</span>
+                        <span class="block text-[10px] text-teal-700 font-mono">SGST ${halfRate.toFixed(1)}%: ₹${halfAmt.toFixed(2)}</span>
+                    </div>
+                `;
+            }
+
             return `
                 <tr class="hover:bg-slate-50 transition">
                     <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded text-[10px] font-bold ${badgeClass}">${item.item_type}</span></td>
-                    <td class="py-2.5 px-3 font-semibold text-slate-900">${item.name}</td>
-                    <td class="py-2.5 px-3 text-slate-400 font-mono">${item.hsn_sac}</td>
                     <td class="py-2.5 px-3">
-                        <input type="number" min="1" value="${item.quantity}" onchange="updateQty(${idx}, this.value)" class="w-14 px-1.5 py-1 rounded border border-slate-200 text-center font-bold">
+                        <span class="font-bold text-slate-900 block">${item.name}</span>
+                        ${item.part_number ? `<span class="text-[10px] text-amber-900 bg-amber-100 font-mono font-bold px-1.5 py-0.2 rounded inline-block mt-0.5">Part #: ${item.part_number}</span>` : ''}
                     </td>
+                    <td class="py-2.5 px-3 text-slate-400 font-mono text-[11px]">${item.hsn_sac}</td>
                     <td class="py-2.5 px-3">
-                        <input type="number" step="0.01" value="${item.unit_price}" onchange="updatePrice(${idx}, this.value)" class="w-20 px-1.5 py-1 rounded border border-slate-200 font-bold">
-                    </td>
-                    <td class="py-2.5 px-3">
-                        <select onchange="updateTax(${idx}, this.value)" class="px-1.5 py-1 rounded border border-slate-200 bg-white text-xs font-semibold text-slate-700">
-                            ${taxOptions}
+                        <select onchange="updateUnit(${idx}, this.value)" class="w-16 px-1 py-1 rounded border border-slate-200 bg-white text-[10px] font-bold uppercase">
+                            <option value="PCS" ${unitVal === 'PCS' ? 'selected' : ''}>PCS</option>
+                            <option value="NOS" ${unitVal === 'NOS' ? 'selected' : ''}>NOS</option>
+                            <option value="SET" ${unitVal === 'SET' ? 'selected' : ''}>SET</option>
+                            <option value="MTR" ${unitVal === 'MTR' ? 'selected' : ''}>MTR</option>
+                            <option value="LTR" ${unitVal === 'LTR' ? 'selected' : ''}>LTR</option>
+                            <option value="HRS" ${unitVal === 'HRS' ? 'selected' : ''}>HRS</option>
                         </select>
                     </td>
-                    <td class="py-2.5 px-3 text-right font-bold text-slate-900">₹${lineTotal.toFixed(2)}</td>
+                    <td class="py-2.5 px-3">
+                        <input type="number" step="0.01" value="${item.unit_price}" onchange="updatePrice(${idx}, this.value)" class="w-20 px-1.5 py-1 rounded border border-slate-200 font-bold text-xs">
+                    </td>
+                    <td class="py-2.5 px-3">
+                        <input type="number" min="1" value="${item.quantity}" onchange="updateQty(${idx}, this.value)" class="w-14 px-1.5 py-1 rounded border border-slate-200 text-center font-bold text-xs">
+                    </td>
+                    <td class="py-2.5 px-3">
+                        ${taxBreakdownHtml}
+                    </td>
+                    <td class="py-2.5 px-3 text-right font-bold text-slate-900 text-xs">₹${lineTotal.toFixed(2)}</td>
                     <td class="py-2.5 px-3 text-center">
                         <button onclick="removePOSItem(${idx})" class="text-rose-500 hover:text-rose-700 font-bold">✕</button>
                     </td>
@@ -513,6 +589,7 @@
     }
 
     function onGstTypeChange() {
+        renderPOSTable();
         recalculateTotals();
     }
 
@@ -537,7 +614,9 @@
         const igstTotal = isInterstate ? taxTotal : 0;
 
         const discount = parseFloat(document.getElementById('pos-discount').value) || 0;
-        const grandTotal = Math.max(0, (laborTotal + partsTotal + taxTotal) - discount);
+        const rawGrandTotal = Math.max(0, (laborTotal + partsTotal + taxTotal) - discount);
+        const roundedGrandTotal = Math.round(rawGrandTotal);
+        const roundOff = roundedGrandTotal - rawGrandTotal;
 
         document.getElementById('pos-labor-total').innerText = `₹${laborTotal.toFixed(2)}`;
         document.getElementById('pos-parts-total').innerText = `₹${partsTotal.toFixed(2)}`;
@@ -560,15 +639,40 @@
             if (boxIgst) boxIgst.classList.add('hidden');
         }
 
-        document.getElementById('pos-grand-total').innerText = `₹${grandTotal.toFixed(2)}`;
+        const roundOffEl = document.getElementById('pos-round-off');
+        if (roundOffEl) {
+            const sign = roundOff > 0 ? "+" : "";
+            roundOffEl.innerText = `${sign}₹${roundOff.toFixed(2)}`;
+        }
+
+        // Grand Total: Exact integer, no decimal paise!
+        document.getElementById('pos-grand-total').innerText = `₹${roundedGrandTotal.toLocaleString('en-IN')}`;
 
         const paidField = document.getElementById('pos-amount-paid');
         const mode = document.getElementById('pos-payment-mode').value;
         if (mode === 'KHATA_CREDIT') {
             paidField.placeholder = "0.00";
-        } else if (!paidField.value) {
-            paidField.placeholder = grandTotal.toFixed(2);
+        } else if (!paidField.dataset.customSet && (!paidField.value || parseFloat(paidField.value) === 0)) {
+            paidField.value = roundedGrandTotal;
         }
+    }
+
+    function setFullPaid() {
+        const totalText = document.getElementById('pos-grand-total').innerText.replace(/[^\d.]/g, '');
+        const num = parseFloat(totalText) || 0;
+        const paidField = document.getElementById('pos-amount-paid');
+        paidField.value = num;
+        paidField.dataset.customSet = "true";
+        document.getElementById('pos-payment-mode').value = 'UPI';
+        showToast(`Paid amount set to full (₹${num})`, "info");
+    }
+
+    function setCreditUnpaid() {
+        const paidField = document.getElementById('pos-amount-paid');
+        paidField.value = "0";
+        paidField.dataset.customSet = "true";
+        document.getElementById('pos-payment-mode').value = 'KHATA_CREDIT';
+        showToast("Marked as Credit / Khata (₹0 paid)", "info");
     }
 
     function onPaymentModeChange() {
@@ -576,8 +680,10 @@
         const paidField = document.getElementById('pos-amount-paid');
         if (mode === 'KHATA_CREDIT') {
             paidField.value = "0.00";
-        } else {
-            paidField.value = "";
+            paidField.dataset.customSet = "true";
+        } else if (!paidField.dataset.customSet) {
+            const totalText = document.getElementById('pos-grand-total').innerText.replace(/[^\d.]/g, '');
+            paidField.value = parseFloat(totalText) || 0;
         }
         recalculateTotals();
     }
@@ -607,9 +713,11 @@
                 taxTotal += (rowTotal * (i.tax_rate / 100));
             }
         });
-        const grandTotal = Math.max(0, (laborTotal + partsTotal + taxTotal) - discount);
+        const rawGrandTotal = Math.max(0, (laborTotal + partsTotal + taxTotal) - discount);
+        const roundedGrandTotal = Math.round(rawGrandTotal);
+
         const amountPaidInput = document.getElementById('pos-amount-paid').value.trim();
-        const amountPaid = amountPaidInput !== "" ? parseFloat(amountPaidInput) : (paymentMode === 'KHATA_CREDIT' ? 0.0 : grandTotal);
+        const amountPaid = amountPaidInput !== "" ? parseFloat(amountPaidInput) : (paymentMode === 'KHATA_CREDIT' ? 0.0 : roundedGrandTotal);
 
         const payload = {
             editing_invoice_id: editingInvoiceId,
@@ -627,6 +735,8 @@
                 item_type: i.item_type,
                 item_id: i.item_id,
                 name: i.name,
+                part_number: i.part_number || '',
+                unit: i.unit || 'pcs',
                 barcode: i.barcode,
                 hsn_sac: i.hsn_sac,
                 quantity: i.quantity,
@@ -733,6 +843,8 @@
             item_type: i.item_type || 'PART',
             item_id: i.item_id || null,
             name: i.name,
+            part_number: i.part_number || '',
+            unit: i.unit || (i.item_type === 'LABOR' ? 'hrs' : 'pcs'),
             barcode: i.barcode || '-',
             hsn_sac: i.hsn_sac || (i.item_type === 'LABOR' ? '9987' : '8536'),
             quantity: i.quantity || 1,
@@ -812,6 +924,8 @@
                         item_type: i.item_type || 'PART',
                         item_id: i.item_id || null,
                         name: i.name,
+                        part_number: i.part_number || '',
+                        unit: i.unit || (i.item_type === 'LABOR' ? 'hrs' : 'pcs'),
                         barcode: i.barcode || '-',
                         hsn_sac: i.hsn_code || i.hsn_sac || (i.item_type === 'LABOR' ? '9987' : '8536'),
                         quantity: i.quantity || 1,
@@ -835,9 +949,10 @@
     });
 
     function filterPartsList() {
-        const q = document.getElementById('pos-part-search').value.toLowerCase();
+        const q = (document.getElementById('pos-part-search')?.value || '').toLowerCase().trim();
         document.querySelectorAll('.part-row').forEach(row => {
-            row.style.display = row.innerText.toLowerCase().includes(q) ? 'flex' : 'none';
+            const searchData = (row.getAttribute('data-search') || row.innerText).toLowerCase();
+            row.style.display = searchData.includes(q) ? 'flex' : 'none';
         });
     }
 

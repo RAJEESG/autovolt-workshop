@@ -445,7 +445,8 @@ async def create_user_account(
     username: str = Form(...),
     whatsapp_mobile: str = Form(...),
     role: str = Form("STAFF"),
-    password: str = Form(...)
+    password: str = Form(...),
+    permissions: Optional[List[str]] = Form(None)
 ):
     conn = db.get_db_connection()
     cursor = conn.cursor()
@@ -457,16 +458,24 @@ async def create_user_account(
 
     user_id = f"user_{uuid.uuid4().hex[:8]}"
     pw_hash = hash_password(password.strip())
+    perms_str = ",".join(permissions) if permissions else ""
+    if not perms_str:
+        if role == "CASHIER":
+            perms_str = "can_bill,can_jobs,can_khata"
+        elif role == "STOREKEEPER":
+            perms_str = "can_inventory,can_purchases"
+        elif role in ["ADMIN", "OWNER"]:
+            perms_str = "can_bill,can_inventory,can_purchases,can_wages,can_reports,can_settings,can_jobs,can_khata"
 
     cursor.execute("""
-    INSERT INTO users (id, username, password_hash, full_name, role, whatsapp_mobile, phone, tenant_id, status, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', datetime('now'))
+    INSERT INTO users (id, username, password_hash, full_name, role, whatsapp_mobile, phone, tenant_id, permissions, status, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', datetime('now'))
     """, (
         user_id, username.strip(), pw_hash, full_name.strip(), role,
-        whatsapp_mobile.strip(), whatsapp_mobile.strip(), tenant_id
+        whatsapp_mobile.strip(), whatsapp_mobile.strip(), tenant_id, perms_str
     ))
 
-    db.log_audit("CREATE_USER", "users", user_id, f"Created user {username} for tenant {tenant_id}", cursor=cursor)
+    db.log_audit("CREATE_USER", "users", user_id, f"Created user {username} ({role}) for tenant {tenant_id}", cursor=cursor)
     conn.commit()
     conn.close()
 
