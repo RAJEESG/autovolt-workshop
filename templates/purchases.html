@@ -43,6 +43,7 @@
                         <tr class="text-slate-400 uppercase tracking-wider font-semibold border-b border-slate-100 bg-slate-50">
                             <th class="py-2.5 px-3">Bill # & Date</th>
                             <th class="py-2.5 px-3">Supplier Name</th>
+                            <th class="py-2.5 px-3">State / GST Type</th>
                             <th class="py-2.5 px-3">Payment</th>
                             <th class="py-2.5 px-3">Status / Stock</th>
                             <th class="py-2.5 px-3 text-right">Total Amount (₹)</th>
@@ -56,6 +57,15 @@
                                 <span class="text-[11px] text-slate-400">{{ p.bill_date }}</span>
                             </td>
                             <td class="py-3 px-3 font-semibold text-slate-900">{{ p.supplier_name }}</td>
+                            <td class="py-3 px-3">
+                                {% if p.is_interstate == 1 or 'Tamil' in (p.supplier_state or '') or '33' in (p.supplier_state or '') %}
+                                <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-800">Inter-State (IGST)</span>
+                                <span class="block text-[10px] text-slate-500 font-mono mt-0.5">{{ p.supplier_state or 'Tamil Nadu' }}: ₹{{ "{:,.2f}".format(p.igst_amount or 0) }}</span>
+                                {% else %}
+                                <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">Intra-State (CGST+SGST)</span>
+                                <span class="block text-[10px] text-slate-500 font-mono mt-0.5">CGST: ₹{{ "{:,.2f}".format(p.cgst_amount or 0) }} | SGST: ₹{{ "{:,.2f}".format(p.sgst_amount or 0) }}</span>
+                                {% endif %}
+                            </td>
                             <td class="py-3 px-3"><span class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100">{{ p.payment_mode }}</span></td>
                             <td class="py-3 px-3">
                                 {% if p.status == 'DRAFT' %}
@@ -76,7 +86,7 @@
                             <td class="py-3 px-3 text-right font-black text-slate-900 text-sm">₹{{ "{:,.2f}".format(p.total_amount) }}</td>
                         </tr>
                         {% else %}
-                        <tr><td colspan="5" class="text-center py-6 text-slate-400 text-xs">No purchase bills recorded yet.</td></tr>
+                        <tr><td colspan="6" class="text-center py-6 text-slate-400 text-xs">No purchase bills recorded yet.</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
@@ -147,6 +157,27 @@
                 </div>
             </div>
 
+            <!-- GST Supply Type & State -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 bg-indigo-50/50 rounded-2xl border border-indigo-100">
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">Supplier State / GST Type *</label>
+                    <select name="supplier_state" id="pur-supplier-state" onchange="onPurchaseStateChange()" class="w-full px-3 py-2 rounded-xl border border-indigo-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-semibold text-xs">
+                        <option value="Kerala (32)" data-interstate="0" selected>🌴 Kerala (Intra-State: CGST + SGST)</option>
+                        <option value="Tamil Nadu (33)" data-interstate="1">🏙️ Tamil Nadu / Coimbatore (Inter-State: IGST)</option>
+                        <option value="Karnataka (29)" data-interstate="1">🏢 Karnataka (Inter-State: IGST)</option>
+                        <option value="Other State" data-interstate="1">🚚 Other State (Inter-State: IGST)</option>
+                    </select>
+                    <input type="hidden" name="is_interstate" id="pur-is-interstate" value="0">
+                    <input type="hidden" name="cgst_amount" id="pur-cgst-amount" value="0.0">
+                    <input type="hidden" name="sgst_amount" id="pur-sgst-amount" value="0.0">
+                    <input type="hidden" name="igst_amount" id="pur-igst-amount" value="0.0">
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">Supplier GSTIN (Optional)</label>
+                    <input type="text" name="supplier_gstin" placeholder="e.g. 33ABCDE1234F1Z5" class="w-full px-3 py-2 rounded-xl border border-indigo-200 focus:outline-none uppercase font-mono text-xs">
+                </div>
+            </div>
+
             <!-- Parts Line Items Section -->
             <div class="space-y-2 border border-slate-200 rounded-2xl p-4 bg-slate-50">
                 <div class="flex items-center justify-between">
@@ -161,8 +192,9 @@
                         <thead class="text-slate-500 font-semibold text-[11px] border-b border-slate-200">
                             <tr>
                                 <th class="py-1.5 px-2">Spare Part</th>
-                                <th class="py-1.5 px-2 w-20">Qty (+)</th>
-                                <th class="py-1.5 px-2 w-28">Purchase Cost (₹)</th>
+                                <th class="py-1.5 px-2 w-16">Qty (+)</th>
+                                <th class="py-1.5 px-2 w-24">Base Cost (₹)</th>
+                                <th class="py-1.5 px-2 w-28">GST %</th>
                                 <th class="py-1.5 px-2 text-right w-24">Total (₹)</th>
                                 <th class="py-1.5 px-2 text-center w-8">✕</th>
                             </tr>
@@ -171,6 +203,26 @@
                             <!-- Injected rows -->
                         </tbody>
                     </table>
+                </div>
+
+                <!-- Live GST Breakdown for Purchase Bill -->
+                <div class="bg-white rounded-2xl p-3 border border-slate-200 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs mt-3">
+                    <div>
+                        <span class="text-slate-400 block text-[10px] font-semibold uppercase">Taxable Base</span>
+                        <span id="pur-summary-base" class="font-extrabold text-slate-800 font-mono">₹0.00</span>
+                    </div>
+                    <div id="pur-summary-intra-box">
+                        <span class="text-slate-400 block text-[10px] font-semibold uppercase">CGST + SGST (Kerala)</span>
+                        <span id="pur-summary-cgst-sgst" class="font-bold text-emerald-700 font-mono">₹0.00 + ₹0.00</span>
+                    </div>
+                    <div id="pur-summary-inter-box" class="hidden">
+                        <span class="text-slate-400 block text-[10px] font-semibold uppercase">IGST (Inter-State)</span>
+                        <span id="pur-summary-igst" class="font-bold text-indigo-700 font-mono">₹0.00</span>
+                    </div>
+                    <div>
+                        <span class="text-slate-400 block text-[10px] font-semibold uppercase">Calculated Total</span>
+                        <span id="pur-summary-calc-total" class="font-black text-slate-900 font-mono">₹0.00</span>
+                    </div>
                 </div>
             </div>
 
@@ -252,15 +304,33 @@
 <script>
     const availableInventory = [
         {% for itm in inventory_items %}
-        { id: "{{ itm.id }}", name: "{{ itm.part_name }}", barcode: "{{ itm.barcode }}", cost: {{ itm.cost_price }} },
+        { id: "{{ itm.id }}", name: "{{ itm.part_name }}", barcode: "{{ itm.barcode }}", cost: {{ itm.cost_price }}, tax_rate: {{ itm.tax_rate or 18.0 }} },
         {% endfor %}
     ];
 
     let purchaseRows = [];
 
-    function addPurchaseLineItem(itemId = '', qty = 1, cost = 0) {
+    function onPurchaseStateChange() {
+        const stateSelect = document.getElementById('pur-supplier-state');
+        const selectedOpt = stateSelect.options[stateSelect.selectedIndex];
+        const isInter = selectedOpt.getAttribute('data-interstate') === '1';
+        document.getElementById('pur-is-interstate').value = isInter ? '1' : '0';
+
+        const intraBox = document.getElementById('pur-summary-intra-box');
+        const interBox = document.getElementById('pur-summary-inter-box');
+        if (isInter) {
+            intraBox.classList.add('hidden');
+            interBox.classList.remove('hidden');
+        } else {
+            intraBox.classList.remove('hidden');
+            interBox.classList.add('hidden');
+        }
+        recalculatePurchaseTotals();
+    }
+
+    function addPurchaseLineItem(itemId = '', qty = 1, cost = 0, taxRate = null) {
         const rowId = 'prow_' + Math.random().toString(36).substr(2, 9);
-        const defaultItem = availableInventory.find(i => i.id === itemId) || availableInventory[0] || { id: '', name: 'Part', barcode: '', cost: 0 };
+        const defaultItem = availableInventory.find(i => i.id === itemId) || availableInventory[0] || { id: '', name: 'Part', barcode: '', cost: 0, tax_rate: 18.0 };
 
         purchaseRows.push({
             rowId: rowId,
@@ -268,7 +338,8 @@
             part_name: defaultItem.name,
             barcode: defaultItem.barcode,
             quantity: qty,
-            unit_cost: cost || defaultItem.cost
+            unit_cost: cost !== 0 ? cost : defaultItem.cost,
+            tax_rate: taxRate !== null ? taxRate : (defaultItem.tax_rate || 18.0)
         });
         renderPurchaseRows();
     }
@@ -278,14 +349,15 @@
         tbody.innerHTML = '';
 
         if (purchaseRows.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="5" class="py-4 text-center text-slate-400">No parts added. Click "+ Add Part Item" above.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="6" class="py-4 text-center text-slate-400">No parts added. Click "+ Add Part Item" above.</td></tr>`;
+            recalculatePurchaseTotals();
             return;
         }
 
-        let calculatedTotal = 0;
         purchaseRows.forEach((r, idx) => {
-            const lineTotal = r.quantity * r.unit_cost;
-            calculatedTotal += lineTotal;
+            const lineBase = r.quantity * r.unit_cost;
+            const lineTax = lineBase * (r.tax_rate / 100.0);
+            const lineTotal = lineBase + lineTax;
 
             const tr = document.createElement('tr');
             tr.innerHTML = `
@@ -300,6 +372,15 @@
                 <td class="py-2 px-2">
                     <input type="number" step="0.01" value="${r.unit_cost}" oninput="updatePurchaseItemCost(${idx}, this.value)" class="w-full text-xs px-2 py-1.5 rounded-lg border border-slate-200 text-right font-bold">
                 </td>
+                <td class="py-2 px-2">
+                    <select onchange="updatePurchaseItemTaxRate(${idx}, this.value)" class="w-full text-xs px-2 py-1.5 rounded-lg border border-slate-200 font-semibold">
+                        <option value="18.0" ${r.tax_rate == 18.0 ? 'selected' : ''}>18%</option>
+                        <option value="28.0" ${r.tax_rate == 28.0 ? 'selected' : ''}>28%</option>
+                        <option value="12.0" ${r.tax_rate == 12.0 ? 'selected' : ''}>12%</option>
+                        <option value="5.0" ${r.tax_rate == 5.0 ? 'selected' : ''}>5%</option>
+                        <option value="0.0" ${r.tax_rate == 0.0 ? 'selected' : ''}>0%</option>
+                    </select>
+                </td>
                 <td class="py-2 px-2 text-right font-bold text-slate-900">
                     ₹${lineTotal.toFixed(2)}
                 </td>
@@ -310,10 +391,7 @@
             tbody.appendChild(tr);
         });
 
-        const totalField = document.getElementById('pur-total-amount');
-        if (calculatedTotal > 0) {
-            totalField.value = calculatedTotal.toFixed(2);
-        }
+        recalculatePurchaseTotals();
     }
 
     function updatePurchaseItemPart(idx, partId) {
@@ -323,6 +401,7 @@
             purchaseRows[idx].part_name = found.name;
             purchaseRows[idx].barcode = found.barcode;
             purchaseRows[idx].unit_cost = found.cost;
+            purchaseRows[idx].tax_rate = found.tax_rate || 18.0;
         }
         renderPurchaseRows();
     }
@@ -337,18 +416,64 @@
         renderPurchaseRows();
     }
 
+    function updatePurchaseItemTaxRate(idx, val) {
+        purchaseRows[idx].tax_rate = parseFloat(val) || 0.0;
+        renderPurchaseRows();
+    }
+
     function removePurchaseRow(idx) {
         purchaseRows.splice(idx, 1);
         renderPurchaseRows();
     }
 
+    function recalculatePurchaseTotals() {
+        let totalBase = 0;
+        let totalTax = 0;
+
+        purchaseRows.forEach(r => {
+            const base = (r.quantity || 1) * (r.unit_cost || 0);
+            const tax = base * ((r.tax_rate || 0) / 100.0);
+            totalBase += base;
+            totalTax += tax;
+        });
+
+        const grandTotal = totalBase + totalTax;
+        const isInter = document.getElementById('pur-is-interstate').value === '1';
+
+        let cgst = 0, sgst = 0, igst = 0;
+        if (isInter) {
+            igst = totalTax;
+            const igstEl = document.getElementById('pur-summary-igst');
+            if (igstEl) igstEl.innerText = '₹' + igst.toFixed(2);
+        } else {
+            cgst = totalTax / 2.0;
+            sgst = totalTax / 2.0;
+            const intraEl = document.getElementById('pur-summary-cgst-sgst');
+            if (intraEl) intraEl.innerText = '₹' + cgst.toFixed(2) + ' + ₹' + sgst.toFixed(2);
+        }
+
+        const baseEl = document.getElementById('pur-summary-base');
+        if (baseEl) baseEl.innerText = '₹' + totalBase.toFixed(2);
+        const calcEl = document.getElementById('pur-summary-calc-total');
+        if (calcEl) calcEl.innerText = '₹' + grandTotal.toFixed(2);
+
+        document.getElementById('pur-cgst-amount').value = cgst.toFixed(2);
+        document.getElementById('pur-sgst-amount').value = sgst.toFixed(2);
+        document.getElementById('pur-igst-amount').value = igst.toFixed(2);
+
+        const totalField = document.getElementById('pur-total-amount');
+        if (totalField) {
+            totalField.value = grandTotal.toFixed(2);
+        }
+    }
+
     function preparePurchaseSubmit(e) {
+        recalculatePurchaseTotals();
         document.getElementById('pur-items-json').value = JSON.stringify(purchaseRows);
         return true;
     }
 
     window.addEventListener('DOMContentLoaded', () => {
-        // Initial row for convenience
         if (availableInventory.length > 0 && purchaseRows.length === 0) {
             addPurchaseLineItem();
         }

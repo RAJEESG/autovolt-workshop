@@ -42,8 +42,38 @@
                 </button>
             </div>
 
+            <!-- Editing Existing Invoice Banner (Dynamic / Static) -->
+            <div id="editing-banner-container" class="{% if not editing_invoice %}hidden{% endif %} p-3.5 rounded-2xl bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 text-blue-950 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-sm">
+                <div class="flex items-center gap-2.5">
+                    <span class="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold text-sm shrink-0">✏️</span>
+                    <div>
+                        <span class="font-bold text-blue-950" id="editing-banner-title">Editing Existing Bill #{% if editing_invoice %}{{ editing_invoice.invoice_number }}{% endif %}</span>
+                        <p class="text-[11px] text-blue-800">Changes will directly update this exact invoice number. Old parts stock will be balanced automatically.</p>
+                    </div>
+                </div>
+                <button type="button" onclick="cancelEditingInvoice()" class="text-[11px] font-bold bg-white text-rose-600 border border-rose-200 hover:bg-rose-50 px-3 py-1.5 rounded-xl transition shadow-sm self-start sm:self-auto">
+                    ✕ Cancel Edit
+                </button>
+            </div>
+
+            <!-- Existing Linked Invoice on Job Warning -->
+            {% if existing_linked_invoice %}
+            <div class="p-3 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-sm">
+                <div class="flex items-center gap-2">
+                    <span class="text-base">ℹ️</span>
+                    <div>
+                        <span class="font-bold">Bill #{{ existing_linked_invoice.invoice_number }} already exists for this Job Card!</span>
+                        <span class="text-[11px] text-amber-700 block">Total: ₹{{ "{:,.2f}".format(existing_linked_invoice.grand_total) }} • Status: {{ existing_linked_invoice.payment_status }}</span>
+                    </div>
+                </div>
+                <button type="button" onclick="startEditInvoice('{{ existing_linked_invoice.id }}')" class="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs transition shadow-sm self-start sm:self-auto">
+                    ✏️ Edit Existing Bill Instead
+                </button>
+            </div>
+            {% endif %}
+
             <!-- Job Card Prefill Banner if loaded from job -->
-            {% if prefill_job %}
+            {% if prefill_job and not existing_linked_invoice %}
             <div class="p-3.5 rounded-2xl bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 text-amber-950 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-sm">
                 <div class="flex items-center gap-2.5">
                     <span class="w-8 h-8 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center font-bold text-sm shrink-0">⚡</span>
@@ -54,33 +84,43 @@
                 </div>
                 <span class="text-[10px] font-black bg-amber-200 text-amber-950 px-2.5 py-1 rounded-full uppercase w-max">From Job Card</span>
             </div>
-            <input type="hidden" id="prefill-job-id" value="{{ prefill_job.job.id }}">
-            <input type="hidden" id="prefill-job-number" value="{{ prefill_job.job.job_number }}">
-            {% else %}
-            <input type="hidden" id="prefill-job-id" value="">
-            <input type="hidden" id="prefill-job-number" value="">
             {% endif %}
 
+            <input type="hidden" id="editing-invoice-id" value="{% if editing_invoice %}{{ editing_invoice.id }}{% endif %}">
+            <input type="hidden" id="editing-invoice-number" value="{% if editing_invoice %}{{ editing_invoice.invoice_number }}{% endif %}">
+            <input type="hidden" id="prefill-job-id" value="{% if prefill_job %}{{ prefill_job.job.id }}{% endif %}">
+            <input type="hidden" id="prefill-job-number" value="{% if prefill_job %}{{ prefill_job.job.job_number }}{% endif %}">
+
             <!-- Customer & Vehicle Info Inputs (With Searchable Picklist / Quick Select) -->
-            <div class="space-y-2 bg-slate-50 p-4 rounded-2xl border border-slate-100 text-xs">
-                <div class="flex items-center justify-between mb-1">
-                    <span class="font-bold text-slate-800 uppercase tracking-wider text-[11px]">Customer & Vehicle Details</span>
-                    <button type="button" onclick="openModal('select-customer-pos-modal')" class="text-primary-700 hover:text-primary-800 font-bold flex items-center gap-1">
-                        🔍 Select Existing Customer / Vehicle
-                    </button>
+            <div class="space-y-3 bg-slate-50 p-4 rounded-2xl border border-slate-100 text-xs">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200/60 pb-2">
+                    <span class="font-bold text-slate-800 uppercase tracking-wider text-[11px]">Customer, Vehicle & GST Details</span>
+                    <div class="flex items-center gap-2">
+                        <!-- GST Supply Type Toggle (Kerala Intra vs Tamil Nadu Inter) -->
+                        <div class="flex items-center gap-1.5 bg-white border border-slate-200 px-2.5 py-1 rounded-xl shadow-xs">
+                            <span class="text-slate-500 font-bold text-[11px]">GST Type:</span>
+                            <select id="pos-gst-type" onchange="onGstTypeChange()" class="bg-transparent font-bold text-primary-700 text-xs focus:outline-none cursor-pointer">
+                                <option value="INTRA_STATE" {% if not editing_invoice or not editing_invoice.is_interstate %}selected{% endif %}>🏛️ Kerala / Intra-State (CGST + SGST)</option>
+                                <option value="INTER_STATE" {% if editing_invoice and editing_invoice.is_interstate %}selected{% endif %}>🚛 Tamil Nadu / Inter-State (IGST)</option>
+                            </select>
+                        </div>
+                        <button type="button" onclick="openModal('select-customer-pos-modal')" class="text-primary-700 hover:text-primary-800 font-bold flex items-center gap-1 text-[11px] bg-primary-50 px-2.5 py-1 rounded-xl border border-primary-200">
+                            🔍 Select Existing
+                        </button>
+                    </div>
                 </div>
                 <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
                         <label class="block font-bold text-slate-700 mb-1">Customer Name *</label>
-                        <input type="text" id="bill-cust-name" value="{% if prefill_job %}{{ prefill_job.job.customer_name }}{% endif %}" placeholder="Customer Name" class="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500">
+                        <input type="text" id="bill-cust-name" value="{% if editing_invoice %}{{ editing_invoice.customer_name }}{% elif prefill_job %}{{ prefill_job.job.customer_name }}{% endif %}" placeholder="Customer Name" class="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500">
                     </div>
                     <div>
                         <label class="block font-bold text-slate-700 mb-1">WhatsApp Phone *</label>
-                        <input type="tel" id="bill-cust-phone" value="{% if prefill_job %}{{ prefill_job.job.customer_phone }}{% endif %}" placeholder="e.g. 9847012345" class="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500">
+                        <input type="tel" id="bill-cust-phone" value="{% if editing_invoice %}{{ editing_invoice.customer_phone }}{% elif prefill_job %}{{ prefill_job.job.customer_phone }}{% endif %}" placeholder="e.g. 9847012345" class="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500">
                     </div>
                     <div>
                         <label class="block font-bold text-slate-700 mb-1">Vehicle Reg Number</label>
-                        <input type="text" id="bill-veh-no" value="{% if prefill_job %}{{ prefill_job.job.vehicle_reg_no }}{% endif %}" placeholder="KL-07-XX-XXXX" class="w-full uppercase font-mono px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500">
+                        <input type="text" id="bill-veh-no" value="{% if editing_invoice %}{{ editing_invoice.vehicle_reg_no }}{% elif prefill_job %}{{ prefill_job.job.vehicle_reg_no }}{% endif %}" placeholder="KL-07-XX-XXXX" class="w-full uppercase font-mono px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500">
                     </div>
                 </div>
             </div>
@@ -129,22 +169,30 @@
 
             <!-- Billing Calculations & Submit Section -->
             <div class="bg-slate-900 text-white p-5 rounded-3xl space-y-4 shadow-lg">
-                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
+                <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 text-xs">
                     <div>
-                        <label class="block text-slate-400 mb-1">Labor Total</label>
-                        <span class="text-lg font-bold text-amber-400" id="pos-labor-total">₹0.00</span>
+                        <label class="block text-slate-400 mb-1">Labor Subtotal</label>
+                        <span class="text-base font-bold text-amber-400" id="pos-labor-total">₹0.00</span>
                     </div>
                     <div>
-                        <label class="block text-slate-400 mb-1">Parts Total</label>
-                        <span class="text-lg font-bold text-blue-400" id="pos-parts-total">₹0.00</span>
+                        <label class="block text-slate-400 mb-1">Parts Subtotal</label>
+                        <span class="text-base font-bold text-blue-400" id="pos-parts-total">₹0.00</span>
                     </div>
-                    <div>
-                        <label class="block text-slate-400 mb-1">GST Tax Total</label>
-                        <span class="text-lg font-bold text-slate-300" id="pos-tax-total">₹0.00</span>
+                    <div id="box-cgst-sgst" class="space-y-1">
+                        <label class="block text-slate-400 mb-1">CGST + SGST (Central + State)</label>
+                        <div class="flex items-center gap-2 pt-1">
+                            <span class="text-xs font-semibold text-emerald-400 font-mono" id="pos-cgst-total">CGST: ₹0.00</span>
+                            <span class="text-slate-600">|</span>
+                            <span class="text-xs font-semibold text-teal-400 font-mono" id="pos-sgst-total">SGST: ₹0.00</span>
+                        </div>
+                    </div>
+                    <div id="box-igst" class="hidden space-y-1">
+                        <label class="block text-slate-400 mb-1">IGST (Inter-State Tax)</label>
+                        <span class="text-base font-bold text-indigo-400" id="pos-igst-total">₹0.00</span>
                     </div>
                     <div>
                         <label class="block text-slate-400 mb-1">Discount (₹)</label>
-                        <input type="number" id="pos-discount" value="0" min="0" oninput="recalculateTotals()" class="w-full px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-700 text-white focus:outline-none text-xs">
+                        <input type="number" id="pos-discount" value="{% if editing_invoice %}{{ editing_invoice.discount_amount }}{% else %}0{% endif %}" min="0" oninput="recalculateTotals()" class="w-full px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-700 text-white focus:outline-none text-xs">
                     </div>
                 </div>
 
@@ -153,16 +201,16 @@
                         <div>
                             <span class="text-xs text-slate-400 block">Payment Mode:</span>
                             <select id="pos-payment-mode" onchange="onPaymentModeChange()" class="text-xs font-bold px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none">
-                                <option value="UPI">📱 UPI / GPay / PhonePe</option>
-                                <option value="CASH">💵 Cash In Hand</option>
-                                <option value="BANK_TRANSFER">🏦 Bank Transfer</option>
-                                <option value="CARD">💳 Card</option>
-                                <option value="KHATA_CREDIT">⏳ Credit / Khata Due (Unpaid)</option>
+                                <option value="UPI" {% if editing_invoice and editing_invoice.payment_mode == 'UPI' %}selected{% endif %}>📱 UPI / GPay / PhonePe</option>
+                                <option value="CASH" {% if editing_invoice and editing_invoice.payment_mode == 'CASH' %}selected{% endif %}>💵 Cash In Hand</option>
+                                <option value="BANK_TRANSFER" {% if editing_invoice and editing_invoice.payment_mode == 'BANK_TRANSFER' %}selected{% endif %}>🏦 Bank Transfer</option>
+                                <option value="CARD" {% if editing_invoice and editing_invoice.payment_mode == 'CARD' %}selected{% endif %}>💳 Card</option>
+                                <option value="KHATA_CREDIT" {% if editing_invoice and editing_invoice.payment_mode == 'KHATA_CREDIT' %}selected{% endif %}>⏳ Credit / Khata Due (Unpaid)</option>
                             </select>
                         </div>
                         <div>
                             <span class="text-xs text-slate-400 block">Amount Paid Now (₹):</span>
-                            <input type="number" id="pos-amount-paid" placeholder="0.00" class="w-28 text-xs font-bold px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none">
+                            <input type="number" id="pos-amount-paid" value="{% if editing_invoice %}{{ editing_invoice.amount_paid }}{% endif %}" placeholder="0.00" class="w-28 text-xs font-bold px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none">
                         </div>
                     </div>
 
@@ -171,8 +219,8 @@
                             <span class="text-xs text-slate-400 block">Grand Total:</span>
                             <span class="text-3xl font-black text-emerald-400" id="pos-grand-total">₹0.00</span>
                         </div>
-                        <button type="button" onclick="submitPOSInvoice()" class="px-6 py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-sm rounded-2xl shadow-lg transition flex items-center gap-2">
-                            <span>SUBMIT & BILL ⚡</span>
+                        <button type="button" id="pos-submit-btn" onclick="submitPOSInvoice()" class="px-6 py-3 {% if editing_invoice %}bg-blue-600 hover:bg-blue-500 text-white{% else %}bg-emerald-500 hover:bg-emerald-400 text-slate-950{% endif %} font-black text-sm rounded-2xl shadow-lg transition flex items-center gap-2">
+                            <span id="pos-submit-btn-text">{% if editing_invoice %}UPDATE INVOICE (#{{ editing_invoice.invoice_number }}) 🔄{% else %}SUBMIT & BILL ⚡{% endif %}</span>
                         </button>
                     </div>
                 </div>
@@ -201,11 +249,11 @@
                             <span class="text-[10px] text-slate-400 block">{{ inv.vehicle_reg_no or 'Counter Sale' }}</span>
                         </div>
                         <div class="text-right">
-                            <span class="font-black text-xs text-slate-900">₹{{ "{:,.2f}".format(inv.grand_total) }}</span>
-                            <span class="block text-[10px] font-bold {% if inv.payment_status == 'PAID' %}text-emerald-600{% elif inv.payment_status == 'PARTIAL' %}text-amber-600{% else %}text-rose-600{% endif %}">
+                            <span class="font-black text-xs {% if inv.payment_status == 'CANCELLED' %}line-through text-slate-400{% else %}text-slate-900{% endif %}">₹{{ "{:,.2f}".format(inv.grand_total) }}</span>
+                            <span class="block text-[10px] font-bold {% if inv.payment_status == 'PAID' %}text-emerald-600{% elif inv.payment_status == 'PARTIAL' %}text-amber-600{% elif inv.payment_status == 'CANCELLED' %}text-rose-600 bg-rose-100 px-1.5 py-0.5 rounded-md font-black{% else %}text-rose-600{% endif %}">
                                 {{ inv.payment_status }}
                             </span>
-                            {% if inv.balance_due and inv.balance_due > 0 %}
+                            {% if inv.balance_due and inv.balance_due > 0 and inv.payment_status != 'CANCELLED' %}
                             <span class="block text-[10px] font-bold text-rose-500">Due: ₹{{ "{:,.2f}".format(inv.balance_due) }}</span>
                             {% endif %}
                         </div>
@@ -214,23 +262,28 @@
                     <div class="pt-2 border-t border-slate-200/60 flex items-center justify-between text-xs">
                         <span class="text-[10px] text-slate-400">{{ inv.invoice_date }}</span>
                         <div class="flex items-center gap-1">
-                            {% if inv.balance_due and inv.balance_due > 0 %}
+                            {% if inv.balance_due and inv.balance_due > 0 and inv.payment_status != 'CANCELLED' %}
                             <button onclick="openRecordPaymentModal('{{ inv.id }}', '{{ inv.invoice_number }}', {{ inv.balance_due }})" class="p-1 rounded bg-amber-100 text-amber-800 hover:bg-amber-200 text-[11px] font-bold" title="Record Installment / Payment">
                                 💰 Pay
+                            </button>
+                            {% endif %}
+                            {% if inv.payment_status != 'CANCELLED' %}
+                            <button onclick="startEditInvoice('{{ inv.id }}')" class="p-1 rounded bg-blue-100 text-blue-700 hover:bg-blue-200 text-xs font-bold" title="Edit Bill (Master PIN Required)">
+                                ✏️
                             </button>
                             {% endif %}
                             <button onclick="shareInvoiceWhatsApp('{{ inv.id }}')" class="p-1 rounded bg-emerald-100 text-emerald-700 hover:bg-emerald-200" title="WhatsApp Share">
                                 💬
                             </button>
-                            <button onclick="printA4Invoice('{{ inv.id }}')" class="p-1 rounded bg-slate-200 text-slate-700 hover:bg-slate-300" title="A4 Print">
+                            <!-- Direct PDF Print Popup -->
+                            <button onclick="openPdfPrint('{{ inv.id }}')" class="p-1 rounded bg-purple-100 text-purple-700 hover:bg-purple-200" title="Print PDF Bill">
                                 🖨️
                             </button>
-                            <a href="/api/invoices/{{ inv.id }}/pdf" target="_blank" class="p-1 rounded bg-blue-100 text-blue-700 hover:bg-blue-200" title="PDF">
-                                📄
-                            </a>
-                            <button onclick="promptDeleteInvoice('{{ inv.id }}')" class="p-1 rounded bg-rose-50 text-rose-600 hover:bg-rose-100" title="Delete Bill (Master PIN Required)">
-                                🗑️
+                            {% if inv.payment_status != 'CANCELLED' %}
+                            <button onclick="promptCancelInvoice('{{ inv.id }}', '{{ inv.invoice_number }}')" class="p-1 rounded bg-rose-50 text-rose-600 hover:bg-rose-100" title="Cancel Bill & Restock Parts (Sales Return - Master PIN Required)">
+                                🚫
                             </button>
+                            {% endif %}
                         </div>
                     </div>
                 </div>
@@ -459,6 +512,10 @@
         renderPOSTable();
     }
 
+    function onGstTypeChange() {
+        recalculateTotals();
+    }
+
     function recalculateTotals() {
         let laborTotal = 0;
         let partsTotal = 0;
@@ -474,12 +531,35 @@
             }
         });
 
+        const isInterstate = document.getElementById('pos-gst-type')?.value === 'INTER_STATE';
+        const cgstTotal = isInterstate ? 0 : (taxTotal / 2);
+        const sgstTotal = isInterstate ? 0 : (taxTotal / 2);
+        const igstTotal = isInterstate ? taxTotal : 0;
+
         const discount = parseFloat(document.getElementById('pos-discount').value) || 0;
         const grandTotal = Math.max(0, (laborTotal + partsTotal + taxTotal) - discount);
 
         document.getElementById('pos-labor-total').innerText = `₹${laborTotal.toFixed(2)}`;
         document.getElementById('pos-parts-total').innerText = `₹${partsTotal.toFixed(2)}`;
-        document.getElementById('pos-tax-total').innerText = `₹${taxTotal.toFixed(2)}`;
+
+        const boxCgstSgst = document.getElementById('box-cgst-sgst');
+        const boxIgst = document.getElementById('box-igst');
+
+        if (isInterstate) {
+            if (boxCgstSgst) boxCgstSgst.classList.add('hidden');
+            if (boxIgst) {
+                boxIgst.classList.remove('hidden');
+                document.getElementById('pos-igst-total').innerText = `IGST: ₹${igstTotal.toFixed(2)}`;
+            }
+        } else {
+            if (boxCgstSgst) {
+                boxCgstSgst.classList.remove('hidden');
+                document.getElementById('pos-cgst-total').innerText = `CGST: ₹${cgstTotal.toFixed(2)}`;
+                document.getElementById('pos-sgst-total').innerText = `SGST: ₹${sgstTotal.toFixed(2)}`;
+            }
+            if (boxIgst) boxIgst.classList.add('hidden');
+        }
+
         document.getElementById('pos-grand-total').innerText = `₹${grandTotal.toFixed(2)}`;
 
         const paidField = document.getElementById('pos-amount-paid');
@@ -515,7 +595,9 @@
         const discount = parseFloat(document.getElementById('pos-discount').value) || 0;
         const prefillJobId = document.getElementById('prefill-job-id')?.value || null;
         const prefillJobNumber = document.getElementById('prefill-job-number')?.value || null;
-        
+        const editingInvoiceId = document.getElementById('editing-invoice-id')?.value || null;
+        const isInterstate = document.getElementById('pos-gst-type')?.value === 'INTER_STATE';
+
         let laborTotal = 0, partsTotal = 0, taxTotal = 0;
         posItems.forEach(i => {
             const rowTotal = i.quantity * i.unit_price;
@@ -530,6 +612,8 @@
         const amountPaid = amountPaidInput !== "" ? parseFloat(amountPaidInput) : (paymentMode === 'KHATA_CREDIT' ? 0.0 : grandTotal);
 
         const payload = {
+            editing_invoice_id: editingInvoiceId,
+            is_interstate: isInterstate,
             customer_name: customerName,
             customer_phone: customerPhone,
             vehicle_reg_no: vehicleReg,
@@ -562,15 +646,148 @@
             });
             const data = await res.json();
             if (res.ok) {
-                showToast(`✅ Invoice #${data.invoice_number} created successfully!`, "success");
+                showToast(`✅ Invoice #${data.invoice_number} ${data.is_updated ? 'updated' : 'created'} successfully!`, "success");
+                
+                // Immediately popup the PDF print dialog / window!
+                window.open(`/api/invoices/${data.invoice_id}/pdf`, '_blank');
+                
                 setTimeout(() => {
                     window.location.href = `/billing`;
-                }, 800);
+                }, 1000);
             } else {
                 showToast("Invoice creation failed: " + (data.detail || "Error"), "error");
             }
         } catch (e) {
             showToast("Network error: " + e, "error");
+        }
+    }
+
+    // Direct PDF Print Popup
+    function openPdfPrint(invoiceId) {
+        window.open(`/api/invoices/${invoiceId}/pdf`, '_blank');
+    }
+
+    // Start Editing an Invoice with Master PIN
+    async function startEditInvoice(invoiceId) {
+        const pin = prompt("🔐 Enter Master Security PIN (default: 1234) to edit this bill:");
+        if (!pin) return;
+
+        try {
+            const vResp = await fetch('/api/invoices/verify-pin', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pin: pin })
+            });
+            if (!vResp.ok) {
+                showToast("Invalid Master Security PIN", "error");
+                return;
+            }
+
+            const resp = await fetch(`/api/invoices/${invoiceId}`);
+            const data = await resp.json();
+            if (resp.ok && data.invoice) {
+                loadInvoiceDataIntoPOS(data.invoice);
+                showToast(`Invoice #${data.invoice.invoice_number} loaded for editing!`, "info");
+            } else {
+                showToast("Could not load invoice: " + (data.detail || "Error"), "error");
+            }
+        } catch(e) {
+            showToast("Error loading invoice: " + e, "error");
+        }
+    }
+
+    function loadInvoiceDataIntoPOS(inv) {
+        document.getElementById('bill-cust-name').value = inv.customer_name || '';
+        document.getElementById('bill-cust-phone').value = inv.customer_phone || '';
+        document.getElementById('bill-veh-no').value = inv.vehicle_reg_no || '';
+        document.getElementById('pos-payment-mode').value = inv.payment_mode || 'UPI';
+        document.getElementById('pos-discount').value = inv.discount_amount || 0;
+        document.getElementById('pos-amount-paid').value = inv.amount_paid != null ? inv.amount_paid : '';
+        
+        if (document.getElementById('pos-gst-type')) {
+            document.getElementById('pos-gst-type').value = inv.is_interstate ? 'INTER_STATE' : 'INTRA_STATE';
+        }
+
+        document.getElementById('editing-invoice-id').value = inv.id;
+        document.getElementById('editing-invoice-number').value = inv.invoice_number;
+
+        // Show Edit Banner
+        const editBanner = document.getElementById('editing-banner-container');
+        if (editBanner) {
+            editBanner.classList.remove('hidden');
+            document.getElementById('editing-banner-title').innerText = `Editing Existing Bill #${inv.invoice_number}`;
+        }
+
+        // Change Submit Button to Update
+        const submitBtnText = document.getElementById('pos-submit-btn-text');
+        const submitBtn = document.getElementById('pos-submit-btn');
+        if (submitBtnText) submitBtnText.innerText = `UPDATE INVOICE (#${inv.invoice_number}) 🔄`;
+        if (submitBtn) {
+            submitBtn.classList.remove('bg-emerald-500', 'hover:bg-emerald-400', 'text-slate-950');
+            submitBtn.classList.add('bg-blue-600', 'hover:bg-blue-500', 'text-white');
+        }
+
+        // Load Items
+        posItems = (inv.items || []).map(i => ({
+            id: 'pos_' + Math.random().toString(36).substr(2, 9),
+            item_type: i.item_type || 'PART',
+            item_id: i.item_id || null,
+            name: i.name,
+            barcode: i.barcode || '-',
+            hsn_sac: i.hsn_sac || (i.item_type === 'LABOR' ? '9987' : '8536'),
+            quantity: i.quantity || 1,
+            unit_price: i.unit_price || 0,
+            tax_rate: i.tax_rate || 0,
+            already_deducted: false
+        }));
+
+        renderPOSTable();
+        recalculateTotals();
+
+        window.scrollTo({ top: 120, behavior: 'smooth' });
+    }
+
+    function cancelEditingInvoice() {
+        document.getElementById('editing-invoice-id').value = '';
+        document.getElementById('editing-invoice-number').value = '';
+        
+        const editBanner = document.getElementById('editing-banner-container');
+        if (editBanner) editBanner.classList.add('hidden');
+
+        const submitBtnText = document.getElementById('pos-submit-btn-text');
+        const submitBtn = document.getElementById('pos-submit-btn');
+        if (submitBtnText) submitBtnText.innerText = 'SUBMIT & BILL ⚡';
+        if (submitBtn) {
+            submitBtn.classList.remove('bg-blue-600', 'hover:bg-blue-500', 'text-white');
+            submitBtn.classList.add('bg-emerald-500', 'hover:bg-emerald-400', 'text-slate-950');
+        }
+
+        posItems = [];
+        renderPOSTable();
+        recalculateTotals();
+        showToast("Edit cancelled. Ready for new bill.", "info");
+    }
+
+    // Cancel Invoice with Master PIN & Process Sales Return
+    async function promptCancelInvoice(invoiceId, invoiceNumber) {
+        const pin = prompt(`⚠️ Enter Master PIN (default: 1234) to CANCEL Invoice #${invoiceNumber} and restore all parts back to inventory (Sales Return):`);
+        if (!pin) return;
+
+        try {
+            const resp = await fetch(`/api/invoices/${invoiceId}/cancel`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pin: pin })
+            });
+            const data = await resp.json();
+            if (resp.ok && data.success) {
+                showToast(data.message, "success");
+                setTimeout(() => window.location.reload(), 1000);
+            } else {
+                showToast(data.detail || "Cancellation failed", "error");
+            }
+        } catch(e) {
+            showToast("Cancel error: " + e, "error");
         }
     }
 
@@ -582,9 +799,9 @@
         });
     }
 
-    // Auto-populate items if loaded from Job Card
+    // Auto-populate items if loaded from Job Card or Edit Invoice
     window.addEventListener('DOMContentLoaded', () => {
-        {% if prefill_job and prefill_items_json %}
+        {% if (editing_invoice or prefill_job) and prefill_items_json %}
         try {
             const rawItems = {{ prefill_items_json|safe }};
             if (rawItems && rawItems.length > 0) {
@@ -596,23 +813,26 @@
                         item_id: i.item_id || null,
                         name: i.name,
                         barcode: i.barcode || '-',
-                        hsn_sac: i.hsn_code || (i.item_type === 'LABOR' ? '9987' : '8536'),
+                        hsn_sac: i.hsn_code || i.hsn_sac || (i.item_type === 'LABOR' ? '9987' : '8536'),
                         quantity: i.quantity || 1,
                         unit_price: i.unit_price || 0,
                         tax_rate: i.tax_rate || 0,
-                        already_deducted: i.item_type === 'PART'
+                        already_deducted: !!i.already_deducted
                     });
                 });
                 renderPOSTable();
                 recalculateTotals();
+                {% if editing_invoice %}
+                showToast("Invoice #{{ editing_invoice.invoice_number }} loaded for editing!", "info");
+                {% else %}
                 showToast("Job Card parts and labor loaded into bill!", "info");
+                {% endif %}
             }
         } catch(e) {
-            console.error("Error populating job items:", e);
+            console.error("Error populating items:", e);
         }
         {% endif %}
     });
-
 
     function filterPartsList() {
         const q = document.getElementById('pos-part-search').value.toLowerCase();
@@ -667,28 +887,6 @@
             }
         } catch (err) {
             showToast("Error: " + err, "error");
-        }
-    }
-
-    async function promptDeleteInvoice(invoiceId) {
-        const pin = prompt("🔐 Enter Master Security PIN (default: 1234) to delete this bill:");
-        if (!pin) return;
-
-        try {
-            const resp = await fetch(`/api/invoices/${invoiceId}/delete`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ pin: pin })
-            });
-            const data = await resp.json();
-            if (resp.ok && data.success) {
-                showToast("Invoice deleted & stock restored", "success");
-                setTimeout(() => window.location.reload(), 600);
-            } else {
-                showToast(data.detail || "Invalid Master PIN", "error");
-            }
-        } catch (e) {
-            showToast("Delete failed: " + e, "error");
         }
     }
 

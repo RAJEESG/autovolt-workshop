@@ -613,8 +613,17 @@ def run_schema_migrations(cursor, conn):
         ("activity_logs", "username", "TEXT DEFAULT 'Admin'"),
         ("activity_logs", "entity_type", "TEXT"),
         ("activity_logs", "entity_id", "TEXT"),
-        ("activity_logs", "details", "TEXT"),
         ("purchase_bills", "status", "TEXT DEFAULT 'CONFIRMED'"),
+        ("invoices", "igst_total", "REAL DEFAULT 0.0"),
+        ("invoices", "is_interstate", "INTEGER DEFAULT 0"),
+        ("invoices", "place_of_supply", "TEXT DEFAULT 'Kerala (32)'"),
+        ("invoices", "updated_at", "TEXT"),
+        ("invoices", "status", "TEXT DEFAULT 'ACTIVE'"),
+        ("purchase_bills", "cgst_amount", "REAL DEFAULT 0.0"),
+        ("purchase_bills", "sgst_amount", "REAL DEFAULT 0.0"),
+        ("purchase_bills", "igst_amount", "REAL DEFAULT 0.0"),
+        ("purchase_bills", "is_interstate", "INTEGER DEFAULT 0"),
+        ("purchase_bills", "supplier_state", "TEXT DEFAULT 'Kerala (32)'"),
     ]
 
     for table, col, col_type in migrations:

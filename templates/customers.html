@@ -255,8 +255,8 @@
                         </td>
                         <td class="py-2.5 px-3 text-right font-black text-slate-900">₹${(inv.grand_total || 0).toFixed(2)}</td>
                         <td class="py-2.5 px-3 text-right space-x-1">
-                            <a href="/invoice/${inv.id}/print" target="_blank" class="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-bold text-[11px] transition" title="Print Invoice">
-                                🖨️ Print
+                            <a href="/api/invoices/${inv.id}/pdf" target="_blank" class="px-2 py-1 bg-red-50 hover:bg-red-100 text-red-700 rounded-lg font-bold text-[11px] transition flex items-center gap-1 w-max ml-auto" title="Print PDF Invoice">
+                                <span>📄 PDF Bill</span>
                             </a>
                         </td>
                     `;

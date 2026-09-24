@@ -687,16 +687,33 @@ async def convert_job_card_to_invoice(job_id: str):
 # =========================================================
 
 @app.get("/billing", response_class=HTMLResponse)
-async def billing_page(request: Request, from_job: Optional[str] = Query(None)):
+async def billing_page(request: Request, from_job: Optional[str] = Query(None), edit_invoice: Optional[str] = Query(None)):
     conn = db.get_db_connection()
     cursor = conn.cursor()
     
     prefill_job = None
+    editing_invoice = None
+    existing_linked_invoice = None
     prefill_items_json = "[]"
-    if from_job:
+    
+    if edit_invoice:
+        cursor.execute("SELECT * FROM invoices WHERE id = ?", (edit_invoice,))
+        inv_r = cursor.fetchone()
+        if inv_r:
+            cursor.execute("SELECT * FROM invoice_items WHERE invoice_id = ?", (edit_invoice,))
+            inv_items = [dict(r) for r in cursor.fetchall()]
+            editing_invoice = dict(inv_r)
+            editing_invoice["items"] = inv_items
+            prefill_items_json = json.dumps(inv_items, default=str)
+    elif from_job:
         cursor.execute("SELECT * FROM job_cards WHERE id = ?", (from_job,))
         job_row = cursor.fetchone()
         if job_row:
+            cursor.execute("SELECT * FROM invoices WHERE job_card_id = ? AND payment_status != 'CANCELLED' ORDER BY created_at DESC LIMIT 1", (from_job,))
+            eli = cursor.fetchone()
+            if eli:
+                existing_linked_invoice = dict(eli)
+                
             cursor.execute("SELECT * FROM job_items WHERE job_card_id = ?", (from_job,))
             job_items = [dict(r) for r in cursor.fetchall()]
             prefill_job = {
@@ -740,105 +757,290 @@ async def billing_page(request: Request, from_job: Optional[str] = Query(None)):
             "customers": customers,
             "gst_slabs_list": gst_slabs_list,
             "prefill_job": prefill_job,
+            "editing_invoice": editing_invoice,
+            "existing_linked_invoice": existing_linked_invoice,
             "prefill_items_json": prefill_items_json,
             "from_job": from_job
         }
     )
 
+@app.post("/api/invoices/verify-pin")
+async def verify_invoice_pin(payload: Dict[str, Any]):
+    pin = payload.get("pin", "")
+    workshop = get_current_workshop()
+    if not verify_master_pin(pin, workshop.get("master_pin", "1234")):
+        raise HTTPException(status_code=403, detail="Invalid Master Security PIN")
+    return {"success": True}
+
+@app.get("/api/invoices/{invoice_id}")
+async def get_invoice_detail(invoice_id: str):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,))
+    inv = cursor.fetchone()
+    if not inv:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    invoice = dict(inv)
+    cursor.execute("SELECT * FROM invoice_items WHERE invoice_id = ?", (invoice_id,))
+    invoice["items"] = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return {"success": True, "invoice": invoice}
+
 @app.post("/api/invoices")
-async def create_pos_invoice(payload: Dict[str, Any]):
+@app.post("/api/invoices/{invoice_id}/edit")
+@app.put("/api/invoices/{invoice_id}")
+async def save_or_update_pos_invoice(payload: Dict[str, Any], invoice_id: Optional[str] = None):
     conn = db.get_db_connection()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT COUNT(*) FROM invoices")
-    cnt = cursor.fetchone()[0] + 1
-    invoice_number = f"INV-2026-{cnt:03d}"
-    invoice_id = f"inv_{uuid.uuid4().hex[:8]}"
-    today_str = get_ist_today_str()
+    editing_id = invoice_id or payload.get("editing_invoice_id")
+    workshop = get_current_workshop()
     now_ist = get_ist_now_str()
+    today_str = get_ist_today_str()
     
     items = payload.get("items", [])
     subtotal_labor = sum((float(i.get("unit_price") or 0.0)) * (int(i.get("quantity") or 1)) for i in items if i.get("item_type") == "LABOR")
     subtotal_parts = sum((float(i.get("unit_price") or 0.0)) * (int(i.get("quantity") or 1)) for i in items if i.get("item_type") == "PART")
+    taxable_subtotal = subtotal_labor + subtotal_parts
+    
+    is_interstate = 1 if payload.get("is_interstate") else 0
+    
+    total_tax = 0.0
+    for i in items:
+        u_p = float(i.get("unit_price") or 0.0)
+        u_q = int(i.get("quantity") or 1)
+        t_r = float(i.get("tax_rate") or 0.0)
+        total_tax += (u_p * u_q) * (t_r / 100.0)
+    total_tax = round(total_tax, 2)
+    
+    if is_interstate:
+        cgst_total = 0.0
+        sgst_total = 0.0
+        igst_total = total_tax
+    else:
+        cgst_total = round(total_tax / 2.0, 2)
+        sgst_total = round(total_tax - cgst_total, 2)
+        igst_total = 0.0
+        
     discount = float(payload.get("discount_amount", 0.0))
-    grand_total = max(0.0, (subtotal_labor + subtotal_parts) - discount)
+    grand_total = max(0.0, (subtotal_labor + subtotal_parts + total_tax) - discount)
     amount_paid = float(payload.get("amount_paid", grand_total))
     balance_due = max(0.0, grand_total - amount_paid)
     payment_status = "PAID" if balance_due <= 0 else ("PARTIAL" if amount_paid > 0 else "UNPAID")
     
-    workshop = get_current_workshop()
     vpa = workshop.get("upi_id", "sparkautoworkshop@okaxis")
     pay_for_qr = balance_due if balance_due > 0 else grand_total
-    upi_link = generate_upi_link(vpa, workshop.get("name", "Auto Workshop"), pay_for_qr, f"Inv_{invoice_number}")
     
     job_card_id = payload.get("job_card_id")
     job_number = payload.get("job_number")
-
-    cursor.execute("""
-    INSERT INTO invoices (
-        id, invoice_number, invoice_date, invoice_type, job_card_id, job_number,
-        customer_name, customer_phone, vehicle_reg_no,
-        subtotal_labor, subtotal_parts, taxable_subtotal, discount_amount,
-        grand_total, amount_paid, balance_due, payment_status, payment_mode,
-        upi_payment_link, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        invoice_id, invoice_number, today_str, payload.get("invoice_type", "JOB_SERVICE" if job_card_id else "COUNTER_SALE"),
-        job_card_id, job_number,
-        payload.get("customer_name", "Walk-in"), payload.get("customer_phone", "9876543210"),
-        payload.get("vehicle_reg_no", ""),
-        subtotal_labor, subtotal_parts, grand_total, discount,
-        grand_total, amount_paid, balance_due, payment_status,
-        payload.get("payment_mode", "UPI"), upi_link, now_ist
-    ))
     
+    if editing_id:
+        # --- UPDATE EXISTING INVOICE (Same invoice # and id preserved) ---
+        cursor.execute("SELECT * FROM invoices WHERE id = ?", (editing_id,))
+        old_inv = cursor.fetchone()
+        if not old_inv:
+            conn.close()
+            raise HTTPException(status_code=404, detail="Existing invoice not found to update")
+            
+        inv_number = old_inv["invoice_number"]
+        inv_id = editing_id
+        upi_link = generate_upi_link(vpa, workshop.get("name", "Auto Workshop"), pay_for_qr, f"Inv_{inv_number}")
+        
+        # 1. Restore stock from previous invoice items
+        cursor.execute("SELECT * FROM invoice_items WHERE invoice_id = ?", (editing_id,))
+        old_items = cursor.fetchall()
+        for oi in old_items:
+            if oi["item_type"] == "PART" and oi["item_id"]:
+                cursor.execute("UPDATE inventory_items SET stock_qty = stock_qty + ? WHERE id = ?", (oi["quantity"], oi["item_id"]))
+                log_id = f"stk_{uuid.uuid4().hex[:8]}"
+                cursor.execute("""
+                INSERT INTO stock_logs (id, item_id, part_name, barcode, change_qty, new_stock_qty, action_type, reference_id, notes, created_at)
+                VALUES (?, ?, ?, ?, ?, (SELECT stock_qty FROM inventory_items WHERE id = ?), 'EDIT_RESTORE', ?, ?, ?)
+                """, (log_id, oi["item_id"], oi["name"], oi["barcode"], int(oi["quantity"]), oi["item_id"], inv_number, f"Restored during edit of {inv_number}", now_ist))
+        
+        # 2. Clear old items
+        cursor.execute("DELETE FROM invoice_items WHERE invoice_id = ?", (editing_id,))
+        
+        # 3. Update invoice record
+        cursor.execute("""
+        UPDATE invoices SET
+            customer_name = ?, customer_phone = ?, vehicle_reg_no = ?,
+            subtotal_labor = ?, subtotal_parts = ?, taxable_subtotal = ?,
+            cgst_total = ?, sgst_total = ?, igst_total = ?, tax_total = ?,
+            discount_amount = ?, grand_total = ?, amount_paid = ?, balance_due = ?,
+            payment_status = ?, payment_mode = ?, is_interstate = ?,
+            upi_payment_link = ?, updated_at = ?
+        WHERE id = ?
+        """, (
+            payload.get("customer_name", "Walk-in"), payload.get("customer_phone", "9876543210"),
+            payload.get("vehicle_reg_no", ""),
+            subtotal_labor, subtotal_parts, taxable_subtotal,
+            cgst_total, sgst_total, igst_total, total_tax,
+            discount, grand_total, amount_paid, balance_due,
+            payment_status, payload.get("payment_mode", "UPI"), is_interstate,
+            upi_link, now_ist, editing_id
+        ))
+        
+        # 4. Adjust customer khata balance if balance changed
+        old_bal = float(old_inv["balance_due"] or 0.0)
+        bal_diff = balance_due - old_bal
+        if bal_diff != 0 and payload.get("customer_phone"):
+            cursor.execute("UPDATE customers SET khata_balance = MAX(0, khata_balance + ?) WHERE phone = ?", (bal_diff, payload.get("customer_phone").strip()))
+            
+        db.log_audit("EDIT_INVOICE", "invoices", editing_id, f"Updated bill #{inv_number} (New Total: ₹{grand_total:.2f}, Status: {payment_status})", cursor=cursor)
+    else:
+        # --- CREATE NEW INVOICE ---
+        cursor.execute("SELECT COUNT(*) FROM invoices")
+        cnt = cursor.fetchone()[0] + 1
+        inv_number = f"INV-2026-{cnt:03d}"
+        inv_id = f"inv_{uuid.uuid4().hex[:8]}"
+        upi_link = generate_upi_link(vpa, workshop.get("name", "Auto Workshop"), pay_for_qr, f"Inv_{inv_number}")
+
+        cursor.execute("""
+        INSERT INTO invoices (
+            id, invoice_number, invoice_date, invoice_type, job_card_id, job_number,
+            customer_name, customer_phone, vehicle_reg_no,
+            subtotal_labor, subtotal_parts, taxable_subtotal,
+            cgst_total, sgst_total, igst_total, tax_total, discount_amount,
+            grand_total, amount_paid, balance_due, payment_status, payment_mode,
+            is_interstate, upi_payment_link, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            inv_id, inv_number, today_str, payload.get("invoice_type", "JOB_SERVICE" if job_card_id else "COUNTER_SALE"),
+            job_card_id, job_number,
+            payload.get("customer_name", "Walk-in"), payload.get("customer_phone", "9876543210"),
+            payload.get("vehicle_reg_no", ""),
+            subtotal_labor, subtotal_parts, taxable_subtotal,
+            cgst_total, sgst_total, igst_total, total_tax, discount,
+            grand_total, amount_paid, balance_due, payment_status,
+            payload.get("payment_mode", "UPI"), is_interstate, upi_link, now_ist
+        ))
+        
+        # Update customer khata if unpaid/partial
+        if balance_due > 0 and payload.get("customer_phone"):
+            cursor.execute("UPDATE customers SET khata_balance = khata_balance + ? WHERE phone = ?", (balance_due, payload.get("customer_phone").strip()))
+
+        # Record payment if amount_paid > 0
+        if amount_paid > 0:
+            pay_id = f"pay_{uuid.uuid4().hex[:8]}"
+            cursor.execute("""
+            INSERT INTO payments (id, invoice_id, amount, payment_mode, payment_date, notes, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (pay_id, inv_id, amount_paid, payload.get("payment_mode", "UPI"), today_str, f"Payment for {inv_number}", now_ist))
+
+        db.log_audit("CREATE_INVOICE", "invoices", inv_id, f"Created bill #{inv_number} (₹{grand_total:.2f}, Status: {payment_status})", cursor=cursor)
+
+    # Insert items and apply stock deductions
     for i in items:
         inv_item_id = f"ii_{uuid.uuid4().hex[:8]}"
         u_price = float(i.get("unit_price") or 0.0)
         u_qty = int(i.get("quantity") or 1)
         line_total = u_price * u_qty
-        t_rate = float(i.get("tax_rate") or 18.0)
+        t_rate = float(i.get("tax_rate") or 0.0)
         cursor.execute("""
         INSERT INTO invoice_items (
             id, invoice_id, item_type, item_id, barcode, name, hsn_sac,
             quantity, unit_price, tax_rate, taxable_amount, total_price
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            inv_item_id, invoice_id, i.get("item_type", "PART"), i.get("item_id"),
+            inv_item_id, inv_id, i.get("item_type", "PART"), i.get("item_id"),
             i.get("barcode"), i.get("name", "Item"), i.get("hsn_sac", "8536"),
             u_qty, u_price, t_rate,
             line_total, line_total
         ))
         
-        # Only deduct inventory stock if it wasn't already deducted when added to the job card!
         if i.get("item_id") and not i.get("already_deducted"):
             cursor.execute("UPDATE inventory_items SET stock_qty = MAX(0, stock_qty - ?) WHERE id = ?", (u_qty, i["item_id"]))
             log_id = f"stk_{uuid.uuid4().hex[:8]}"
             cursor.execute("""
             INSERT INTO stock_logs (id, item_id, part_name, barcode, change_qty, new_stock_qty, action_type, reference_id, notes, created_at)
             VALUES (?, ?, ?, ?, ?, (SELECT stock_qty FROM inventory_items WHERE id = ?), 'SALE_OUT', ?, ?, ?)
-            """, (log_id, i["item_id"], i.get("name"), i.get("barcode"), -u_qty, i["item_id"], invoice_number, f"Billed in Invoice {invoice_number}", now_ist))
+            """, (log_id, i["item_id"], i.get("name"), i.get("barcode"), -u_qty, i["item_id"], inv_number, f"Billed in Invoice {inv_number}", now_ist))
             
     # If linked to job card, mark job card as COMPLETED
     if job_card_id:
         cursor.execute("UPDATE job_cards SET status = 'COMPLETED', completed_at = ? WHERE id = ?", (now_ist, job_card_id))
 
-    # Update customer khata if unpaid/partial
-    if balance_due > 0 and payload.get("customer_phone"):
-        cursor.execute("UPDATE customers SET khata_balance = khata_balance + ? WHERE phone = ?", (balance_due, payload.get("customer_phone").strip()))
-
-    # Record payment if amount_paid > 0
-    if amount_paid > 0:
-        pay_id = f"pay_{uuid.uuid4().hex[:8]}"
-        cursor.execute("""
-        INSERT INTO payments (id, invoice_id, amount, payment_mode, payment_date, notes, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (pay_id, invoice_id, amount_paid, payload.get("payment_mode", "UPI"), today_str, f"Payment for {invoice_number}", now_ist))
-
-    db.log_audit("CREATE_INVOICE", "invoices", invoice_id, f"Created bill #{invoice_number} (₹{grand_total:.2f}, Status: {payment_status})", cursor=cursor)
     conn.commit()
     conn.close()
-    return {"success": True, "invoice_id": invoice_id, "invoice_number": invoice_number}
+    return {"success": True, "invoice_id": inv_id, "invoice_number": inv_number, "is_updated": bool(editing_id)}
+
+@app.post("/api/invoices/{invoice_id}/cancel")
+async def cancel_invoice_with_pin(invoice_id: str, payload: Dict[str, Any]):
+    pin = payload.get("pin", "")
+    workshop = get_current_workshop()
+    if not verify_master_pin(pin, workshop.get("master_pin", "1234")):
+        raise HTTPException(status_code=403, detail="Invalid Master Security PIN")
+
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,))
+    inv = cursor.fetchone()
+    if not inv:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    
+    if inv["payment_status"] == "CANCELLED":
+        conn.close()
+        return {"success": True, "message": "Invoice is already cancelled"}
+
+    now_ist = get_ist_now_str()
+    invoice_number = inv["invoice_number"]
+
+    # 1. Restore inventory stock for all parts in the invoice (Sales Return)
+    cursor.execute("SELECT * FROM invoice_items WHERE invoice_id = ?", (invoice_id,))
+    items = cursor.fetchall()
+    restored_parts_count = 0
+    for itm in items:
+        if itm["item_type"] == "PART" and itm["item_id"]:
+            cursor.execute("UPDATE inventory_items SET stock_qty = stock_qty + ? WHERE id = ?", (itm["quantity"], itm["item_id"]))
+            log_id = f"stk_{uuid.uuid4().hex[:8]}"
+            cursor.execute("""
+            INSERT INTO stock_logs (id, item_id, part_name, barcode, change_qty, new_stock_qty, action_type, reference_id, notes, created_at)
+            VALUES (?, ?, ?, ?, ?, (SELECT stock_qty FROM inventory_items WHERE id = ?), 'SALES_RETURN', ?, ?, ?)
+            """, (log_id, itm["item_id"], itm["name"], itm["barcode"], int(itm["quantity"]), itm["item_id"], invoice_number, f"Sales Return / Bill {invoice_number} Cancelled", now_ist))
+            restored_parts_count += 1
+
+    # 2. Record Sales Return entry
+    sr_id = f"sr_{uuid.uuid4().hex[:8]}"
+    cursor.execute("SELECT COUNT(*) FROM sales_returns")
+    cnt = cursor.fetchone()[0] + 1
+    return_num = f"CN-2026-{cnt:03d}"
+    try:
+        cursor.execute("""
+        INSERT INTO sales_returns (
+            id, return_number, invoice_id, customer_name, customer_phone,
+            item_id, item_name, quantity, refund_amount, return_reason, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            sr_id, return_num, invoice_id, inv["customer_name"], inv["customer_phone"],
+            "ALL", f"Sales Return for Bill #{invoice_number}", len(items),
+            inv["grand_total"], "Invoice Cancelled & Stock Restored", now_ist
+        ))
+    except Exception:
+        pass
+
+    # 3. If there was an unpaid balance on customer khata, deduct it
+    bal = float(inv["balance_due"] or 0.0)
+    if bal > 0 and inv["customer_phone"]:
+        cursor.execute("UPDATE customers SET khata_balance = MAX(0, khata_balance - ?) WHERE phone = ?", (bal, inv["customer_phone"].strip()))
+
+    # 4. Mark invoice status as CANCELLED
+    cursor.execute("""
+    UPDATE invoices SET payment_status = 'CANCELLED', status = 'CANCELLED',
+    notes = COALESCE(notes, '') || ' [CANCELLED on ' || ? || ' - Sales Return Restocked]'
+    WHERE id = ?
+    """, (now_ist, invoice_id))
+
+    # 5. If linked to job card, update job card status
+    if inv["job_card_id"]:
+        cursor.execute("UPDATE job_cards SET status = 'IN_PROGRESS' WHERE id = ?", (inv["job_card_id"],))
+
+    db.log_audit("CANCEL_INVOICE", "invoices", invoice_id, f"Cancelled #{invoice_number} and processed Sales Return (+stock restored)", cursor=cursor)
+    conn.commit()
+    conn.close()
+    return {"success": True, "message": f"Invoice #{invoice_number} cancelled and parts restored to inventory."}
 
 
 @app.post("/api/invoices/{invoice_id}/record-payment")
@@ -1390,7 +1592,12 @@ async def record_purchase_bill(
     payment_mode: str = Form("BANK_TRANSFER"),
     status: str = Form("CONFIRMED"),
     notes: Optional[str] = Form(None),
-    items_json: Optional[str] = Form(None)
+    items_json: Optional[str] = Form(None),
+    supplier_state: Optional[str] = Form("Kerala (32)"),
+    is_interstate: Optional[int] = Form(0),
+    cgst_amount: Optional[float] = Form(0.0),
+    sgst_amount: Optional[float] = Form(0.0),
+    igst_amount: Optional[float] = Form(0.0)
 ):
     conn = db.get_db_connection()
     cursor = conn.cursor()
@@ -1398,9 +1605,16 @@ async def record_purchase_bill(
     now_ist = get_ist_now_str()
 
     cursor.execute("""
-    INSERT INTO purchase_bills (id, bill_number, supplier_name, bill_date, total_amount, payment_mode, status, notes, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (pur_id, bill_number, supplier_name, bill_date, total_amount, payment_mode, status, notes, now_ist))
+    INSERT INTO purchase_bills (
+        id, bill_number, supplier_name, bill_date, total_amount, payment_mode, 
+        status, notes, created_at, supplier_state, is_interstate, cgst_amount, sgst_amount, igst_amount
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        pur_id, bill_number, supplier_name, bill_date, total_amount, payment_mode, 
+        status, notes, now_ist, supplier_state or "Kerala (32)", is_interstate or 0,
+        cgst_amount or 0.0, sgst_amount or 0.0, igst_amount or 0.0
+    ))
 
     # Parse items if passed
     if items_json:
@@ -1956,39 +2170,9 @@ async def public_job_view(request: Request, job_id: str):
         }
     )
 
-@app.get("/invoice/{invoice_id}/print", response_class=HTMLResponse)
-async def print_invoice_page(request: Request, invoice_id: str, format: str = Query("a4")):
-    conn = db.get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,))
-    inv_row = cursor.fetchone()
-    if not inv_row:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Invoice not found")
-    invoice = dict(inv_row)
-    
-    cursor.execute("SELECT * FROM invoice_items WHERE invoice_id = ?", (invoice_id,))
-    invoice["items"] = [dict(row) for row in cursor.fetchall()]
-    conn.close()
-    
-    workshop = get_current_workshop()
-    
-    vpa = workshop.get("upi_id", "sparkautoworkshop@okaxis")
-    grand_total = float(invoice.get("grand_total", 0.0))
-    upi_link = invoice.get("upi_payment_link") or generate_upi_link(vpa, workshop.get("name", "Auto Workshop"), grand_total, f"Inv_{invoice.get('invoice_number')}")
-    upi_qr_url = generate_upi_qr_data_url(upi_link)
-    
-    return templates.TemplateResponse(
-        request=request,
-        name="print_invoice.html",
-        context={
-            "invoice": invoice,
-            "items": invoice["items"],
-            "workshop": workshop,
-            "print_format": format,
-            "upi_qr_url": upi_qr_url
-        }
-    )
+@app.get("/invoice/{invoice_id}/print")
+async def print_invoice_page(request: Request, invoice_id: str):
+    return RedirectResponse(url=f"/api/invoices/{invoice_id}/pdf", status_code=303)
 
 if __name__ == "__main__":
     import uvicorn

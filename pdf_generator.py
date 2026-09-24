@@ -99,6 +99,11 @@ def generate_invoice_pdf_bytes(invoice: Dict[str, Any], workshop: Dict[str, Any]
 
     story = []
     
+    if invoice.get("payment_status") == "CANCELLED" or invoice.get("status") == "CANCELLED":
+        cancel_p = Paragraph("<font size=11 color='#dc2626'><b>⚠️ THIS INVOICE IS CANCELLED — PARTS RESTOCKED (SALES RETURN) ⚠️</b></font>", ParagraphStyle('Canc', parent=styles['Normal'], alignment=1))
+        story.append(cancel_p)
+        story.append(Spacer(1, 2 * mm))
+        
     # --- 1. WORKSHOP HEADER ---
     header_data = [
         [
@@ -189,19 +194,41 @@ def generate_invoice_pdf_bytes(invoice: Dict[str, Any], workshop: Dict[str, Any]
         [Paragraph("Labor Subtotal:", normal_cell), Paragraph(f"₹ {invoice.get('subtotal_labor', 0):,.2f}", right_cell)],
         [Paragraph("Parts Subtotal:", normal_cell), Paragraph(f"₹ {invoice.get('subtotal_parts', 0):,.2f}", right_cell)],
     ]
-    if invoice.get("tax_total", 0) > 0:
-        summary_data.append([Paragraph("GST Tax Total:", normal_cell), Paragraph(f"₹ {invoice.get('tax_total', 0):,.2f}", right_cell)])
+    
+    is_interstate = bool(invoice.get("is_interstate"))
+    cgst = float(invoice.get("cgst_total") or 0.0)
+    sgst = float(invoice.get("sgst_total") or 0.0)
+    igst = float(invoice.get("igst_total") or 0.0)
+    tax_total = float(invoice.get("tax_total") or (cgst + sgst + igst))
+    
+    if is_interstate or igst > 0:
+        summary_data.append([Paragraph("IGST Total (Inter-State):", normal_cell), Paragraph(f"₹ {igst or tax_total:,.2f}", right_cell)])
+    else:
+        if cgst > 0 or sgst > 0:
+            summary_data.append([Paragraph("CGST Total (Central):", normal_cell), Paragraph(f"₹ {cgst:,.2f}", right_cell)])
+            summary_data.append([Paragraph("SGST Total (State):", normal_cell), Paragraph(f"₹ {sgst:,.2f}", right_cell)])
+        elif tax_total > 0:
+            half = round(tax_total / 2.0, 2)
+            summary_data.append([Paragraph("CGST Total (Central):", normal_cell), Paragraph(f"₹ {half:,.2f}", right_cell)])
+            summary_data.append([Paragraph("SGST Total (State):", normal_cell), Paragraph(f"₹ {tax_total - half:,.2f}", right_cell)])
+            
     if invoice.get("discount_amount", 0) > 0:
         summary_data.append([Paragraph("Discount:", normal_cell), Paragraph(f"- ₹ {invoice.get('discount_amount', 0):,.2f}", right_cell)])
         
     summary_data.append([Paragraph("<b>Grand Total:</b>", bold_cell), Paragraph(f"<b>₹ {grand_total:,.2f}</b>", right_bold)])
     summary_data.append([Paragraph("Amount Paid:", normal_cell), Paragraph(f"₹ {invoice.get('amount_paid', 0):,.2f}", right_cell)])
     
-    bal_color = "#dc2626" if balance_due > 0 else "#16a34a"
-    summary_data.append([
-        Paragraph(f"<font color='{bal_color}'><b>Balance Due:</b></font>", bold_cell),
-        Paragraph(f"<font color='{bal_color}'><b>₹ {balance_due:,.2f}</b></font>", right_bold)
-    ])
+    if invoice.get("payment_status") == "CANCELLED":
+        summary_data.append([
+            Paragraph("<font color='#dc2626'><b>Status:</b></font>", bold_cell),
+            Paragraph("<font color='#dc2626'><b>CANCELLED / VOID</b></font>", right_bold)
+        ])
+    else:
+        bal_color = "#dc2626" if balance_due > 0 else "#16a34a"
+        summary_data.append([
+            Paragraph(f"<font color='{bal_color}'><b>Balance Due:</b></font>", bold_cell),
+            Paragraph(f"<font color='{bal_color}'><b>₹ {balance_due:,.2f}</b></font>", right_bold)
+        ])
     
     summary_table = Table(summary_data, colWidths=[40 * mm, 38 * mm])
     summary_table.setStyle(TableStyle([

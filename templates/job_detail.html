@@ -29,18 +29,23 @@
             </button>
             
             {% if linked_invoice %}
-            <!-- View / Print existing bill -->
-            <a href="/invoices/{{ linked_invoice.id }}/print" target="_blank" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-xl transition shadow flex items-center gap-1.5">
+            <!-- View / Print existing PDF bill -->
+            <a href="/api/invoices/{{ linked_invoice.id }}/pdf" target="_blank" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-xl transition shadow flex items-center gap-1.5">
                 <i data-lucide="printer" class="w-4 h-4"></i>
-                <span>Print Bill (#{{ linked_invoice.invoice_number }})</span>
+                <span>Print PDF Bill (#{{ linked_invoice.invoice_number }})</span>
             </a>
-            {% endif %}
-
+            <!-- Edit Existing Bill -->
+            <a href="/billing?edit_invoice={{ linked_invoice.id }}" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl transition shadow flex items-center gap-1.5">
+                <i data-lucide="edit" class="w-4 h-4"></i>
+                <span>Edit Bill (#{{ linked_invoice.invoice_number }})</span>
+            </a>
+            {% else %}
             <!-- Generate Final Invoice Bill (Direct to POS pre-filled) -->
             <a href="/billing?from_job={{ job.id }}" class="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white font-bold text-xs rounded-xl transition shadow flex items-center gap-1.5">
                 <i data-lucide="receipt" class="w-4 h-4"></i>
-                <span>{% if linked_invoice %}Edit / Create New Bill{% else %}Generate Bill & Print{% endif %}</span>
+                <span>Generate Bill & Print</span>
             </a>
+            {% endif %}
         </div>
     </div>
 
