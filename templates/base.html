@@ -130,6 +130,11 @@
                 <span>Purchase Register</span>
             </a>
 
+            <a href="/suppliers" class="flex items-center gap-3 px-3 py-2 rounded-xl transition {% if active_page == 'suppliers' %}bg-primary-600 text-white font-semibold shadow-md shadow-primary-600/30{% else %}hover:bg-slate-800 text-slate-300 hover:text-white{% endif %}">
+                <i data-lucide="truck" class="w-5 h-5"></i>
+                <span>Suppliers Master</span>
+            </a>
+
             <a href="/sales-returns" class="flex items-center gap-3 px-3 py-2 rounded-xl transition {% if active_page == 'sales_returns' %}bg-primary-600 text-white font-semibold shadow-md shadow-primary-600/30{% else %}hover:bg-slate-800 text-slate-300 hover:text-white{% endif %}">
                 <i data-lucide="corner-down-left" class="w-5 h-5"></i>
                 <span>Sales Returns</span>

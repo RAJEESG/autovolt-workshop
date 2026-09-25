@@ -132,12 +132,27 @@
 
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                    <label class="block font-bold text-slate-900 mb-1">Supplier / Distributor Name *</label>
-                    <input type="text" name="supplier_name" required placeholder="e.g. Lucas TVS Kerala Agency" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500">
+                    <div class="flex items-center justify-between mb-1">
+                        <label class="block font-bold text-slate-900 text-xs">Supplier / Distributor *</label>
+                        <button type="button" onclick="openModal('quick-add-supplier-modal')" class="text-primary-700 hover:text-primary-800 font-bold text-[11px] underline">
+                            + New Supplier
+                        </button>
+                    </div>
+                    <select id="pur-supplier-select" onchange="onSupplierSelectChange()" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500 font-semibold text-xs bg-white">
+                        <option value="">-- Choose Existing Supplier --</option>
+                        {% for s in suppliers %}
+                        <option value="{{ s.id }}" data-name="{{ s.name }}" data-state="{{ s.state or '' }}" data-gstin="{{ s.gstin or '' }}">
+                            {{ s.name }}{% if s.city %} ({{ s.city }}){% endif %}
+                        </option>
+                        {% endfor %}
+                        <option value="CUSTOM">+ Enter Custom Supplier...</option>
+                    </select>
+                    <input type="hidden" name="supplier_id" id="pur-supplier-id" value="">
+                    <input type="text" name="supplier_name" id="pur-supplier-name-input" required placeholder="Type supplier name..." class="w-full mt-1.5 px-3 py-1.5 rounded-xl border border-slate-200 focus:outline-none text-xs hidden">
                 </div>
                 <div>
-                    <label class="block font-bold text-slate-900 mb-1">Supplier Bill / Invoice # *</label>
-                    <input type="text" name="bill_number" required placeholder="PB-2026-9812" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500 font-mono">
+                    <label class="block font-bold text-slate-900 mb-1 text-xs">Supplier Bill / Invoice # *</label>
+                    <input type="text" name="bill_number" required placeholder="PB-2026-9812" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500 font-mono text-xs">
                 </div>
             </div>
 
@@ -174,7 +189,7 @@
                 </div>
                 <div>
                     <label class="block font-bold text-slate-900 mb-1">Supplier GSTIN (Optional)</label>
-                    <input type="text" name="supplier_gstin" placeholder="e.g. 33ABCDE1234F1Z5" class="w-full px-3 py-2 rounded-xl border border-indigo-200 focus:outline-none uppercase font-mono text-xs">
+                    <input type="text" name="supplier_gstin" id="pur-supplier-gstin" placeholder="e.g. 33ABCDE1234F1Z5" class="w-full px-3 py-2 rounded-xl border border-indigo-200 focus:outline-none uppercase font-mono text-xs">
                 </div>
             </div>
 
@@ -182,8 +197,8 @@
             <div class="space-y-2 border border-slate-200 rounded-2xl p-4 bg-slate-50">
                 <div class="flex items-center justify-between">
                     <span class="font-bold text-slate-900 uppercase text-[11px] tracking-wider">📦 Purchased Spare Parts (Auto Stock IN)</span>
-                    <button type="button" onclick="addPurchaseLineItem()" class="px-2.5 py-1 bg-primary-100 hover:bg-primary-200 text-primary-800 font-bold text-xs rounded-lg transition">
-                        + Add Part Item
+                    <button type="button" onclick="openPurchasePartPickerModal()" class="px-3 py-1.5 bg-primary-600 hover:bg-primary-700 text-white font-bold text-xs rounded-xl shadow transition flex items-center gap-1">
+                        <span>🔍 + Add Part Item</span>
                     </button>
                 </div>
 
@@ -298,17 +313,286 @@
         </form>
     </div>
 </div>
+
+<!-- Modal: Quick Add Supplier -->
+<div id="quick-add-supplier-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] hidden items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 space-y-4">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+            <h3 class="font-bold text-slate-900 text-sm">🏢 Add New Spare Parts Supplier</h3>
+            <button type="button" onclick="closeModal('quick-add-supplier-modal')" class="text-slate-400 hover:text-slate-700 text-xl font-bold">✕</button>
+        </div>
+
+        <form id="quick-supplier-form" onsubmit="submitQuickSupplier(event)" class="space-y-3 text-xs">
+            <div>
+                <label class="block font-bold text-slate-800 mb-1">Supplier / Firm Name *</label>
+                <input type="text" id="qs-name" required placeholder="e.g. Kerala Auto Electricals" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500">
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+                <div>
+                    <label class="block font-bold text-slate-800 mb-1">Phone Number *</label>
+                    <input type="tel" id="qs-phone" required placeholder="9847012345" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-800 mb-1">Contact Person</label>
+                    <input type="text" id="qs-contact" placeholder="Manager / Rep" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                </div>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+                <div>
+                    <label class="block font-bold text-slate-800 mb-1">City / Town</label>
+                    <input type="text" id="qs-city" placeholder="Kochi / Coimbatore" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-800 mb-1">State / GST Type</label>
+                    <select id="qs-state" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none font-semibold">
+                        <option value="Kerala (32)" selected>🌴 Kerala (32)</option>
+                        <option value="Tamil Nadu (33)">🏙️ Tamil Nadu (33)</option>
+                        <option value="Karnataka (29)">🏢 Karnataka (29)</option>
+                        <option value="Other State">🚚 Other State</option>
+                    </select>
+                </div>
+            </div>
+            <div>
+                <label class="block font-bold text-slate-800 mb-1">Supplier GSTIN (Optional)</label>
+                <input type="text" id="qs-gstin" placeholder="32AAAAA0000A1Z5" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none uppercase font-mono">
+            </div>
+
+            <div class="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                <button type="button" onclick="closeModal('quick-add-supplier-modal')" class="px-3.5 py-1.5 text-slate-600 font-bold">Cancel</button>
+                <button type="submit" class="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl shadow">Save & Select Supplier</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal: Searchable Parts Picker for Purchase Bill -->
+<div id="purchase-part-picker-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] hidden items-center justify-center p-4 overflow-y-auto">
+    <div class="bg-white rounded-3xl max-w-2xl w-full p-6 shadow-2xl border border-slate-100 my-8 space-y-4">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+            <div>
+                <h3 class="font-extrabold text-slate-900 text-base">📦 Select Spare Part to Add</h3>
+                <p class="text-[11px] text-slate-500">Search existing inventory or create a brand new product on the fly</p>
+            </div>
+            <button type="button" onclick="closeModal('purchase-part-picker-modal')" class="text-slate-400 hover:text-slate-700 text-xl font-bold">✕</button>
+        </div>
+
+        <!-- Action bar: Search input + Toggle Create Product Button -->
+        <div class="flex flex-col sm:flex-row items-center gap-2">
+            <div class="relative flex-1 w-full">
+                <input type="text" id="picker-search-input" oninput="filterPickerParts()" placeholder="🔍 Search by name, part #, barcode, category..." class="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 text-xs shadow-inner">
+                <span class="absolute left-3 top-2.5 text-slate-400 text-xs">🔍</span>
+            </div>
+            <button type="button" onclick="toggleQuickProductForm()" id="btn-toggle-quick-product" class="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow transition shrink-0 flex items-center gap-1.5">
+                <span>+ Create Brand New Product</span>
+            </button>
+        </div>
+
+        <!-- Quick Create Product Form (Collapsible inside picker) -->
+        <div id="quick-create-product-section" class="hidden p-4 rounded-2xl bg-emerald-50/50 border border-emerald-200 space-y-3">
+            <div class="flex items-center justify-between border-b border-emerald-200/60 pb-2">
+                <span class="font-bold text-emerald-950 text-xs uppercase tracking-wider">⚡ Create & Add Brand New Product</span>
+                <button type="button" onclick="toggleQuickProductForm()" class="text-emerald-700 hover:text-emerald-900 text-xs font-bold">✕ Close</button>
+            </div>
+
+            <form id="quick-product-form" onsubmit="submitQuickProduct(event)" class="space-y-3 text-xs">
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">Part Name / Description *</label>
+                    <input type="text" id="qp-name" required placeholder="e.g. Lucas TVS Starter Bush Kit 12V" class="w-full px-3 py-2 rounded-xl border border-emerald-200 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div>
+                        <label class="block font-bold text-slate-800 mb-1">Part Number (PN)</label>
+                        <input type="text" id="qp-part-no" placeholder="e.g. 26024100" class="w-full uppercase font-mono px-3 py-1.5 rounded-xl border border-emerald-200 bg-white focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-800 mb-1">Barcode (SKU)</label>
+                        <input type="text" id="qp-barcode" placeholder="Auto-generated if blank" class="w-full font-mono px-3 py-1.5 rounded-xl border border-emerald-200 bg-white focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-800 mb-1">Category</label>
+                        <select id="qp-category" class="w-full px-3 py-1.5 rounded-xl border border-emerald-200 bg-white focus:outline-none font-semibold">
+                            <option value="Alternators & Starters">Alternators & Starters</option>
+                            <option value="Batteries & Terminals">Batteries & Terminals</option>
+                            <option value="Relays & Fuses" selected>Relays & Fuses</option>
+                            <option value="Wiring & Harness">Wiring & Harness</option>
+                            <option value="Sensors & Switches">Sensors & Switches</option>
+                            <option value="Lights & Bulbs">Lights & Bulbs</option>
+                            <option value="Audio & Accessories">Audio & Accessories</option>
+                            <option value="Other Electrical">Other Electrical</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <div>
+                        <label class="block font-bold text-slate-800 mb-1">Purchase Cost (₹) *</label>
+                        <input type="number" step="0.01" id="qp-cost" required placeholder="0.00" class="w-full px-3 py-1.5 rounded-xl border border-emerald-200 bg-white focus:outline-none font-bold">
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-800 mb-1">Selling Price (₹) *</label>
+                        <input type="number" step="0.01" id="qp-selling" required placeholder="0.00" class="w-full px-3 py-1.5 rounded-xl border border-emerald-200 bg-white focus:outline-none font-bold">
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-800 mb-1">Tax Rate (GST)</label>
+                        <select id="qp-tax" class="w-full px-3 py-1.5 rounded-xl border border-emerald-200 bg-white focus:outline-none font-bold">
+                            <option value="18.0" selected>18% GST</option>
+                            <option value="28.0">28% GST</option>
+                            <option value="12.0">12% GST</option>
+                            <option value="5.0">5% GST</option>
+                            <option value="0.0">0% GST</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-800 mb-1">HSN Code</label>
+                        <input type="text" id="qp-hsn" value="8536" class="w-full font-mono px-3 py-1.5 rounded-xl border border-emerald-200 bg-white focus:outline-none">
+                    </div>
+                </div>
+
+                <div class="flex justify-end gap-2 pt-2">
+                    <button type="submit" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl shadow transition">
+                        ✓ Save & Add to Purchase Bill
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Searchable Parts List Table -->
+        <div class="overflow-y-auto max-h-72 border border-slate-200 rounded-2xl">
+            <table class="w-full text-left text-xs">
+                <thead class="bg-slate-100 text-slate-600 uppercase font-semibold text-[11px] sticky top-0">
+                    <tr>
+                        <th class="py-2.5 px-3">Part Name & Number</th>
+                        <th class="py-2.5 px-2">Category</th>
+                        <th class="py-2.5 px-2 text-center">In Stock</th>
+                        <th class="py-2.5 px-2 text-right">Cost (₹)</th>
+                        <th class="py-2.5 px-2 text-center">Tax %</th>
+                        <th class="py-2.5 px-3 text-right">Action</th>
+                    </tr>
+                </thead>
+                <tbody id="picker-parts-body" class="divide-y divide-slate-100 font-medium text-slate-800">
+                    <!-- Populated dynamically via JS -->
+                </tbody>
+            </table>
+        </div>
+
+        <div class="flex justify-end pt-2 border-t border-slate-100">
+            <button type="button" onclick="closeModal('purchase-part-picker-modal')" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition">
+                Close
+            </button>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
     const availableInventory = [
         {% for itm in inventory_items %}
-        { id: "{{ itm.id }}", name: "{{ itm.part_name }}", part_number: "{{ itm.part_number or '' }}", barcode: "{{ itm.barcode }}", cost: {{ itm.cost_price }}, tax_rate: {{ itm.tax_rate or 18.0 }} },
+        {
+            id: "{{ itm.id }}",
+            name: "{{ itm.part_name }}",
+            part_name: "{{ itm.part_name }}",
+            part_number: "{{ itm.part_number or '' }}",
+            barcode: "{{ itm.barcode }}",
+            cost: {{ itm.cost_price }},
+            cost_price: {{ itm.cost_price }},
+            tax_rate: {{ itm.tax_rate or 18.0 }},
+            stock: {{ itm.stock_qty }},
+            category: "{{ itm.category or '' }}"
+        },
         {% endfor %}
     ];
 
     let purchaseRows = [];
+
+    // Supplier dropdown selection handler
+    function onSupplierSelectChange() {
+        const sel = document.getElementById('pur-supplier-select');
+        const customInput = document.getElementById('pur-supplier-name-input');
+        const supplierIdInput = document.getElementById('pur-supplier-id');
+        const val = sel.value;
+
+        if (val === 'CUSTOM') {
+            supplierIdInput.value = '';
+            customInput.value = '';
+            customInput.classList.remove('hidden');
+            customInput.focus();
+        } else if (val) {
+            const opt = sel.options[sel.selectedIndex];
+            const name = opt.getAttribute('data-name') || opt.text;
+            const state = opt.getAttribute('data-state') || '';
+            const gstin = opt.getAttribute('data-gstin') || '';
+
+            supplierIdInput.value = val;
+            customInput.value = name;
+            customInput.classList.add('hidden');
+
+            if (gstin) {
+                const gstinInput = document.getElementById('pur-supplier-gstin');
+                if (gstinInput) gstinInput.value = gstin;
+            }
+
+            // Auto set state and GST interstate mode
+            const stateSelect = document.getElementById('pur-supplier-state');
+            if (stateSelect) {
+                if (state.includes('Tamil') || state.includes('33')) {
+                    stateSelect.value = 'Tamil Nadu (33)';
+                } else if (state.includes('Karnataka') || state.includes('29')) {
+                    stateSelect.value = 'Karnataka (29)';
+                } else if (state.includes('Kerala') || state.includes('32')) {
+                    stateSelect.value = 'Kerala (32)';
+                }
+                onPurchaseStateChange();
+            }
+        } else {
+            supplierIdInput.value = '';
+            customInput.value = '';
+            customInput.classList.add('hidden');
+        }
+    }
+
+    async function submitQuickSupplier(e) {
+        e.preventDefault();
+        const payload = {
+            name: document.getElementById('qs-name').value.trim(),
+            phone: document.getElementById('qs-phone').value.trim(),
+            contact_person: document.getElementById('qs-contact').value.trim(),
+            city: document.getElementById('qs-city').value.trim(),
+            state: document.getElementById('qs-state').value,
+            gstin: document.getElementById('qs-gstin').value.trim()
+        };
+
+        try {
+            const res = await fetch('/api/suppliers/quick-create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (!res.ok) throw new Error("Failed to add supplier");
+            const data = await res.json();
+            const sup = data.supplier;
+
+            const sel = document.getElementById('pur-supplier-select');
+            const opt = document.createElement('option');
+            opt.value = sup.id;
+            opt.dataset.name = sup.name;
+            opt.dataset.state = sup.state;
+            opt.dataset.gstin = sup.gstin;
+            opt.innerText = `${sup.name}${sup.city ? ` (${sup.city})` : ''}`;
+
+            sel.insertBefore(opt, sel.lastElementChild);
+            sel.value = sup.id;
+            onSupplierSelectChange();
+
+            closeModal('quick-add-supplier-modal');
+            document.getElementById('quick-supplier-form').reset();
+            showToast(`Supplier ${sup.name} added and selected!`, 'success');
+        } catch (err) {
+            console.error(err);
+            showToast("Error saving supplier", "error");
+        }
+    }
 
     function onPurchaseStateChange() {
         const stateSelect = document.getElementById('pur-supplier-state');
@@ -328,28 +612,156 @@
         recalculatePurchaseTotals();
     }
 
-    function addPurchaseLineItem(itemId = '', qty = 1, cost = 0, taxRate = null) {
-        const rowId = 'prow_' + Math.random().toString(36).substr(2, 9);
-        const defaultItem = availableInventory.find(i => i.id === itemId) || availableInventory[0] || { id: '', name: 'Part', barcode: '', cost: 0, tax_rate: 18.0 };
+    function openPurchasePartPickerModal() {
+        openModal('purchase-part-picker-modal');
+        const searchInput = document.getElementById('picker-search-input');
+        if (searchInput) searchInput.value = '';
+        renderPickerParts(availableInventory);
+    }
 
-        purchaseRows.push({
-            rowId: rowId,
-            item_id: itemId || defaultItem.id,
-            part_name: defaultItem.name,
-            barcode: defaultItem.barcode,
-            quantity: qty,
-            unit_cost: cost !== 0 ? cost : defaultItem.cost,
-            tax_rate: taxRate !== null ? taxRate : (defaultItem.tax_rate || 18.0)
+    function filterPickerParts() {
+        const q = (document.getElementById('picker-search-input')?.value || '').toLowerCase().trim();
+        if (!q) {
+            renderPickerParts(availableInventory);
+            return;
+        }
+        const filtered = availableInventory.filter(i => {
+            return (i.name || '').toLowerCase().includes(q) ||
+                   (i.part_number || '').toLowerCase().includes(q) ||
+                   (i.barcode || '').toLowerCase().includes(q) ||
+                   (i.category || '').toLowerCase().includes(q);
         });
+        renderPickerParts(filtered);
+    }
+
+    function renderPickerParts(items) {
+        const tbody = document.getElementById('picker-parts-body');
+        if (!tbody) return;
+        tbody.innerHTML = '';
+
+        if (items.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="6" class="py-6 text-center text-slate-400">No matching parts found. Click "+ Create Brand New Product" above to create one.</td></tr>`;
+            return;
+        }
+
+        items.forEach(itm => {
+            const tr = document.createElement('tr');
+            tr.className = "hover:bg-slate-50 transition";
+            tr.innerHTML = `
+                <td class="py-2.5 px-3">
+                    <span class="font-bold text-slate-900 block">${itm.name}</span>
+                    <div class="flex items-center gap-1.5 text-[10px] text-slate-400 font-mono mt-0.5">
+                        ${itm.part_number ? `<span class="bg-amber-100 text-amber-900 px-1 py-0.2 rounded font-bold">PN: ${itm.part_number}</span>` : ''}
+                        <span>${itm.barcode}</span>
+                    </div>
+                </td>
+                <td class="py-2.5 px-2">
+                    <span class="px-2 py-0.5 rounded-full text-[10px] bg-slate-100 text-slate-600 font-medium">${itm.category || 'N/A'}</span>
+                </td>
+                <td class="py-2.5 px-2 text-center font-bold text-slate-800">
+                    ${itm.stock}
+                </td>
+                <td class="py-2.5 px-2 text-right font-mono font-bold text-slate-900">
+                    ₹${parseFloat(itm.cost).toFixed(2)}
+                </td>
+                <td class="py-2.5 px-2 text-center text-slate-600 font-semibold">
+                    ${itm.tax_rate}%
+                </td>
+                <td class="py-2.5 px-3 text-right">
+                    <button type="button" onclick="selectPickerItem('${itm.id}')" class="px-2.5 py-1 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-lg text-xs shadow-xs transition">
+                        + Select
+                    </button>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    function selectPickerItem(itemId) {
+        const itm = availableInventory.find(i => i.id === itemId);
+        if (!itm) return;
+        addSelectedPartToPurchase(itm);
+    }
+
+    function addSelectedPartToPurchase(item) {
+        const existing = purchaseRows.find(r => r.item_id === item.id);
+        if (existing) {
+            existing.quantity += 1;
+        } else {
+            purchaseRows.push({
+                item_id: item.id,
+                part_name: item.name || item.part_name,
+                part_number: item.part_number || '',
+                barcode: item.barcode || '',
+                unit_cost: parseFloat(item.cost || item.cost_price || 0.0),
+                tax_rate: parseFloat(item.tax_rate || 18.0),
+                quantity: 1
+            });
+        }
         renderPurchaseRows();
+        closeModal('purchase-part-picker-modal');
+        showToast(`Added ${item.name || item.part_name} to bill`, 'success');
+    }
+
+    function toggleQuickProductForm() {
+        const formSec = document.getElementById('quick-create-product-section');
+        formSec.classList.toggle('hidden');
+        if (!formSec.classList.contains('hidden')) {
+            document.getElementById('qp-name').focus();
+        }
+    }
+
+    async function submitQuickProduct(e) {
+        e.preventDefault();
+        const payload = {
+            part_name: document.getElementById('qp-name').value.trim(),
+            part_number: document.getElementById('qp-part-no').value.trim(),
+            barcode: document.getElementById('qp-barcode').value.trim(),
+            category: document.getElementById('qp-category').value,
+            cost_price: parseFloat(document.getElementById('qp-cost').value) || 0.0,
+            selling_price: parseFloat(document.getElementById('qp-selling').value) || 0.0,
+            tax_rate: parseFloat(document.getElementById('qp-tax').value) || 18.0,
+            hsn_code: document.getElementById('qp-hsn').value.trim() || '8536'
+        };
+
+        try {
+            const res = await fetch('/api/inventory/quick-create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (!res.ok) throw new Error("Failed to create product");
+            const data = await res.json();
+            const newItem = {
+                id: data.id,
+                name: data.part_name,
+                part_name: data.part_name,
+                part_number: data.part_number,
+                barcode: data.barcode,
+                cost: data.cost_price,
+                cost_price: data.cost_price,
+                selling_price: data.selling_price,
+                tax_rate: data.tax_rate,
+                stock: data.stock_qty || 0,
+                category: data.category
+            };
+            availableInventory.push(newItem);
+            addSelectedPartToPurchase(newItem);
+            document.getElementById('quick-product-form').reset();
+            document.getElementById('quick-create-product-section').classList.add('hidden');
+        } catch (err) {
+            console.error(err);
+            showToast("Error creating product", "error");
+        }
     }
 
     function renderPurchaseRows() {
         const tbody = document.getElementById('purchase-items-body');
+        if (!tbody) return;
         tbody.innerHTML = '';
 
         if (purchaseRows.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="6" class="py-4 text-center text-slate-400">No parts added. Click "+ Add Part Item" above.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="6" class="py-6 text-center text-slate-400 font-medium">No parts added to this bill yet. Click <span class="font-bold text-primary-600">"🔍 + Add Part Item"</span> above to search or create parts.</td></tr>`;
             recalculatePurchaseTotals();
             return;
         }
@@ -361,49 +773,39 @@
 
             const tr = document.createElement('tr');
             tr.innerHTML = `
-                <td class="py-2 px-2">
-                    <select onchange="updatePurchaseItemPart(${idx}, this.value)" class="w-full text-xs px-2 py-1.5 rounded-lg border border-slate-200">
-                        ${availableInventory.map(inv => `<option value="${inv.id}" ${inv.id === r.item_id ? 'selected' : ''}>${inv.name}${inv.part_number ? ` [PN: ${inv.part_number}]` : ''}</option>`).join('')}
-                    </select>
+                <td class="py-2.5 px-2">
+                    <span class="font-bold text-slate-900 block">${r.part_name}</span>
+                    <div class="flex items-center gap-2 text-[10px] text-slate-400 font-mono mt-0.5">
+                        ${r.part_number ? `<span class="text-amber-800 font-bold bg-amber-50 px-1 rounded border border-amber-200">PN: ${r.part_number}</span>` : ''}
+                        <span>${r.barcode || ''}</span>
+                    </div>
                 </td>
-                <td class="py-2 px-2">
-                    <input type="number" min="1" value="${r.quantity}" oninput="updatePurchaseItemQty(${idx}, this.value)" class="w-full text-xs px-2 py-1.5 rounded-lg border border-slate-200 text-center font-bold">
+                <td class="py-2.5 px-2">
+                    <input type="number" min="1" value="${r.quantity}" oninput="updatePurchaseItemQty(${idx}, this.value)" class="w-full text-xs px-2 py-1.5 rounded-lg border border-slate-200 text-center font-bold focus:ring-2 focus:ring-primary-500">
                 </td>
-                <td class="py-2 px-2">
-                    <input type="number" step="0.01" value="${r.unit_cost}" oninput="updatePurchaseItemCost(${idx}, this.value)" class="w-full text-xs px-2 py-1.5 rounded-lg border border-slate-200 text-right font-bold">
+                <td class="py-2.5 px-2">
+                    <input type="number" step="0.01" value="${r.unit_cost}" oninput="updatePurchaseItemCost(${idx}, this.value)" class="w-full text-xs px-2 py-1.5 rounded-lg border border-slate-200 text-right font-bold focus:ring-2 focus:ring-primary-500">
                 </td>
-                <td class="py-2 px-2">
+                <td class="py-2.5 px-2">
                     <select onchange="updatePurchaseItemTaxRate(${idx}, this.value)" class="w-full text-xs px-2 py-1.5 rounded-lg border border-slate-200 font-semibold">
-                        <option value="18.0" ${r.tax_rate == 18.0 ? 'selected' : ''}>18%</option>
-                        <option value="28.0" ${r.tax_rate == 28.0 ? 'selected' : ''}>28%</option>
-                        <option value="12.0" ${r.tax_rate == 12.0 ? 'selected' : ''}>12%</option>
-                        <option value="5.0" ${r.tax_rate == 5.0 ? 'selected' : ''}>5%</option>
-                        <option value="0.0" ${r.tax_rate == 0.0 ? 'selected' : ''}>0%</option>
+                        <option value="18.0" ${r.tax_rate == 18.0 ? 'selected' : ''}>18% GST</option>
+                        <option value="28.0" ${r.tax_rate == 28.0 ? 'selected' : ''}>28% GST</option>
+                        <option value="12.0" ${r.tax_rate == 12.0 ? 'selected' : ''}>12% GST</option>
+                        <option value="5.0" ${r.tax_rate == 5.0 ? 'selected' : ''}>5% GST</option>
+                        <option value="0.0" ${r.tax_rate == 0.0 ? 'selected' : ''}>0% GST</option>
                     </select>
                 </td>
-                <td class="py-2 px-2 text-right font-bold text-slate-900">
+                <td class="py-2.5 px-2 text-right font-black text-slate-900 font-mono">
                     ₹${lineTotal.toFixed(2)}
                 </td>
-                <td class="py-2 px-2 text-center">
-                    <button type="button" onclick="removePurchaseRow(${idx})" class="text-rose-500 hover:text-rose-700 font-bold">✕</button>
+                <td class="py-2.5 px-2 text-center">
+                    <button type="button" onclick="removePurchaseRow(${idx})" class="p-1 rounded text-rose-500 hover:bg-rose-50 hover:text-rose-700 font-bold transition">✕</button>
                 </td>
             `;
             tbody.appendChild(tr);
         });
 
         recalculatePurchaseTotals();
-    }
-
-    function updatePurchaseItemPart(idx, partId) {
-        const found = availableInventory.find(i => i.id === partId);
-        if (found) {
-            purchaseRows[idx].item_id = found.id;
-            purchaseRows[idx].part_name = found.name;
-            purchaseRows[idx].barcode = found.barcode;
-            purchaseRows[idx].unit_cost = found.cost;
-            purchaseRows[idx].tax_rate = found.tax_rate || 18.0;
-        }
-        renderPurchaseRows();
     }
 
     function updatePurchaseItemQty(idx, val) {
@@ -474,9 +876,7 @@
     }
 
     window.addEventListener('DOMContentLoaded', () => {
-        if (availableInventory.length > 0 && purchaseRows.length === 0) {
-            addPurchaseLineItem();
-        }
+        renderPurchaseRows();
     });
 </script>
 {% endblock %}

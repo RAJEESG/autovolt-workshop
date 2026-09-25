@@ -321,11 +321,33 @@ def init_db():
     );
     """)
 
+    # 12b. Suppliers Table (Supplier Master & Directory)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS suppliers (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        contact_person TEXT,
+        phone TEXT NOT NULL,
+        whatsapp TEXT,
+        email TEXT,
+        address TEXT,
+        city TEXT,
+        state TEXT DEFAULT 'Kerala (32)',
+        gstin TEXT,
+        payment_terms TEXT,
+        notes TEXT,
+        total_purchases REAL DEFAULT 0.0,
+        outstanding_balance REAL DEFAULT 0.0,
+        created_at TEXT
+    );
+    """)
+
     # 13. Purchase Bills Table
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS purchase_bills (
         id TEXT PRIMARY KEY,
         bill_number TEXT NOT NULL,
+        supplier_id TEXT,
         supplier_name TEXT NOT NULL,
         bill_date TEXT NOT NULL,
         total_amount REAL NOT NULL,
@@ -638,6 +660,8 @@ def run_schema_migrations(cursor, conn):
         ("workshop_profile", "tax_regime", "TEXT DEFAULT 'REGULAR_GST'"),
         ("workshop_profile", "round_off_enabled", "INTEGER DEFAULT 1"),
         ("users", "permissions", "TEXT DEFAULT ''"),
+        ("purchase_bills", "supplier_id", "TEXT DEFAULT ''"),
+        ("purchase_items", "tax_rate", "REAL DEFAULT 18.0"),
     ]
 
     for table, col, col_type in migrations:
@@ -804,12 +828,23 @@ def seed_initial_data(cursor, conn):
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
             """, b)
 
-    # 7. Sample Purchase Bill
+    # 7. Seed Initial Suppliers & Purchase Bill
+    cursor.execute("SELECT COUNT(*) FROM suppliers")
+    if cursor.fetchone()[0] == 0:
+        cursor.executemany("""
+        INSERT INTO suppliers (id, name, contact_person, phone, whatsapp, email, address, city, state, gstin, payment_terms, notes, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        """, [
+            ("sup_001", "Lucas TVS Kerala Agency", "Sunil Kumar", "9847012345", "9847012345", "sales@lucastvskerala.com", "Auto Spares Complex, MG Road", "Kochi", "Kerala (32)", "32AABCL1234F1Z5", "30 Days Credit", "Authorized Lucas TVS distributor"),
+            ("sup_002", "Bosch Auto Electricals Distributors", "Abdul Rahman", "9447098765", "9447098765", "spares@boschdealerkerala.com", "Industrial Estate, Aroor", "Alappuzha", "Kerala (32)", "32AABCB5678G1Z2", "15 Days Credit", "Batteries, Starters & Alternators"),
+            ("sup_003", "Coimbatore Auto Electric Spares", "Murugan V.", "9842011223", "9842011223", "orders@cbeautospares.in", "Crosscut Road, Gandhipuram", "Coimbatore", "Tamil Nadu (33)", "33ABCDE9999K1Z1", "Immediate / Bank Transfer", "Inter-state supplier for heavy electrical components")
+        ])
+
     cursor.execute("SELECT COUNT(*) FROM purchase_bills")
     if cursor.fetchone()[0] == 0:
         cursor.execute("""
-        INSERT INTO purchase_bills (id, bill_number, supplier_name, bill_date, total_amount, payment_status, payment_mode, notes, created_at)
-        VALUES ('pur_1', 'SUP-INV-8912', 'Lucas TVS Kerala Agencies', date('now', '-3 days'), 18500.0, 'PAID', 'BANK_TRANSFER', 'Bulk starter armatures and relays stock purchase', datetime('now', '-3 days'))
+        INSERT INTO purchase_bills (id, bill_number, supplier_id, supplier_name, bill_date, total_amount, payment_status, payment_mode, notes, created_at)
+        VALUES ('pur_1', 'SUP-INV-8912', 'sup_001', 'Lucas TVS Kerala Agency', date('now', '-3 days'), 18500.0, 'PAID', 'BANK_TRANSFER', 'Bulk starter armatures and relays stock purchase', datetime('now', '-3 days'))
         """)
 
     conn.commit()

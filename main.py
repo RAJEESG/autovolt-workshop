@@ -1601,6 +1601,9 @@ async def purchases_page(request: Request):
     cursor.execute("SELECT * FROM inventory_items ORDER BY part_name")
     inventory_items = [dict(row) for row in cursor.fetchall()]
 
+    cursor.execute("SELECT * FROM suppliers ORDER BY name")
+    suppliers = [dict(row) for row in cursor.fetchall()]
+
     conn.close()
     
     return templates.TemplateResponse(
@@ -1610,7 +1613,8 @@ async def purchases_page(request: Request):
             "active_page": "purchases",
             "purchases": purchases,
             "purchase_returns": purchase_returns,
-            "inventory_items": inventory_items
+            "inventory_items": inventory_items,
+            "suppliers": suppliers
         }
     )
 
@@ -1621,6 +1625,7 @@ async def record_purchase_bill(
     bill_number: str = Form(...),
     bill_date: str = Form(...),
     total_amount: float = Form(...),
+    supplier_id: Optional[str] = Form(None),
     payment_mode: str = Form("BANK_TRANSFER"),
     status: str = Form("CONFIRMED"),
     notes: Optional[str] = Form(None),
@@ -1636,14 +1641,31 @@ async def record_purchase_bill(
     pur_id = f"pur_{uuid.uuid4().hex[:8]}"
     now_ist = get_ist_now_str()
 
+    clean_sup_name = supplier_name.strip()
+    # Resolve or create supplier record to maintain complete supplier history
+    if not supplier_id and clean_sup_name:
+        cursor.execute("SELECT id FROM suppliers WHERE LOWER(name) = LOWER(?)", (clean_sup_name,))
+        s_row = cursor.fetchone()
+        if s_row:
+            supplier_id = s_row["id"]
+        else:
+            supplier_id = f"sup_{uuid.uuid4().hex[:8]}"
+            cursor.execute("""
+            INSERT INTO suppliers (id, name, phone, state, created_at)
+            VALUES (?, ?, ?, ?, datetime('now'))
+            """, (supplier_id, clean_sup_name, "", supplier_state or "Kerala (32)"))
+
+    if supplier_id:
+        cursor.execute("UPDATE suppliers SET total_purchases = total_purchases + ? WHERE id = ?", (total_amount, supplier_id))
+
     cursor.execute("""
     INSERT INTO purchase_bills (
-        id, bill_number, supplier_name, bill_date, total_amount, payment_mode, 
+        id, bill_number, supplier_id, supplier_name, bill_date, total_amount, payment_mode, 
         status, notes, created_at, supplier_state, is_interstate, cgst_amount, sgst_amount, igst_amount
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
-        pur_id, bill_number, supplier_name, bill_date, total_amount, payment_mode, 
+        pur_id, bill_number, supplier_id, clean_sup_name, bill_date, total_amount, payment_mode, 
         status, notes, now_ist, supplier_state or "Kerala (32)", is_interstate or 0,
         cgst_amount or 0.0, sgst_amount or 0.0, igst_amount or 0.0
     ))
@@ -1660,11 +1682,12 @@ async def record_purchase_bill(
                 qty = int(itm.get("quantity", 1))
                 unit_cost = float(itm.get("unit_cost", 0.0))
                 total_cost = unit_cost * qty
+                t_rate = float(itm.get("tax_rate", 18.0))
 
                 cursor.execute("""
-                INSERT INTO purchase_items (id, purchase_id, item_id, part_name, barcode, quantity, unit_cost, total_cost)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (pi_id, pur_id, part_id, part_name, barcode, qty, unit_cost, total_cost))
+                INSERT INTO purchase_items (id, purchase_id, item_id, part_name, barcode, quantity, unit_cost, total_cost, tax_rate)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (pi_id, pur_id, part_id, part_name, barcode, qty, unit_cost, total_cost, t_rate))
 
                 # If CONFIRMED, update inventory stock and write stock movement log!
                 if status == "CONFIRMED" and part_id:
@@ -1678,7 +1701,7 @@ async def record_purchase_bill(
                     cursor.execute("""
                     INSERT INTO stock_logs (id, item_id, part_name, barcode, change_qty, new_stock_qty, action_type, unit_cost, reference_id, notes, created_at)
                     VALUES (?, ?, ?, ?, ?, (SELECT stock_qty FROM inventory_items WHERE id = ?), 'PURCHASE_IN', ?, ?, ?, ?)
-                    """, (stk_id, part_id, part_name, barcode, qty, part_id, unit_cost, bill_number, f"Supplier Bill #{bill_number} from {supplier_name}", now_ist))
+                    """, (stk_id, part_id, part_name, barcode, qty, part_id, unit_cost, bill_number, f"Supplier Bill #{bill_number} from {clean_sup_name}", now_ist))
         except Exception as e:
             print(f"[Purchase Items Error] {e}")
 
@@ -1754,6 +1777,279 @@ async def record_purchase_return(
     conn.commit()
     conn.close()
     return RedirectResponse(url="/purchases", status_code=303)
+
+# =========================================================
+# 🚚 SUPPLIERS DIRECTORY & PURCHASE HISTORY
+# =========================================================
+
+@app.get("/suppliers", response_class=HTMLResponse)
+async def suppliers_page(request: Request):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+    SELECT s.*, 
+           COUNT(DISTINCT pb.id) as total_bills,
+           COALESCE(SUM(pb.total_amount), 0.0) as calculated_total_purchases
+    FROM suppliers s
+    LEFT JOIN purchase_bills pb ON s.id = pb.supplier_id OR LOWER(s.name) = LOWER(pb.supplier_name)
+    GROUP BY s.id
+    ORDER BY s.name
+    """)
+    suppliers = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    
+    return templates.TemplateResponse(
+        request=request,
+        name="suppliers.html",
+        context={
+            "active_page": "suppliers",
+            "suppliers": suppliers
+        }
+    )
+
+@app.post("/api/suppliers")
+async def create_supplier(
+    name: str = Form(...),
+    contact_person: Optional[str] = Form(None),
+    phone: str = Form(...),
+    whatsapp: Optional[str] = Form(None),
+    email: Optional[str] = Form(None),
+    address: Optional[str] = Form(None),
+    city: Optional[str] = Form(None),
+    state: str = Form("Kerala (32)"),
+    gstin: Optional[str] = Form(None),
+    payment_terms: Optional[str] = Form(None),
+    notes: Optional[str] = Form(None)
+):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    sup_id = f"sup_{uuid.uuid4().hex[:8]}"
+    
+    cursor.execute("""
+    INSERT INTO suppliers (
+        id, name, contact_person, phone, whatsapp, email, address, city, state, gstin, payment_terms, notes, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    """, (sup_id, name.strip(), contact_person, phone.strip(), whatsapp or phone.strip(), email, address, city, state, gstin, payment_terms, notes))
+    
+    db.log_audit("CREATE_SUPPLIER", "suppliers", sup_id, f"Created supplier {name}", cursor=cursor)
+    conn.commit()
+    return RedirectResponse(url="/suppliers", status_code=303)
+
+@app.post("/api/suppliers/quick-create")
+async def quick_create_supplier(payload: Dict[str, Any]):
+    name = (payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Supplier name is required")
+    phone = (payload.get("phone") or "").strip()
+    contact_person = (payload.get("contact_person") or "").strip()
+    state = (payload.get("state") or "Kerala (32)").strip()
+    city = (payload.get("city") or "").strip()
+    gstin = (payload.get("gstin") or "").strip().upper()
+
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    sup_id = f"sup_{uuid.uuid4().hex[:8]}"
+
+    cursor.execute("""
+    INSERT INTO suppliers (
+        id, name, contact_person, phone, whatsapp, email, address, city, state, gstin, payment_terms, notes, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    """, (sup_id, name, contact_person, phone, phone, None, None, city, state, gstin, None, None))
+
+    db.log_audit("CREATE_SUPPLIER_QUICK", "suppliers", sup_id, f"Quick created supplier {name}", cursor=cursor)
+    conn.commit()
+    conn.close()
+
+    return {
+        "success": True,
+        "supplier": {
+            "id": sup_id,
+            "name": name,
+            "phone": phone,
+            "state": state,
+            "city": city,
+            "gstin": gstin
+        }
+    }
+
+@app.get("/api/suppliers/{supplier_id}")
+async def get_supplier_details(supplier_id: str):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM suppliers WHERE id = ?", (supplier_id,))
+    sup_row = cursor.fetchone()
+    if not sup_row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Supplier not found")
+    supplier = dict(sup_row)
+    
+    # Get purchase bills
+    cursor.execute("SELECT * FROM purchase_bills WHERE supplier_id = ? OR LOWER(supplier_name) = LOWER(?) ORDER BY bill_date DESC", (supplier_id, supplier["name"]))
+    bills = [dict(r) for r in cursor.fetchall()]
+    
+    # Get all distinct products supplied
+    cursor.execute("""
+    SELECT pi.part_name, pi.barcode, pi.unit_cost, pi.quantity, pi.total_cost, pb.bill_number, pb.bill_date
+    FROM purchase_items pi
+    JOIN purchase_bills pb ON pi.purchase_id = pb.id
+    WHERE pb.supplier_id = ? OR LOWER(pb.supplier_name) = LOWER(?)
+    ORDER BY pb.bill_date DESC
+    """, (supplier_id, supplier["name"]))
+    products = [dict(r) for r in cursor.fetchall()]
+    
+    conn.close()
+    return {
+        "supplier": supplier,
+        "bills": bills,
+        "products": products
+    }
+
+# =========================================================
+# 📦 INVENTORY PRODUCT HISTORY & QUICK PART CREATION
+# =========================================================
+
+@app.get("/api/inventory/{item_id}/history")
+async def get_inventory_item_history(item_id: str):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM inventory_items WHERE id = ?", (item_id,))
+    item_row = cursor.fetchone()
+    if not item_row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Inventory item not found")
+    item = dict(item_row)
+
+    # 1. Purchase History (every supplier bill where this product was purchased)
+    cursor.execute("""
+    SELECT pi.id, pi.quantity, pi.unit_cost, pi.total_cost,
+           pb.id as purchase_id, pb.bill_number, pb.supplier_name, pb.bill_date, pb.payment_mode, pb.created_at
+    FROM purchase_items pi
+    JOIN purchase_bills pb ON pi.purchase_id = pb.id
+    WHERE pi.item_id = ?
+    ORDER BY pb.bill_date DESC, pb.created_at DESC
+    """, (item_id,))
+    purchases = [dict(r) for r in cursor.fetchall()]
+
+    # 2. Stock movement logs
+    cursor.execute("""
+    SELECT * FROM stock_logs
+    WHERE item_id = ?
+    ORDER BY created_at DESC
+    LIMIT 100
+    """, (item_id,))
+    logs = [dict(r) for r in cursor.fetchall()]
+
+    conn.close()
+
+    # 3. Calculate Price Trend
+    price_trend = {
+        "status": "INITIAL",  # INCREASED, DECREASED, UNCHANGED, INITIAL
+        "diff": 0.0,
+        "percentage": 0.0,
+        "latest_cost": item["cost_price"],
+        "previous_cost": item["cost_price"],
+        "message": "Current Base Cost"
+    }
+
+    if len(purchases) >= 2:
+        latest = purchases[0]["unit_cost"]
+        prev = purchases[1]["unit_cost"]
+        price_trend["latest_cost"] = latest
+        price_trend["previous_cost"] = prev
+        diff = round(latest - prev, 2)
+        price_trend["diff"] = abs(diff)
+        pct = round((abs(diff) / prev) * 100, 1) if prev > 0 else 0
+        price_trend["percentage"] = pct
+
+        if diff > 0:
+            price_trend["status"] = "INCREASED"
+            price_trend["message"] = f"Purchase cost increased by ₹{abs(diff):.2f} (+{pct}%) since previous bill"
+        elif diff < 0:
+            price_trend["status"] = "DECREASED"
+            price_trend["message"] = f"Purchase cost decreased by ₹{abs(diff):.2f} (-{pct}%) since previous bill"
+        else:
+            price_trend["status"] = "UNCHANGED"
+            price_trend["message"] = "Purchase cost stable / unchanged"
+    elif len(purchases) == 1:
+        price_trend["latest_cost"] = purchases[0]["unit_cost"]
+        price_trend["message"] = f"Initial recorded purchase at ₹{purchases[0]['unit_cost']:.2f}"
+    else:
+        # Check stock logs if any purchase costs logged
+        costs = [l["unit_cost"] for l in logs if l.get("unit_cost") and l["unit_cost"] > 0]
+        if len(costs) >= 2:
+            latest = costs[0]
+            prev = costs[1]
+            diff = round(latest - prev, 2)
+            pct = round((abs(diff) / prev) * 100, 1) if prev > 0 else 0
+            if diff > 0:
+                price_trend["status"] = "INCREASED"
+                price_trend["diff"] = abs(diff)
+                price_trend["percentage"] = pct
+                price_trend["message"] = f"Cost increased by ₹{abs(diff):.2f} (+{pct}%)"
+            elif diff < 0:
+                price_trend["status"] = "DECREASED"
+                price_trend["diff"] = abs(diff)
+                price_trend["percentage"] = pct
+                price_trend["message"] = f"Cost decreased by ₹{abs(diff):.2f} (-{pct}%)"
+
+    return {
+        "item": item,
+        "purchases": purchases,
+        "logs": logs,
+        "price_trend": price_trend
+    }
+
+@app.post("/api/inventory/quick-create")
+async def quick_create_inventory_item(payload: Dict[str, Any]):
+    part_name = payload.get("part_name", "").strip()
+    if not part_name:
+        raise HTTPException(status_code=400, detail="Part name is required")
+        
+    barcode = payload.get("barcode", "").strip()
+    if not barcode:
+        barcode = f"890{uuid.uuid4().int % 100000000:08d}"
+        
+    part_number = payload.get("part_number", "").strip().upper()
+    category = payload.get("category", "Relays & Fuses")
+    cost_price = float(payload.get("cost_price", 0.0))
+    selling_price = float(payload.get("selling_price", 0.0))
+    tax_rate = float(payload.get("tax_rate", 18.0))
+    hsn_code = payload.get("hsn_code", "8536").strip()
+    
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    item_id = f"item_{uuid.uuid4().hex[:8]}"
+    
+    cursor.execute("""
+    INSERT INTO inventory_items (
+        id, part_name, part_number, sku, barcode, category, stock_qty, min_stock_alert,
+        cost_price, selling_price, tax_rate, hsn_code, unit, warranty_months,
+        created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, 0, 5, ?, ?, ?, ?, 'pcs', 6, datetime('now'), datetime('now'))
+    """, (item_id, part_name, part_number, barcode, barcode, category, cost_price, selling_price, tax_rate, hsn_code))
+    
+    db.log_audit("QUICK_CREATE_PART", "inventory_items", item_id, f"Quick created part: {part_name} (PN: {part_number})", cursor=cursor)
+    conn.commit()
+    conn.close()
+    
+    return {
+        "status": "ok",
+        "item": {
+            "id": item_id,
+            "part_name": part_name,
+            "name": part_name,
+            "part_number": part_number,
+            "barcode": barcode,
+            "cost_price": cost_price,
+            "cost": cost_price,
+            "selling_price": selling_price,
+            "tax_rate": tax_rate,
+            "hsn_code": hsn_code,
+            "unit": "pcs",
+            "stock_qty": 0
+        }
+    }
 
 @app.get("/sales-returns", response_class=HTMLResponse)
 async def sales_returns_page(request: Request):

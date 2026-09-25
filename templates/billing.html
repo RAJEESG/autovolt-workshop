@@ -5,11 +5,11 @@
 
 {% block content %}
 <div class="space-y-6 max-w-7xl mx-auto">
-    <!-- POS Screen Layout: 2 Columns (Billing Grid + Invoices List) -->
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <!-- Main POS Bill Builder (2 Columns) -->
-        <div class="lg:col-span-2 bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-6">
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+    <!-- POS Screen Layout: Optimized Wide POS (9 Cols) + Compact Recent Bills (3 Cols) -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+        <!-- Main POS Bill Builder (Wide 9 Cols) -->
+        <div id="pos-main-container" class="lg:col-span-8 xl:col-span-9 bg-white rounded-3xl border border-slate-200 shadow-sm p-5 md:p-6 space-y-5 transition-all">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
                 <div class="flex items-center gap-3">
                     <div class="w-10 h-10 rounded-2xl bg-primary-600 text-white flex items-center justify-center font-bold text-lg shadow-md shadow-primary-500/20">
                         ⚡
@@ -21,6 +21,10 @@
                 </div>
 
                 <div class="flex items-center gap-2">
+                    <button type="button" onclick="toggleRecentBillsSidebar()" class="text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 px-3 py-1 rounded-full border border-slate-200 transition flex items-center gap-1.5 shadow-sm" title="Toggle Recent Bills Sidebar">
+                        <span>📋</span>
+                        <span id="toggle-sidebar-text">Recent Bills</span>
+                    </button>
                     <span class="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-100 flex items-center gap-1.5">
                         <span class="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
                         Scanner Ready
@@ -140,21 +144,20 @@
                     <table class="w-full text-left text-xs" id="pos-items-table">
                         <thead class="bg-slate-100 text-slate-600 uppercase font-semibold text-[11px]">
                             <tr>
-                                <th class="py-2.5 px-3">Type</th>
-                                <th class="py-2.5 px-3">Item / Service Description</th>
-                                <th class="py-2.5 px-3">HSN</th>
-                                <th class="py-2.5 px-3 w-16">Unit</th>
-                                <th class="py-2.5 px-3 w-20">Rate (₹)</th>
-                                <th class="py-2.5 px-3 w-14">Qty</th>
-                                <th class="py-2.5 px-3 w-32">Tax (CGST/SGST)</th>
-                                <th class="py-2.5 px-3 text-right w-24">Total (₹)</th>
-                                <th class="py-2.5 px-3 text-center w-8">✕</th>
+                                <th class="py-2.5 px-2.5 w-16">Type</th>
+                                <th class="py-2.5 px-2.5">Item / Service Description</th>
+                                <th class="py-2.5 px-2 w-16">HSN</th>
+                                <th class="py-2.5 px-2 w-24">Rate (₹)</th>
+                                <th class="py-2.5 px-2 w-16 text-center">Qty</th>
+                                <th class="py-2.5 px-2 w-28">Tax (CGST/SGST)</th>
+                                <th class="py-2.5 px-2.5 text-right w-24">Total (₹)</th>
+                                <th class="py-2.5 px-2 text-center w-8">✕</th>
                             </tr>
                         </thead>
                         <tbody id="pos-table-body" class="divide-y divide-slate-100 font-medium text-slate-800">
                             <!-- Dynamic Rows Inserted Here -->
                             <tr id="empty-table-row">
-                                <td colspan="9" class="text-center py-8 text-slate-400">
+                                <td colspan="8" class="text-center py-8 text-slate-400">
                                     <i data-lucide="scan-line" class="w-8 h-8 mx-auto text-slate-300 mb-2"></i>
                                     Scan box barcode or click buttons above to add items to bill.
                                 </td>
@@ -234,60 +237,62 @@
             </div>
         </div>
 
-        <!-- Recent Invoices List Sidebar (1 Column) -->
-        <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-5 space-y-3 flex flex-col">
+        <!-- Recent Invoices List Sidebar (Compact & Collapsible) -->
+        <div id="recent-bills-sidebar" class="lg:col-span-4 xl:col-span-3 bg-white rounded-3xl border border-slate-200 shadow-sm p-4 space-y-3 flex flex-col">
             <div class="flex items-center justify-between border-b border-slate-100 pb-2">
-                <h3 class="font-bold text-slate-900 text-sm">Recent Bills & Receipts</h3>
-                <span class="text-xs text-slate-400 font-mono">{{ invoices|length }} total</span>
+                <h3 class="font-bold text-slate-900 text-xs uppercase tracking-wider">Recent Bills</h3>
+                <span class="text-[11px] text-slate-400 font-mono">{{ invoices|length }} total</span>
             </div>
 
             <!-- Instant Search for Past Invoices -->
             <div>
-                <input type="text" id="recent-bills-search" oninput="filterRecentBills()" placeholder="🔍 Search bill #, customer, car..." class="w-full text-xs px-3 py-1.5 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 shadow-inner">
+                <input type="text" id="recent-bills-search" oninput="filterRecentBills()" placeholder="🔍 Search bill #, name, car..." class="w-full text-xs px-2.5 py-1.5 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 shadow-inner">
             </div>
 
-            <div class="space-y-3 flex-1 overflow-y-auto max-h-[580px] pr-1" id="recent-bills-list">
+            <div class="space-y-2 flex-1 overflow-y-auto max-h-[580px] pr-1" id="recent-bills-list">
                 {% for inv in invoices %}
-                <div class="p-3 rounded-2xl bg-slate-50 border border-slate-100 hover:border-slate-300 transition space-y-2 recent-bill-card" data-search-text="{{ inv.invoice_number|lower }} {{ inv.customer_name|lower }} {{ inv.customer_phone }} {{ inv.vehicle_reg_no|lower }}">
-                    <div class="flex items-start justify-between">
-                        <div>
-                            <span class="font-bold text-slate-900 text-xs">{{ inv.invoice_number }}</span>
-                            <p class="text-[11px] text-slate-600 font-semibold">{{ inv.customer_name }}</p>
-                            <span class="text-[10px] text-slate-400 block">{{ inv.vehicle_reg_no or 'Counter Sale' }}</span>
+                <div class="p-2.5 rounded-2xl bg-slate-50 border border-slate-200/80 hover:border-slate-300 transition space-y-1.5 recent-bill-card" data-search-text="{{ inv.invoice_number|lower }} {{ inv.customer_name|lower }} {{ inv.customer_phone }} {{ inv.vehicle_reg_no|lower }}">
+                    <div class="flex items-start justify-between gap-1">
+                        <div class="min-w-0 flex-1">
+                            <div class="flex items-center gap-1.5">
+                                <span class="font-bold text-slate-900 text-xs truncate">{{ inv.invoice_number }}</span>
+                                <span class="text-[9px] px-1.5 py-0.5 rounded font-bold {% if inv.payment_status == 'PAID' %}text-emerald-700 bg-emerald-100{% elif inv.payment_status == 'PARTIAL' %}text-amber-700 bg-amber-100{% elif inv.payment_status == 'CANCELLED' %}text-rose-700 bg-rose-100 line-through{% else %}text-rose-700 bg-rose-100{% endif %}">
+                                    {{ inv.payment_status }}
+                                </span>
+                            </div>
+                            <p class="text-[11px] text-slate-700 font-medium truncate">{{ inv.customer_name }}</p>
+                            <span class="text-[10px] text-slate-400 font-mono block">{{ inv.vehicle_reg_no or 'Counter Sale' }}</span>
                         </div>
-                        <div class="text-right">
-                            <span class="font-black text-xs {% if inv.payment_status == 'CANCELLED' %}line-through text-slate-400{% else %}text-slate-900{% endif %}">₹{{ "{:,.2f}".format(inv.grand_total) }}</span>
-                            <span class="block text-[10px] font-bold {% if inv.payment_status == 'PAID' %}text-emerald-600{% elif inv.payment_status == 'PARTIAL' %}text-amber-600{% elif inv.payment_status == 'CANCELLED' %}text-rose-600 bg-rose-100 px-1.5 py-0.5 rounded-md font-black{% else %}text-rose-600{% endif %}">
-                                {{ inv.payment_status }}
-                            </span>
+                        <div class="text-right shrink-0">
+                            <span class="font-black text-xs {% if inv.payment_status == 'CANCELLED' %}line-through text-slate-400{% else %}text-slate-900{% endif %}">₹{{ "{:,.0f}".format(inv.grand_total) }}</span>
                             {% if inv.balance_due and inv.balance_due > 0 and inv.payment_status != 'CANCELLED' %}
-                            <span class="block text-[10px] font-bold text-rose-500">Due: ₹{{ "{:,.2f}".format(inv.balance_due) }}</span>
+                            <span class="block text-[10px] font-bold text-rose-600">Due: ₹{{ "{:,.0f}".format(inv.balance_due) }}</span>
                             {% endif %}
                         </div>
                     </div>
 
-                    <div class="pt-2 border-t border-slate-200/60 flex items-center justify-between text-xs">
+                    <div class="pt-1.5 border-t border-slate-200/50 flex items-center justify-between text-[11px]">
                         <span class="text-[10px] text-slate-400">{{ inv.invoice_date }}</span>
                         <div class="flex items-center gap-1">
                             {% if inv.balance_due and inv.balance_due > 0 and inv.payment_status != 'CANCELLED' %}
-                            <button onclick="openRecordPaymentModal('{{ inv.id }}', '{{ inv.invoice_number }}', {{ inv.balance_due }})" class="p-1 rounded bg-amber-100 text-amber-800 hover:bg-amber-200 text-[11px] font-bold" title="Record Installment / Payment">
+                            <button onclick="openRecordPaymentModal('{{ inv.id }}', '{{ inv.invoice_number }}', {{ inv.balance_due }})" class="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 hover:bg-amber-200 text-[10px] font-bold" title="Record Installment / Payment">
                                 💰 Pay
                             </button>
                             {% endif %}
                             {% if inv.payment_status != 'CANCELLED' %}
-                            <button onclick="startEditInvoice('{{ inv.id }}')" class="p-1 rounded bg-blue-100 text-blue-700 hover:bg-blue-200 text-xs font-bold" title="Edit Bill (Master PIN Required)">
+                            <button onclick="startEditInvoice('{{ inv.id }}')" class="p-1 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 text-xs font-bold" title="Edit Bill (Master PIN Required)">
                                 ✏️
                             </button>
                             {% endif %}
-                            <button onclick="shareInvoiceWhatsApp('{{ inv.id }}')" class="p-1 rounded bg-emerald-100 text-emerald-700 hover:bg-emerald-200" title="WhatsApp Share">
+                            <button onclick="shareInvoiceWhatsApp('{{ inv.id }}')" class="p-1 rounded bg-emerald-50 text-emerald-700 hover:bg-emerald-100 text-xs" title="WhatsApp Share">
                                 💬
                             </button>
                             <!-- Direct PDF Print Popup -->
-                            <button onclick="openPdfPrint('{{ inv.id }}')" class="p-1 rounded bg-purple-100 text-purple-700 hover:bg-purple-200" title="Print PDF Bill">
+                            <button onclick="openPdfPrint('{{ inv.id }}')" class="p-1 rounded bg-purple-50 text-purple-700 hover:bg-purple-100 text-xs" title="Print PDF Bill">
                                 🖨️
                             </button>
                             {% if inv.payment_status != 'CANCELLED' %}
-                            <button onclick="promptCancelInvoice('{{ inv.id }}', '{{ inv.invoice_number }}')" class="p-1 rounded bg-rose-50 text-rose-600 hover:bg-rose-100" title="Cancel Bill & Restock Parts (Sales Return - Master PIN Required)">
+                            <button onclick="promptCancelInvoice('{{ inv.id }}', '{{ inv.invoice_number }}')" class="p-1 rounded bg-rose-50 text-rose-600 hover:bg-rose-100 text-xs" title="Cancel Bill & Restock Parts">
                                 🚫
                             </button>
                             {% endif %}
@@ -397,6 +402,25 @@
 {% block scripts %}
 <script>
     let posItems = [];
+
+    function toggleRecentBillsSidebar() {
+        const sidebar = document.getElementById('recent-bills-sidebar');
+        const mainPos = document.getElementById('pos-main-container');
+        const btnText = document.getElementById('toggle-sidebar-text');
+        if (!sidebar || !mainPos) return;
+
+        if (sidebar.classList.contains('hidden')) {
+            sidebar.classList.remove('hidden');
+            mainPos.classList.remove('lg:col-span-12', 'xl:col-span-12');
+            mainPos.classList.add('lg:col-span-8', 'xl:col-span-9');
+            if (btnText) btnText.innerText = "Recent Bills";
+        } else {
+            sidebar.classList.add('hidden');
+            mainPos.classList.remove('lg:col-span-8', 'xl:col-span-9');
+            mainPos.classList.add('lg:col-span-12', 'xl:col-span-12');
+            if (btnText) btnText.innerText = "Show Bills";
+        }
+    }
 
     // Trigger manual barcode scan input
     function triggerManualScan() {
@@ -537,34 +561,24 @@
 
             return `
                 <tr class="hover:bg-slate-50 transition">
-                    <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded text-[10px] font-bold ${badgeClass}">${item.item_type}</span></td>
-                    <td class="py-2.5 px-3">
+                    <td class="py-2 px-2.5"><span class="px-2 py-0.5 rounded text-[10px] font-bold ${badgeClass}">${item.item_type}</span></td>
+                    <td class="py-2 px-2.5">
                         <span class="font-bold text-slate-900 block">${item.name}</span>
                         ${item.part_number ? `<span class="text-[10px] text-amber-900 bg-amber-100 font-mono font-bold px-1.5 py-0.2 rounded inline-block mt-0.5">Part #: ${item.part_number}</span>` : ''}
                     </td>
-                    <td class="py-2.5 px-3 text-slate-400 font-mono text-[11px]">${item.hsn_sac}</td>
-                    <td class="py-2.5 px-3">
-                        <select onchange="updateUnit(${idx}, this.value)" class="w-16 px-1 py-1 rounded border border-slate-200 bg-white text-[10px] font-bold uppercase">
-                            <option value="PCS" ${unitVal === 'PCS' ? 'selected' : ''}>PCS</option>
-                            <option value="NOS" ${unitVal === 'NOS' ? 'selected' : ''}>NOS</option>
-                            <option value="SET" ${unitVal === 'SET' ? 'selected' : ''}>SET</option>
-                            <option value="MTR" ${unitVal === 'MTR' ? 'selected' : ''}>MTR</option>
-                            <option value="LTR" ${unitVal === 'LTR' ? 'selected' : ''}>LTR</option>
-                            <option value="HRS" ${unitVal === 'HRS' ? 'selected' : ''}>HRS</option>
-                        </select>
+                    <td class="py-2 px-2 text-slate-400 font-mono text-[11px]">${item.hsn_sac}</td>
+                    <td class="py-2 px-2">
+                        <input type="number" step="0.01" value="${item.unit_price}" onchange="updatePrice(${idx}, this.value)" class="w-24 px-2 py-1 rounded border border-slate-200 font-bold text-xs focus:outline-none focus:ring-1 focus:ring-primary-500">
                     </td>
-                    <td class="py-2.5 px-3">
-                        <input type="number" step="0.01" value="${item.unit_price}" onchange="updatePrice(${idx}, this.value)" class="w-20 px-1.5 py-1 rounded border border-slate-200 font-bold text-xs">
+                    <td class="py-2 px-2 text-center">
+                        <input type="number" min="1" value="${item.quantity}" onchange="updateQty(${idx}, this.value)" class="w-16 px-1.5 py-1 rounded border border-slate-200 text-center font-bold text-xs focus:outline-none focus:ring-1 focus:ring-primary-500">
                     </td>
-                    <td class="py-2.5 px-3">
-                        <input type="number" min="1" value="${item.quantity}" onchange="updateQty(${idx}, this.value)" class="w-14 px-1.5 py-1 rounded border border-slate-200 text-center font-bold text-xs">
-                    </td>
-                    <td class="py-2.5 px-3">
+                    <td class="py-2 px-2">
                         ${taxBreakdownHtml}
                     </td>
-                    <td class="py-2.5 px-3 text-right font-bold text-slate-900 text-xs">₹${lineTotal.toFixed(2)}</td>
-                    <td class="py-2.5 px-3 text-center">
-                        <button onclick="removePOSItem(${idx})" class="text-rose-500 hover:text-rose-700 font-bold">✕</button>
+                    <td class="py-2 px-2.5 text-right font-black text-slate-900 text-xs">₹${lineTotal.toFixed(2)}</td>
+                    <td class="py-2 px-2 text-center">
+                        <button onclick="removePOSItem(${idx})" class="p-1 rounded text-rose-500 hover:text-rose-700 hover:bg-rose-50 font-bold">✕</button>
                     </td>
                 </tr>
             `;

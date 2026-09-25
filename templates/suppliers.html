@@ -1,0 +1,430 @@
+{% extends "base.html" %}
+
+{% block title %}Suppliers Directory & Purchase History — AutoVolt Pro{% endblock %}
+{% block header_title %}Suppliers Directory & Spares Ledger{% endblock %}
+
+{% block content %}
+<div class="space-y-6 max-w-7xl mx-auto">
+    <!-- Header Card -->
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-2xl bg-amber-50 text-amber-700 flex items-center justify-center font-bold text-lg shadow-sm">
+                🚚
+            </div>
+            <div>
+                <h2 class="font-extrabold text-slate-900 text-base">Suppliers Directory & Product Purchase History</h2>
+                <p class="text-xs text-slate-500">Manage spare parts vendors, contact details, GSTIN, and track complete supply history per vendor</p>
+            </div>
+        </div>
+
+        <div class="flex items-center gap-2">
+            <a href="/purchases" class="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl border border-slate-200 transition flex items-center gap-1.5">
+                <i data-lucide="shopping-cart" class="w-4 h-4"></i>
+                <span>Purchase Bills</span>
+            </a>
+            <button onclick="openModal('add-supplier-modal')" class="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white font-bold text-xs rounded-xl shadow transition flex items-center gap-1.5">
+                <i data-lucide="plus" class="w-4 h-4"></i>
+                <span>+ Add New Supplier</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Quick Stats -->
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold text-lg">
+                🏢
+            </div>
+            <div>
+                <span class="text-[11px] text-slate-400 font-semibold uppercase block">Total Suppliers</span>
+                <span class="text-xl font-black text-slate-900">{{ suppliers|length }}</span>
+            </div>
+        </div>
+
+        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold text-lg">
+                📦
+            </div>
+            <div>
+                <span class="text-[11px] text-slate-400 font-semibold uppercase block">Total Inward Bills</span>
+                <span class="text-xl font-black text-slate-900">
+                    {{ suppliers|map(attribute='total_bills')|sum }}
+                </span>
+            </div>
+        </div>
+
+        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center font-bold text-lg">
+                💰
+            </div>
+            <div>
+                <span class="text-[11px] text-slate-400 font-semibold uppercase block">Total Purchases</span>
+                <span class="text-xl font-black text-amber-700">
+                    ₹{{ "{:,.2f}".format(suppliers|map(attribute='calculated_total_purchases')|sum) }}
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Suppliers Table Container -->
+    <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-5 space-y-4">
+        <!-- Search Toolbar -->
+        <div class="flex items-center justify-between gap-3">
+            <div class="relative w-full max-w-md">
+                <input type="text" id="supplier-search-input" oninput="filterSuppliersTable()" placeholder="🔍 Instant search by supplier name, phone, GSTIN, city..." class="w-full px-4 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500 bg-slate-50 focus:bg-white shadow-inner">
+            </div>
+            <span class="text-xs text-slate-400 font-medium" id="supplier-count-badge">{{ suppliers|length }} Suppliers listed</span>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs" id="suppliers-table">
+                <thead>
+                    <tr class="text-slate-400 uppercase tracking-wider font-semibold border-b border-slate-100 bg-slate-50">
+                        <th class="py-3 px-3">Supplier Name & Contact</th>
+                        <th class="py-3 px-3">Phone / WhatsApp</th>
+                        <th class="py-3 px-3">Location & State</th>
+                        <th class="py-3 px-3">GSTIN</th>
+                        <th class="py-3 px-3">Purchase Volume</th>
+                        <th class="py-3 px-3 text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 font-medium text-slate-700">
+                    {% for s in suppliers %}
+                    <tr class="hover:bg-slate-50 transition supplier-row" data-search="{{ s.name|lower }} {{ s.phone }} {{ s.gstin|lower or '' }} {{ s.city|lower or '' }} {{ s.state|lower or '' }} {{ s.contact_person|lower or '' }}">
+                        <td class="py-3 px-3">
+                            <span class="font-bold text-slate-900 block text-sm">{{ s.name }}</span>
+                            <span class="text-[11px] text-slate-400">Contact: {{ s.contact_person or 'Manager' }} {% if s.payment_terms %}• {{ s.payment_terms }}{% endif %}</span>
+                        </td>
+                        <td class="py-3 px-3">
+                            <span class="font-mono font-bold text-slate-800 block">{{ s.phone }}</span>
+                            {% if s.whatsapp %}
+                            <a href="https://wa.me/{{ s.whatsapp | replace('+', '') | replace(' ', '') }}" target="_blank" class="inline-flex items-center gap-1 text-[10px] text-emerald-600 font-bold hover:underline">
+                                <i data-lucide="message-circle" class="w-3 h-3"></i>
+                                <span>WhatsApp</span>
+                            </a>
+                            {% endif %}
+                        </td>
+                        <td class="py-3 px-3">
+                            <span class="text-slate-800 block">{{ s.city or '—' }}</span>
+                            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600">
+                                {{ s.state or 'Kerala (32)' }}
+                            </span>
+                        </td>
+                        <td class="py-3 px-3 font-mono text-[11px] font-bold text-slate-700">
+                            {{ s.gstin or 'Unregistered' }}
+                        </td>
+                        <td class="py-3 px-3">
+                            <span class="font-black text-slate-900 block text-sm">₹{{ "{:,.2f}".format(s.calculated_total_purchases or 0.0) }}</span>
+                            <span class="text-[10px] text-slate-400">{{ s.total_bills }} Inward Bills</span>
+                        </td>
+                        <td class="py-3 px-3 text-right">
+                            <button onclick="viewSupplierHistory('{{ s.id }}')" class="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-xl text-xs transition border border-indigo-200">
+                                📜 History & Parts
+                            </button>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="6" class="text-center py-8 text-slate-400 text-xs">No suppliers recorded yet. Click "+ Add New Supplier" above.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Add New Supplier -->
+<div id="add-supplier-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden items-center justify-center p-4 overflow-y-auto">
+    <div class="bg-white rounded-3xl max-w-xl w-full p-6 shadow-2xl border border-slate-100 my-8 space-y-4">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+            <div class="flex items-center gap-2">
+                <span class="text-xl">🚚</span>
+                <h3 class="font-bold text-slate-900 text-base">Add New Spare Parts Supplier</h3>
+            </div>
+            <button onclick="closeModal('add-supplier-modal')" class="text-slate-400 hover:text-slate-700 text-xl font-bold">✕</button>
+        </div>
+
+        <form action="/api/suppliers" method="POST" class="space-y-3 text-xs font-medium text-slate-700">
+            <div>
+                <label class="block font-bold text-slate-900 mb-1">Supplier / Firm Name *</label>
+                <input type="text" name="name" required placeholder="e.g. Lucas TVS Kerala Agency" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500">
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">Contact Person Name</label>
+                    <input type="text" name="contact_person" placeholder="e.g. Sunil Kumar (Manager)" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">Phone Number *</label>
+                    <input type="text" name="phone" required placeholder="e.g. 9847012345" class="w-full font-mono px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">WhatsApp Number</label>
+                    <input type="text" name="whatsapp" placeholder="e.g. 9847012345" class="w-full font-mono px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">Email Address</label>
+                    <input type="email" name="email" placeholder="sales@agency.com" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">City / Town</label>
+                    <input type="text" name="city" placeholder="e.g. Kochi / Coimbatore" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">State / GST Type *</label>
+                    <select name="state" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none font-semibold">
+                        <option value="Kerala (32)" selected>🌴 Kerala (State Code 32 - Intra-State CGST+SGST)</option>
+                        <option value="Tamil Nadu (33)">🏙️ Tamil Nadu (State Code 33 - Inter-State IGST)</option>
+                        <option value="Karnataka (29)">🏢 Karnataka (State Code 29 - Inter-State IGST)</option>
+                        <option value="Maharashtra (27)">🏙️ Maharashtra (State Code 27)</option>
+                        <option value="Other State">🚚 Other State (Inter-State IGST)</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">GSTIN Number (Optional)</label>
+                    <input type="text" name="gstin" placeholder="32AABCL1234F1Z5" class="w-full uppercase font-mono px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">Credit / Payment Terms</label>
+                    <input type="text" name="payment_terms" placeholder="e.g. 30 Days Credit / Immediate" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                </div>
+            </div>
+
+            <div>
+                <label class="block font-bold text-slate-900 mb-1">Full Shop / Godown Address</label>
+                <textarea name="address" rows="2" placeholder="Building name, street, pincode..." class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none"></textarea>
+            </div>
+
+            <div>
+                <label class="block font-bold text-slate-900 mb-1">Notes / Remarks</label>
+                <input type="text" name="notes" placeholder="Authorized distributor for Lucas TVS armatures & relays..." class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+            </div>
+
+            <div class="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+                <button type="button" onclick="closeModal('add-supplier-modal')" class="px-4 py-2 text-slate-600 font-bold">Cancel</button>
+                <button type="submit" class="px-5 py-2.5 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl shadow">Save Supplier</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal / Drawer: Supplier Purchase History & Supplied Parts -->
+<div id="supplier-history-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden items-center justify-center p-4 overflow-y-auto">
+    <div class="bg-white rounded-3xl max-w-4xl w-full p-6 shadow-2xl border border-slate-100 my-8 space-y-5">
+        <div class="flex items-start justify-between pb-3 border-b border-slate-100">
+            <div class="space-y-1">
+                <div class="flex items-center gap-2">
+                    <span class="text-xl">🚚</span>
+                    <h3 class="font-extrabold text-slate-900 text-base" id="sh-supplier-name">Supplier Name</h3>
+                    <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-800" id="sh-supplier-state">Kerala (32)</span>
+                </div>
+                <p class="text-xs text-slate-500" id="sh-supplier-contact">Contact Person: — • Phone: —</p>
+            </div>
+            <button onclick="closeModal('supplier-history-modal')" class="text-slate-400 hover:text-slate-700 text-xl font-bold">✕</button>
+        </div>
+
+        <!-- Supplier Details Pill Box -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 p-4 rounded-2xl border border-slate-100 text-xs">
+            <div>
+                <span class="text-[10px] uppercase font-bold text-slate-400 block">Phone / WhatsApp</span>
+                <span class="font-bold text-slate-800 font-mono" id="sh-phone">—</span>
+            </div>
+            <div>
+                <span class="text-[10px] uppercase font-bold text-slate-400 block">GSTIN Number</span>
+                <span class="font-mono font-bold text-slate-800" id="sh-gstin">—</span>
+            </div>
+            <div>
+                <span class="text-[10px] uppercase font-bold text-slate-400 block">Address</span>
+                <span class="text-slate-700 font-medium block truncate" id="sh-address">—</span>
+            </div>
+            <div>
+                <span class="text-[10px] uppercase font-bold text-slate-400 block">Total Purchases</span>
+                <span class="font-black text-amber-700 text-sm" id="sh-total-purchases">₹0.00</span>
+            </div>
+        </div>
+
+        <!-- Tabs: Inward Bills vs Parts Supplied -->
+        <div class="space-y-3">
+            <div class="flex items-center gap-2 border-b border-slate-200">
+                <button type="button" id="tab-btn-bills" onclick="switchSupplierTab('bills')" class="px-4 py-2 border-b-2 border-primary-600 text-primary-700 font-bold text-xs transition">
+                    📥 Purchase Bills History (<span id="sh-bills-count">0</span>)
+                </button>
+                <button type="button" id="tab-btn-parts" onclick="switchSupplierTab('parts')" class="px-4 py-2 border-b-2 border-transparent text-slate-500 hover:text-slate-800 font-bold text-xs transition">
+                    📦 Products Supplied by this Vendor (<span id="sh-parts-count">0</span>)
+                </button>
+            </div>
+
+            <!-- Tab 1: Bills List -->
+            <div id="tab-content-bills" class="space-y-2">
+                <div class="overflow-x-auto border border-slate-100 rounded-2xl max-h-[350px]">
+                    <table class="w-full text-left text-xs">
+                        <thead class="bg-slate-50 text-slate-500 uppercase font-semibold text-[11px] sticky top-0">
+                            <tr>
+                                <th class="py-2.5 px-3">Bill #</th>
+                                <th class="py-2.5 px-3">Bill Date</th>
+                                <th class="py-2.5 px-3">Payment Mode</th>
+                                <th class="py-2.5 px-3">Status</th>
+                                <th class="py-2.5 px-3 text-right">Bill Total (₹)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="sh-bills-tbody" class="divide-y divide-slate-100 font-medium text-slate-700">
+                            <!-- Injected -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Tab 2: Products Supplied -->
+            <div id="tab-content-parts" class="hidden space-y-2">
+                <div class="overflow-x-auto border border-slate-100 rounded-2xl max-h-[350px]">
+                    <table class="w-full text-left text-xs">
+                        <thead class="bg-slate-50 text-slate-500 uppercase font-semibold text-[11px] sticky top-0">
+                            <tr>
+                                <th class="py-2.5 px-3">Part Description</th>
+                                <th class="py-2.5 px-3">Barcode</th>
+                                <th class="py-2.5 px-3">Supplied Date</th>
+                                <th class="py-2.5 px-3 text-center">Qty</th>
+                                <th class="py-2.5 px-3 text-right">Cost Price (₹)</th>
+                                <th class="py-2.5 px-3 text-right">Total (₹)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="sh-parts-tbody" class="divide-y divide-slate-100 font-medium text-slate-700">
+                            <!-- Injected -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex items-center justify-end pt-3 border-t border-slate-100">
+            <button type="button" onclick="closeModal('supplier-history-modal')" class="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition">
+                Close
+            </button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function filterSuppliersTable() {
+        const q = (document.getElementById('supplier-search-input')?.value || '').toLowerCase().trim();
+        let visibleCount = 0;
+
+        document.querySelectorAll('.supplier-row').forEach(row => {
+            const search = (row.getAttribute('data-search') || row.innerText).toLowerCase();
+            if (!q || search.includes(q)) {
+                row.style.display = '';
+                visibleCount++;
+            } else {
+                row.style.display = 'none';
+            }
+        });
+
+        const badge = document.getElementById('supplier-count-badge');
+        if (badge) {
+            badge.innerText = `${visibleCount} Suppliers found`;
+        }
+    }
+
+    async function viewSupplierHistory(supplierId) {
+        try {
+            const res = await fetch(`/api/suppliers/${supplierId}`);
+            if (!res.ok) {
+                alert('Could not fetch supplier details');
+                return;
+            }
+            const data = await res.json();
+            const s = data.supplier;
+            const bills = data.bills || [];
+            const products = data.products || [];
+
+            document.getElementById('sh-supplier-name').innerText = s.name;
+            document.getElementById('sh-supplier-state').innerText = s.state || 'Kerala (32)';
+            document.getElementById('sh-supplier-contact').innerText = `Contact: ${s.contact_person || 'Manager'} • Phone: ${s.phone}`;
+            document.getElementById('sh-phone').innerText = s.phone || '—';
+            document.getElementById('sh-gstin').innerText = s.gstin || 'Unregistered';
+            document.getElementById('sh-address').innerText = s.address ? `${s.address}, ${s.city || ''}` : (s.city || '—');
+
+            const totalSum = bills.reduce((acc, b) => acc + (parseFloat(b.total_amount) || 0), 0);
+            document.getElementById('sh-total-purchases').innerText = `₹${totalSum.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+
+            document.getElementById('sh-bills-count').innerText = bills.length;
+            document.getElementById('sh-parts-count').innerText = products.length;
+
+            // Render Bills
+            const billsTbody = document.getElementById('sh-bills-tbody');
+            if (bills.length === 0) {
+                billsTbody.innerHTML = `<tr><td colspan="5" class="py-6 text-center text-slate-400">No purchase bills recorded for this supplier.</td></tr>`;
+            } else {
+                billsTbody.innerHTML = bills.map(b => `
+                    <tr class="hover:bg-slate-50 transition">
+                        <td class="py-2.5 px-3 font-mono font-bold text-slate-900">${b.bill_number}</td>
+                        <td class="py-2.5 px-3 text-slate-500">${b.bill_date}</td>
+                        <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100">${b.payment_mode}</span></td>
+                        <td class="py-2.5 px-3">
+                            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${b.status === 'CONFIRMED' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}">
+                                ${b.status}
+                            </span>
+                        </td>
+                        <td class="py-2.5 px-3 text-right font-black text-slate-900">₹${parseFloat(b.total_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                    </tr>
+                `).join('');
+            }
+
+            // Render Products
+            const partsTbody = document.getElementById('sh-parts-tbody');
+            if (products.length === 0) {
+                partsTbody.innerHTML = `<tr><td colspan="6" class="py-6 text-center text-slate-400">No spare parts itemized under this supplier yet.</td></tr>`;
+            } else {
+                partsTbody.innerHTML = products.map(p => `
+                    <tr class="hover:bg-slate-50 transition">
+                        <td class="py-2.5 px-3 font-bold text-slate-900">${p.part_name}</td>
+                        <td class="py-2.5 px-3 font-mono text-[11px] text-slate-500">${p.barcode || '—'}</td>
+                        <td class="py-2.5 px-3 text-slate-500">${p.bill_date} (Bill #${p.bill_number})</td>
+                        <td class="py-2.5 px-3 text-center font-bold text-slate-900">${p.quantity}</td>
+                        <td class="py-2.5 px-3 text-right font-bold text-slate-700">₹${parseFloat(p.unit_cost || 0).toFixed(2)}</td>
+                        <td class="py-2.5 px-3 text-right font-black text-slate-900">₹${parseFloat(p.total_cost || 0).toFixed(2)}</td>
+                    </tr>
+                `).join('');
+            }
+
+            switchSupplierTab('bills');
+            openModal('supplier-history-modal');
+        } catch (err) {
+            console.error(err);
+            alert('Error loading supplier history.');
+        }
+    }
+
+    function switchSupplierTab(tab) {
+        const btnBills = document.getElementById('tab-btn-bills');
+        const btnParts = document.getElementById('tab-btn-parts');
+        const contentBills = document.getElementById('tab-content-bills');
+        const contentParts = document.getElementById('tab-content-parts');
+
+        if (tab === 'bills') {
+            btnBills.className = 'px-4 py-2 border-b-2 border-primary-600 text-primary-700 font-bold text-xs transition';
+            btnParts.className = 'px-4 py-2 border-b-2 border-transparent text-slate-500 hover:text-slate-800 font-bold text-xs transition';
+            contentBills.classList.remove('hidden');
+            contentParts.classList.add('hidden');
+        } else {
+            btnParts.className = 'px-4 py-2 border-b-2 border-primary-600 text-primary-700 font-bold text-xs transition';
+            btnBills.className = 'px-4 py-2 border-b-2 border-transparent text-slate-500 hover:text-slate-800 font-bold text-xs transition';
+            contentParts.classList.remove('hidden');
+            contentBills.classList.add('hidden');
+        }
+    }
+</script>
+{% endblock %}
