@@ -41,9 +41,14 @@
                     <label class="block text-xs font-bold text-amber-950 mb-1">Scan Inventory Box Barcode (or Type & Enter):</label>
                     <input type="text" id="pos-barcode-input" autofocus placeholder="Point scanner at box barcode or type SKU (e.g. 89012340001)..." class="barcode-input-field barcode-scanner-target w-full px-4 py-2.5 rounded-xl border border-amber-300 bg-white font-mono text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 shadow-inner">
                 </div>
-                <button type="button" onclick="triggerManualScan()" class="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs rounded-xl shadow transition self-stretch sm:self-auto flex items-center justify-center gap-1">
-                    <span>Add Item</span>
-                </button>
+                <div class="flex items-center gap-2 self-stretch sm:self-auto">
+                    <button type="button" onclick="triggerManualScan()" class="flex-1 sm:flex-initial px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs rounded-xl shadow transition flex items-center justify-center gap-1">
+                        <span>Add Item</span>
+                    </button>
+                    <button type="button" onclick="openCameraBarcodeScanner()" class="flex-1 sm:flex-initial px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow transition flex items-center justify-center gap-1.5 whitespace-nowrap" title="Scan with Phone / Laptop Camera">
+                        <span>📷 Camera Scan</span>
+                    </button>
+                </div>
             </div>
 
             <!-- Editing Existing Invoice Banner (Dynamic / Static) -->
@@ -92,6 +97,7 @@
 
             <input type="hidden" id="editing-invoice-id" value="{% if editing_invoice %}{{ editing_invoice.id }}{% endif %}">
             <input type="hidden" id="editing-invoice-number" value="{% if editing_invoice %}{{ editing_invoice.invoice_number }}{% endif %}">
+            <input type="hidden" id="editing-was-full-paid" value="{% if editing_invoice and (editing_invoice.payment_status == 'PAID' or (editing_invoice.balance_due is defined and editing_invoice.balance_due <= 0)) %}true{% else %}false{% endif %}">
             <input type="hidden" id="prefill-job-id" value="{% if prefill_job %}{{ prefill_job.job.id }}{% endif %}">
             <input type="hidden" id="prefill-job-number" value="{% if prefill_job %}{{ prefill_job.job.job_number }}{% endif %}">
 
@@ -220,7 +226,7 @@
                                     <button type="button" onclick="setCreditUnpaid()" class="text-[10px] bg-amber-600/80 hover:bg-amber-500 text-white font-bold px-1.5 py-0.5 rounded transition">Credit (₹0)</button>
                                 </div>
                             </div>
-                            <input type="number" id="pos-amount-paid" value="{% if editing_invoice %}{{ editing_invoice.amount_paid }}{% endif %}" placeholder="0.00" oninput="this.dataset.customSet = 'true'" class="w-full text-xs font-bold px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none">
+                            <input type="number" id="pos-amount-paid" value="{% if editing_invoice %}{{ editing_invoice.amount_paid }}{% endif %}" placeholder="0.00" oninput="this.dataset.customSet = 'true'; this.dataset.userManuallyChanged = 'true'; this.dataset.autoSyncPaid = 'false';" class="w-full text-xs font-bold px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none">
                         </div>
                     </div>
 
@@ -397,11 +403,112 @@
         </form>
     </div>
 </div>
+<!-- Modal: Live Camera Barcode Scanner -->
+<div id="camera-scanner-modal" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-md w-full p-5 shadow-2xl border border-slate-100 space-y-4">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+            <div class="flex items-center gap-2">
+                <span class="w-8 h-8 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center text-base">📷</span>
+                <div>
+                    <h3 class="font-bold text-slate-900 text-sm">Live Camera Barcode Scanner</h3>
+                    <p class="text-[11px] text-slate-500">Scan box barcode using phone/laptop camera</p>
+                </div>
+            </div>
+            <button type="button" onclick="closeCameraBarcodeScanner()" class="text-slate-400 hover:text-slate-700 text-xl font-bold">✕</button>
+        </div>
+
+        <!-- Camera Viewfinder Container -->
+        <div class="relative bg-slate-950 rounded-2xl overflow-hidden border border-slate-800 flex items-center justify-center min-h-[260px]">
+            <div id="camera-qr-reader" class="w-full"></div>
+            <div id="camera-loading-indicator" class="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/80 text-white space-y-2">
+                <div class="w-8 h-8 border-4 border-indigo-400 border-t-transparent rounded-full animate-spin"></div>
+                <span class="text-xs font-semibold">Starting camera...</span>
+            </div>
+        </div>
+
+        <div class="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-[11px] flex items-start gap-2">
+            <span>💡</span>
+            <span>Hold box barcode steady in frame. Supports 1D Product Barcodes & QR codes. Beeps automatically on detection!</span>
+        </div>
+
+        <div class="flex items-center justify-between pt-2 border-t border-slate-100">
+            <button type="button" onclick="switchCameraFacing()" id="btn-switch-cam" class="text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1">
+                🔄 Switch Camera
+            </button>
+            <button type="button" onclick="closeCameraBarcodeScanner()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition">
+                Close
+            </button>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
     let posItems = [];
+    let html5QrScanner = null;
+    let currentCameraFacing = "environment"; // default to back camera
+
+    async function openCameraBarcodeScanner() {
+        openModal('camera-scanner-modal');
+        const loader = document.getElementById('camera-loading-indicator');
+        if (loader) loader.classList.remove('hidden');
+
+        if (typeof Html5Qrcode === "undefined") {
+            showToast("Camera scanner library loading...", "info");
+            return;
+        }
+
+        try {
+            if (!html5QrScanner) {
+                html5QrScanner = new Html5Qrcode("camera-qr-reader");
+            }
+
+            const config = {
+                fps: 15,
+                qrbox: { width: 260, height: 160 },
+                aspectRatio: 1.333334
+            };
+
+            await html5QrScanner.start(
+                { facingMode: currentCameraFacing },
+                config,
+                (decodedText, decodedResult) => {
+                    console.log("Scanned text via camera:", decodedText);
+                    window.barcodeScanner.playBeepSound(true);
+                    window.barcodeScanner.triggerScan(decodedText);
+                    closeCameraBarcodeScanner();
+                },
+                (errorMessage) => {
+                    // scanning in progress, no code in frame
+                }
+            );
+            if (loader) loader.classList.add('hidden');
+        } catch (err) {
+            console.error("Camera start error:", err);
+            if (loader) loader.classList.add('hidden');
+            showToast("Camera permission denied or camera not found.", "error");
+        }
+    }
+
+    async function closeCameraBarcodeScanner() {
+        if (html5QrScanner && html5QrScanner.isScanning) {
+            try {
+                await html5QrScanner.stop();
+            } catch (e) {
+                console.warn("Camera stop error:", e);
+            }
+        }
+        closeModal('camera-scanner-modal');
+    }
+
+    async function switchCameraFacing() {
+        currentCameraFacing = (currentCameraFacing === "environment") ? "user" : "environment";
+        if (html5QrScanner && html5QrScanner.isScanning) {
+            await html5QrScanner.stop();
+            openCameraBarcodeScanner();
+        }
+    }
 
     function toggleRecentBillsSidebar() {
         const sidebar = document.getElementById('recent-bills-sidebar');
@@ -470,6 +577,11 @@
                 tax_rate: parseFloat(tax) || 18.0
             });
         }
+        const wasFullPaid = document.getElementById('editing-was-full-paid')?.value === 'true';
+        if (wasFullPaid) {
+            const pField = document.getElementById('pos-amount-paid');
+            if (pField && !pField.dataset.userManuallyChanged) pField.dataset.autoSyncPaid = 'true';
+        }
         renderPOSTable();
         closeModal('select-part-pos-modal');
     }
@@ -491,11 +603,21 @@
             unit_price: rate,
             tax_rate: 0.0
         });
+        const wasFullPaid = document.getElementById('editing-was-full-paid')?.value === 'true';
+        if (wasFullPaid) {
+            const pField = document.getElementById('pos-amount-paid');
+            if (pField && !pField.dataset.userManuallyChanged) pField.dataset.autoSyncPaid = 'true';
+        }
         renderPOSTable();
     }
 
     function removePOSItem(index) {
         posItems.splice(index, 1);
+        const wasFullPaid = document.getElementById('editing-was-full-paid')?.value === 'true';
+        if (wasFullPaid) {
+            const pField = document.getElementById('pos-amount-paid');
+            if (pField && !pField.dataset.userManuallyChanged) pField.dataset.autoSyncPaid = 'true';
+        }
         renderPOSTable();
     }
 
@@ -664,10 +786,23 @@
 
         const paidField = document.getElementById('pos-amount-paid');
         const mode = document.getElementById('pos-payment-mode').value;
+        const wasFullPaid = document.getElementById('editing-was-full-paid')?.value === 'true';
+        const isEditing = Boolean(document.getElementById('editing-invoice-id')?.value);
+
         if (mode === 'KHATA_CREDIT') {
             paidField.placeholder = "0.00";
-        } else if (!paidField.dataset.customSet && (!paidField.value || parseFloat(paidField.value) === 0)) {
-            paidField.value = roundedGrandTotal;
+            if (!paidField.dataset.customSet) {
+                paidField.value = "0.00";
+            }
+        } else {
+            // When editing an invoice that was full paid (or adding new items), auto-update to full paid!
+            if (wasFullPaid && !paidField.dataset.userManuallyChanged) {
+                paidField.value = roundedGrandTotal;
+            } else if (paidField.dataset.autoSyncPaid === 'true') {
+                paidField.value = roundedGrandTotal;
+            } else if (!isEditing && (!paidField.dataset.customSet || !paidField.value || parseFloat(paidField.value) === 0)) {
+                paidField.value = roundedGrandTotal;
+            }
         }
     }
 
@@ -676,9 +811,13 @@
         const num = parseFloat(totalText) || 0;
         const paidField = document.getElementById('pos-amount-paid');
         paidField.value = num;
-        paidField.dataset.customSet = "true";
-        document.getElementById('pos-payment-mode').value = 'UPI';
-        showToast(`Paid amount set to full (₹${num})`, "info");
+        paidField.dataset.customSet = "false";
+        paidField.dataset.userManuallyChanged = "false";
+        paidField.dataset.autoSyncPaid = "true";
+        if (document.getElementById('pos-payment-mode').value === 'KHATA_CREDIT') {
+            document.getElementById('pos-payment-mode').value = 'UPI';
+        }
+        showToast(`Paid amount set to full (₹${num.toLocaleString('en-IN')})`, "info");
     }
 
     function setCreditUnpaid() {

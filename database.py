@@ -299,6 +299,7 @@ def init_db():
         warranty_months INTEGER DEFAULT 0,
         supplier_name TEXT,
         location_rack TEXT,
+        position_bin TEXT DEFAULT '',
         created_at TEXT,
         updated_at TEXT
     );
@@ -662,6 +663,7 @@ def run_schema_migrations(cursor, conn):
         ("users", "permissions", "TEXT DEFAULT ''"),
         ("purchase_bills", "supplier_id", "TEXT DEFAULT ''"),
         ("purchase_items", "tax_rate", "REAL DEFAULT 18.0"),
+        ("inventory_items", "position_bin", "TEXT DEFAULT ''"),
     ]
 
     for table, col, col_type in migrations:

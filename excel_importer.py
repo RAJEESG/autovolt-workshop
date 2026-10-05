@@ -17,9 +17,9 @@ def generate_inventory_import_template() -> bytes:
     center_align = Alignment(horizontal="center", vertical="center")
 
     headers = [
-        "Part Name *", "Barcode (Box Barcode) *", "Category *", "Opening Stock Qty *",
-        "Cost Price (₹) *", "Selling Price (₹) *", "GST Tax %", "HSN Code",
-        "Unit", "Warranty Months", "Location / Rack"
+        "Part Name *", "Part Number (OEM / Mfr No)", "Barcode (Box Barcode) *", "Category *", "Opening Stock Qty *",
+        "Cost Price (₹ Base) *", "Selling Price (₹ Base) *", "GST Tax %", "HSN Code",
+        "Unit", "Warranty Months", "Location / Rack", "Shelf / Bin Position"
     ]
     ws.append(headers)
 
@@ -31,19 +31,19 @@ def generate_inventory_import_template() -> bytes:
 
     # Sample rows
     sample_rows = [
-        ["Lucas 4-Pin Horn Relay 12V 30A", "89012340001", "Relays & Fuses", 40, 85.00, 140.00, 18.0, "8536", "pcs", 6, "Rack A1"],
-        ["Bosch 5-Pin Changeover Relay 12V", "89012340002", "Relays & Fuses", 25, 110.00, 180.00, 18.0, "8536", "pcs", 6, "Rack A1"],
-        ["Blade Fuse 15A Blue Standard", "89012340003", "Relays & Fuses", 100, 3.50, 10.00, 18.0, "8536", "pcs", 0, "Rack A2"],
-        ["Philips H4 12V 100/90W Rally Bulb", "89012340005", "Bulbs & LEDs", 20, 145.00, 220.00, 18.0, "8539", "pcs", 6, "Rack B1"],
-        ["Amaron Hi-Way 12V 35Ah Battery", "89012340011", "Batteries", 8, 3400.00, 4250.00, 28.0, "8507", "pcs", 36, "Battery Bay"],
-        ["Universal Reverse Parking Camera", "89012340016", "Accessories", 10, 480.00, 850.00, 18.0, "8528", "pcs", 12, "Rack E1"]
+        ["Lucas 4-Pin Horn Relay 12V 30A", "LUC-REL-4P", "89012340001", "Relays & Fuses", 40, 85.00, 140.00, 18.0, "8536", "pcs", 6, "Rack A1", "Shelf 2 / Bin 4"],
+        ["Bosch 5-Pin Changeover Relay 12V", "BOS-REL-5P", "89012340002", "Relays & Fuses", 25, 110.00, 180.00, 18.0, "8536", "pcs", 6, "Rack A1", "Shelf 2 / Bin 5"],
+        ["Blade Fuse 15A Blue Standard", "FUSE-15A", "89012340003", "Relays & Fuses", 100, 3.50, 10.00, 18.0, "8536", "pcs", 0, "Rack A2", "Drawer 1"],
+        ["Philips H4 12V 100/90W Rally Bulb", "PHI-H4-100", "89012340005", "Bulbs & LEDs", 20, 145.00, 220.00, 18.0, "8539", "pcs", 6, "Rack B1", "Top Shelf"],
+        ["Amaron Hi-Way 12V 35Ah Battery", "AAM-HW-35", "89012340011", "Batteries", 8, 3400.00, 4250.00, 28.0, "8507", "pcs", 36, "Battery Bay", "Floor Pallet"],
+        ["Universal Reverse Parking Camera", "REV-CAM-01", "89012340016", "Accessories", 10, 480.00, 850.00, 18.0, "8528", "pcs", 12, "Rack E1", "Bin 12"]
     ]
 
     for row_data in sample_rows:
         ws.append(row_data)
 
     # Set column widths
-    column_widths = [36, 24, 22, 18, 16, 16, 12, 12, 10, 16, 16]
+    column_widths = [36, 26, 24, 22, 18, 18, 18, 12, 12, 10, 16, 18, 20]
     for i, width in enumerate(column_widths, 1):
         ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = width
 
@@ -88,10 +88,14 @@ def parse_inventory_file(file_bytes: bytes, filename: str) -> Tuple[List[Dict[st
             continue
 
         try:
+            part_number = str(row.get("part_number_oem_mfr_no") or row.get("part_number") or row.get("part_no") or row.get("oem_no") or "").strip().upper()
+            if part_number.lower() == "nan":
+                part_number = ""
+
             category = str(row.get("category") or "Relays & Fuses").strip()
             stock_qty = int(float(row.get("opening_stock_qty") or row.get("stock_qty") or row.get("qty") or row.get("stock") or 0))
-            cost_price = float(row.get("cost_price") or row.get("cost") or row.get("purchase_price") or 0.0)
-            selling_price = float(row.get("selling_price") or row.get("price") or row.get("selling_rate") or row.get("mrp") or 0.0)
+            cost_price = float(row.get("cost_price_base") or row.get("cost_price") or row.get("cost") or row.get("purchase_price") or 0.0)
+            selling_price = float(row.get("selling_price_base") or row.get("selling_price") or row.get("price") or row.get("selling_rate") or row.get("mrp") or 0.0)
             tax_rate = float(row.get("gst_tax") or row.get("tax_rate") or row.get("gst") or row.get("tax") or 18.0)
             hsn_code = str(row.get("hsn_code") or row.get("hsn") or "8536").strip()
             if hsn_code.endswith(".0"):
@@ -99,9 +103,15 @@ def parse_inventory_file(file_bytes: bytes, filename: str) -> Tuple[List[Dict[st
             unit = str(row.get("unit") or "pcs").strip()
             warranty_months = int(float(row.get("warranty_months") or row.get("warranty") or 0))
             location_rack = str(row.get("location_rack") or row.get("rack") or row.get("location") or "Main").strip()
+            if location_rack.lower() == "nan":
+                location_rack = "Main"
+            position_bin = str(row.get("shelf_bin_position") or row.get("position_bin") or row.get("bin") or row.get("shelf") or row.get("position") or "").strip()
+            if position_bin.lower() == "nan":
+                position_bin = ""
 
             items.append({
                 "part_name": part_name,
+                "part_number": part_number,
                 "barcode": barcode,
                 "sku": barcode,
                 "category": category if category.lower() != "nan" else "Relays & Fuses",
@@ -112,7 +122,8 @@ def parse_inventory_file(file_bytes: bytes, filename: str) -> Tuple[List[Dict[st
                 "hsn_code": hsn_code if hsn_code.lower() != "nan" else "8536",
                 "unit": unit if unit.lower() != "nan" else "pcs",
                 "warranty_months": warranty_months,
-                "location_rack": location_rack if location_rack.lower() != "nan" else "Main"
+                "location_rack": location_rack,
+                "position_bin": position_bin
             })
         except Exception as err:
             errors.append(f"Row {row_num} error: {err}")

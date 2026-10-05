@@ -1314,27 +1314,27 @@ async def import_inventory_excel(file: UploadFile = File(...)):
         if existing:
             cursor.execute("""
             UPDATE inventory_items SET
-                part_name = ?, category = ?, stock_qty = stock_qty + ?,
+                part_name = ?, part_number = COALESCE(NULLIF(?, ''), part_number), category = ?, stock_qty = stock_qty + ?,
                 cost_price = ?, selling_price = ?, tax_rate = ?, hsn_code = ?,
-                unit = ?, warranty_months = ?, location_rack = ?, updated_at = datetime('now')
+                unit = ?, warranty_months = ?, location_rack = ?, position_bin = COALESCE(NULLIF(?, ''), position_bin), updated_at = datetime('now')
             WHERE id = ?
             """, (
-                itm["part_name"], itm["category"], itm["stock_qty"],
+                itm["part_name"], itm.get("part_number", ""), itm["category"], itm["stock_qty"],
                 itm["cost_price"], itm["selling_price"], itm["tax_rate"], itm["hsn_code"],
-                itm["unit"], itm["warranty_months"], itm["location_rack"], existing["id"]
+                itm["unit"], itm["warranty_months"], itm["location_rack"], itm.get("position_bin", ""), existing["id"]
             ))
         else:
             item_id = f"item_{uuid.uuid4().hex[:8]}"
             cursor.execute("""
             INSERT INTO inventory_items (
-                id, part_name, sku, barcode, category, stock_qty, min_stock_alert,
+                id, part_name, part_number, sku, barcode, category, stock_qty, min_stock_alert,
                 cost_price, selling_price, tax_rate, hsn_code, unit, warranty_months,
-                location_rack, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, 5, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+                location_rack, position_bin, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 5, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
             """, (
-                item_id, itm["part_name"], itm["barcode"], itm["barcode"], itm["category"],
+                item_id, itm["part_name"], itm.get("part_number", ""), itm["barcode"], itm["barcode"], itm["category"],
                 itm["stock_qty"], itm["cost_price"], itm["selling_price"], itm["tax_rate"],
-                itm["hsn_code"], itm["unit"], itm["warranty_months"], itm["location_rack"]
+                itm["hsn_code"], itm["unit"], itm["warranty_months"], itm["location_rack"], itm.get("position_bin", "")
             ))
         imported_count += 1
 
@@ -1388,21 +1388,25 @@ async def add_inventory_item(
     selling_price: float = Form(0.0),
     tax_rate: float = Form(18.0),
     hsn_code: str = Form("8536"),
-    warranty_months: int = Form(0)
+    warranty_months: int = Form(0),
+    location_rack: str = Form("Main"),
+    position_bin: Optional[str] = Form("")
 ):
     conn = db.get_db_connection()
     cursor = conn.cursor()
     item_id = f"item_{uuid.uuid4().hex[:8]}"
     clean_pn = (part_number or "").strip().upper()
+    clean_rack = (location_rack or "Main").strip()
+    clean_bin = (position_bin or "").strip()
     cursor.execute("""
     INSERT INTO inventory_items (
         id, part_name, part_number, sku, barcode, category, stock_qty, min_stock_alert,
         cost_price, selling_price, tax_rate, hsn_code, unit, warranty_months,
-        created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-    """, (item_id, part_name, clean_pn, barcode, barcode, category, stock_qty, 5, cost_price, selling_price, tax_rate, hsn_code, "pcs", warranty_months))
+        location_rack, position_bin, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, 5, ?, ?, ?, ?, 'pcs', ?, ?, ?, datetime('now'), datetime('now'))
+    """, (item_id, part_name, clean_pn, barcode, barcode, category, stock_qty, cost_price, selling_price, tax_rate, hsn_code, warranty_months, clean_rack, clean_bin))
     
-    db.log_audit("ADD_INVENTORY_PART", "inventory_items", item_id, f"Added part: {part_name} (PN: {clean_pn}, Barcode: {barcode})", cursor=cursor)
+    db.log_audit("ADD_INVENTORY_PART", "inventory_items", item_id, f"Added part: {part_name} (PN: {clean_pn}, Barcode: {barcode}, Rack: {clean_rack}, Pos: {clean_bin})", cursor=cursor)
     conn.commit()
     conn.close()
     return RedirectResponse(url="/inventory", status_code=303)
@@ -1582,6 +1586,75 @@ async def record_technician_wages(
     conn.commit()
     conn.close()
     return RedirectResponse(url="/technicians", status_code=303)
+
+@app.get("/api/technicians/{tech_id}/ledger")
+async def get_technician_ledger(tech_id: str):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM technicians WHERE id = ?", (tech_id,))
+    tech = cursor.fetchone()
+    if not tech:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Technician not found")
+    
+    tech_data = dict(tech)
+    commission_pct = float(tech_data.get("commission_pct") or 0.0)
+
+    # 1. Fetch Advances
+    cursor.execute("""
+        SELECT * FROM employee_advances 
+        WHERE technician_id = ? 
+        ORDER BY advance_date DESC, created_at DESC
+    """, (tech_id,))
+    advances = [dict(r) for r in cursor.fetchall()]
+
+    # 2. Fetch Wages
+    cursor.execute("""
+        SELECT * FROM employee_wages 
+        WHERE technician_id = ? 
+        ORDER BY payment_date DESC, created_at DESC
+    """, (tech_id,))
+    wages = [dict(r) for r in cursor.fetchall()]
+
+    # 3. Fetch Assigned Job Cards
+    cursor.execute("""
+        SELECT id, job_number, customer_name, customer_phone, vehicle_reg_no, vehicle_make_model,
+               status, total_labor, total_parts, grand_total, created_at, completed_at, delivered_at
+        FROM job_cards 
+        WHERE assigned_technician_id = ? OR assigned_technician_name = ?
+        ORDER BY created_at DESC
+    """, (tech_id, tech_data["name"]))
+    jobs = []
+    total_labor = 0.0
+    for r in cursor.fetchall():
+        jd = dict(r)
+        lab = float(jd.get("total_labor") or 0.0)
+        total_labor += lab
+        jd["commission_earned"] = round(lab * (commission_pct / 100.0), 2)
+        jobs.append(jd)
+
+    total_advances_given = sum(float(a.get("amount") or 0.0) for a in advances)
+    total_wages_paid = sum(float(w.get("net_paid") or 0.0) for w in wages)
+    total_advances_deducted = sum(float(w.get("advance_deducted") or 0.0) for w in wages)
+    total_commissions_earned = round(total_labor * (commission_pct / 100.0), 2)
+
+    conn.close()
+
+    return {
+        "technician": tech_data,
+        "advances": advances,
+        "wages": wages,
+        "jobs": jobs,
+        "summary": {
+            "total_jobs": len(jobs),
+            "total_labor_generated": total_labor,
+            "total_commissions_earned": total_commissions_earned,
+            "total_advances_given": total_advances_given,
+            "total_advances_deducted": total_advances_deducted,
+            "current_advance_balance": float(tech_data.get("current_advance_balance") or 0.0),
+            "total_wages_paid": total_wages_paid
+        }
+    }
 
 # =========================================================
 # 📥 PURCHASES & RETURNS (DEBIT NOTES / CREDIT NOTES)
@@ -2016,6 +2089,8 @@ async def quick_create_inventory_item(payload: Dict[str, Any]):
     selling_price = float(payload.get("selling_price", 0.0))
     tax_rate = float(payload.get("tax_rate", 18.0))
     hsn_code = payload.get("hsn_code", "8536").strip()
+    location_rack = (payload.get("location_rack") or "Main").strip()
+    position_bin = (payload.get("position_bin") or "").strip()
     
     conn = db.get_db_connection()
     cursor = conn.cursor()
@@ -2025,11 +2100,12 @@ async def quick_create_inventory_item(payload: Dict[str, Any]):
     INSERT INTO inventory_items (
         id, part_name, part_number, sku, barcode, category, stock_qty, min_stock_alert,
         cost_price, selling_price, tax_rate, hsn_code, unit, warranty_months,
+        location_rack, position_bin,
         created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, 0, 5, ?, ?, ?, ?, 'pcs', 6, datetime('now'), datetime('now'))
-    """, (item_id, part_name, part_number, barcode, barcode, category, cost_price, selling_price, tax_rate, hsn_code))
+    ) VALUES (?, ?, ?, ?, ?, ?, 0, 5, ?, ?, ?, ?, 'pcs', 6, ?, ?, datetime('now'), datetime('now'))
+    """, (item_id, part_name, part_number, barcode, barcode, category, cost_price, selling_price, tax_rate, hsn_code, location_rack, position_bin))
     
-    db.log_audit("QUICK_CREATE_PART", "inventory_items", item_id, f"Quick created part: {part_name} (PN: {part_number})", cursor=cursor)
+    db.log_audit("QUICK_CREATE_PART", "inventory_items", item_id, f"Quick created part: {part_name} (PN: {part_number}, Rack: {location_rack}, Bin: {position_bin})", cursor=cursor)
     conn.commit()
     conn.close()
     
@@ -2047,7 +2123,9 @@ async def quick_create_inventory_item(payload: Dict[str, Any]):
             "tax_rate": tax_rate,
             "hsn_code": hsn_code,
             "unit": "pcs",
-            "stock_qty": 0
+            "stock_qty": 0,
+            "location_rack": location_rack,
+            "position_bin": position_bin
         }
     }
 

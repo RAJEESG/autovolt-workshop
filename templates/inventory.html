@@ -18,6 +18,10 @@
         </div>
 
         <div class="flex flex-wrap items-center gap-2">
+            <button onclick="openModal('stock-audit-modal')" class="px-3.5 py-2 bg-purple-50 hover:bg-purple-100 text-purple-800 font-bold text-xs rounded-xl border border-purple-200 transition flex items-center gap-1.5 shadow-sm">
+                <i data-lucide="printer" class="w-4 h-4 text-purple-600"></i>
+                <span>🖨️ Stock Audit Sheet</span>
+            </button>
             <a href="/api/inventory/template/excel" download="Inventory_Import_Template.xlsx" class="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold text-xs rounded-xl border border-emerald-200 transition flex items-center gap-1.5">
                 <i data-lucide="file-spreadsheet" class="w-4 h-4 text-emerald-600"></i>
                 <span>Download Excel Template</span>
@@ -73,15 +77,15 @@
                         <th class="py-2.5 px-3">Barcode</th>
                         <th class="py-2.5 px-3">Category</th>
                         <th class="py-2.5 px-3">Stock Qty</th>
-                        <th class="py-2.5 px-3">Cost Price</th>
-                        <th class="py-2.5 px-3">Selling Price</th>
+                        <th class="py-2.5 px-3">Cost Price (Base + GST = Landing)</th>
+                        <th class="py-2.5 px-3">Selling Price (Base + GST = MRP)</th>
                         <th class="py-2.5 px-3">GST & HSN</th>
                         <th class="py-2.5 px-3 text-right">Actions</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100 font-medium text-slate-700">
                     {% for item in items %}
-                    <tr class="hover:bg-slate-50 transition inv-row" data-category="{{ item.category|lower }}" data-search="{{ item.part_name|lower }} {{ item.part_number|lower if item.part_number else '' }} {{ item.barcode }} {{ item.sku|lower or '' }} {{ item.category|lower }} {{ item.location_rack|lower or '' }}">
+                    <tr class="hover:bg-slate-50 transition inv-row" data-category="{{ item.category|lower }}" data-search="{{ item.part_name|lower }} {{ item.part_number|lower if item.part_number else '' }} {{ item.barcode }} {{ item.sku|lower or '' }} {{ item.category|lower }} {{ item.location_rack|lower or '' }} {{ item.position_bin|lower or '' }}">
                         <td class="py-3 px-3">
                             <div class="flex items-center gap-1.5 flex-wrap">
                                 <span class="font-bold text-slate-900 block text-sm">{{ item.part_name }}</span>
@@ -89,7 +93,13 @@
                                 <span class="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-100 text-amber-900 border border-amber-300">Part #: {{ item.part_number }}</span>
                                 {% endif %}
                             </div>
-                            <span class="text-[11px] text-slate-400">Rack: {{ item.location_rack or 'Main' }} • Warranty: {{ item.warranty_months }}M</span>
+                            <div class="flex items-center gap-2 text-[11px] text-slate-500 font-medium mt-0.5">
+                                <span>📍 Rack: <strong class="text-slate-800">{{ item.location_rack or 'Main' }}</strong></span>
+                                {% if item.position_bin %}
+                                <span>• Bin: <strong class="text-slate-800 font-mono">{{ item.position_bin }}</strong></span>
+                                {% endif %}
+                                <span>• Warranty: {{ item.warranty_months }}M</span>
+                            </div>
                         </td>
                         <td class="py-3 px-3 font-mono font-bold text-primary-700">
                             {{ item.barcode }}
@@ -111,8 +121,28 @@
                             </span>
                             {% endif %}
                         </td>
-                        <td class="py-3 px-3 text-slate-500">₹{{ "{:,.2f}".format(item.cost_price) }}</td>
-                        <td class="py-3 px-3 font-bold text-slate-900">₹{{ "{:,.2f}".format(item.selling_price) }}</td>
+                        <td class="py-3 px-3">
+                            <div class="space-y-0.5">
+                                <div class="font-bold text-slate-900 font-mono text-xs flex items-center gap-1">
+                                    <span>₹{{ "{:,.2f}".format(item.cost_price * (1 + item.tax_rate / 100.0)) }}</span>
+                                    <span class="text-[9px] font-bold text-amber-700 bg-amber-50 px-1 py-0.2 rounded border border-amber-200">Landing</span>
+                                </div>
+                                <div class="text-[10px] text-slate-500 font-mono">
+                                    Base: ₹{{ "{:,.2f}".format(item.cost_price) }} + ₹{{ "{:,.2f}".format(item.cost_price * item.tax_rate / 100.0) }} tax
+                                </div>
+                            </div>
+                        </td>
+                        <td class="py-3 px-3">
+                            <div class="space-y-0.5">
+                                <div class="font-bold text-emerald-800 font-mono text-xs flex items-center gap-1">
+                                    <span>₹{{ "{:,.2f}".format(item.selling_price * (1 + item.tax_rate / 100.0)) }}</span>
+                                    <span class="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200">MRP</span>
+                                </div>
+                                <div class="text-[10px] text-slate-500 font-mono">
+                                    Base: ₹{{ "{:,.2f}".format(item.selling_price) }} + ₹{{ "{:,.2f}".format(item.selling_price * item.tax_rate / 100.0) }} tax
+                                </div>
+                            </div>
+                        </td>
                         <td class="py-3 px-3 text-slate-500">
                             <span class="font-bold text-slate-900">{{ item.tax_rate }}% GST</span>
                             <span class="block text-[10px] text-primary-700 font-semibold font-mono">CGST {{ "%.1f"|format(item.tax_rate / 2) }}% + SGST {{ "%.1f"|format(item.tax_rate / 2) }}%</span>
@@ -215,27 +245,40 @@
                 </div>
             </div>
 
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">Rack / Storage Location</label>
+                    <input type="text" name="location_rack" placeholder="e.g. Rack A / Shelf 2" value="Main" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500">
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">Shelf / Bin Position</label>
+                    <input type="text" name="position_bin" placeholder="e.g. Bin 04 / Box B" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500">
+                </div>
+            </div>
+
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                     <label class="block font-bold text-slate-900 mb-1">Opening Stock Qty *</label>
                     <input type="number" name="stock_qty" value="10" required class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
                 </div>
                 <div>
-                    <label class="block font-bold text-slate-900 mb-1">Cost Price (₹) *</label>
-                    <input type="number" step="0.01" name="cost_price" required placeholder="80.00" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                    <label class="block font-bold text-slate-900 mb-1">Cost Base Price (₹) *</label>
+                    <input type="number" step="0.01" name="cost_price" id="modal-cost-base" required placeholder="100.00" oninput="calcModalPrices()" class="w-full font-mono px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                    <span class="text-[10px] text-amber-800 font-semibold block mt-0.5" id="modal-cost-unit-text">Landing: ₹0.00</span>
                 </div>
                 <div>
-                    <label class="block font-bold text-slate-900 mb-1">Selling Price (₹) *</label>
-                    <input type="number" step="0.01" name="selling_price" required placeholder="140.00" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                    <label class="block font-bold text-slate-900 mb-1">Selling Base Price (₹) *</label>
+                    <input type="number" step="0.01" name="selling_price" id="modal-sell-base" required placeholder="120.00" oninput="calcModalPrices()" class="w-full font-mono px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                    <span class="text-[10px] text-emerald-800 font-semibold block mt-0.5" id="modal-sell-unit-text">MRP: ₹0.00</span>
                 </div>
             </div>
 
             <!-- Clean GST Slab Selector & Tax Breakdown Preview -->
-            <div class="p-3 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+            <div class="p-3 bg-slate-50 rounded-2xl border border-slate-200 space-y-2.5">
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                         <label class="block font-bold text-slate-900 mb-1">GST Tax Slab (India) *</label>
-                        <select name="tax_rate" id="modal-tax-rate" onchange="updateTaxBreakdownPreview()" class="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold focus:outline-none text-xs bg-white">
+                        <select name="tax_rate" id="modal-tax-rate" onchange="calcModalPrices()" class="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold focus:outline-none text-xs bg-white">
                             <option value="18.0" selected>18% GST (Standard Auto Electricals)</option>
                             <option value="28.0">28% GST (Batteries & High Voltage Parts)</option>
                             <option value="12.0">12% GST (Bulbs, Wiring & Accessories)</option>
@@ -247,9 +290,25 @@
                     <div>
                         <label class="block font-bold text-slate-900 mb-1">Applicable Tax Law Split</label>
                         <div class="flex items-center gap-1.5 pt-1">
-                            <span class="px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-900 border border-emerald-300 font-bold font-mono text-[11px]" id="preview-cgst">CGST: 9.0%</span>
-                            <span class="px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-900 border border-emerald-300 font-bold font-mono text-[11px]" id="preview-sgst">SGST: 9.0%</span>
-                            <span class="px-2 py-1 rounded-lg bg-indigo-100 text-indigo-900 border border-indigo-200 font-bold font-mono text-[10px]" id="preview-igst">IGST: 18%</span>
+                            <span class="px-2 py-0.5 rounded-lg bg-emerald-100 text-emerald-900 border border-emerald-300 font-bold font-mono text-[10px]" id="preview-cgst">CGST: 9.0%</span>
+                            <span class="px-2 py-0.5 rounded-lg bg-emerald-100 text-emerald-900 border border-emerald-300 font-bold font-mono text-[10px]" id="preview-sgst">SGST: 9.0%</span>
+                            <span class="px-2 py-0.5 rounded-lg bg-indigo-100 text-indigo-900 border border-indigo-200 font-bold font-mono text-[10px]" id="preview-igst">IGST: 18%</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Live Unit Price Math Breakdown (Base + Tax = Unit Price) -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs pt-1 border-t border-slate-200">
+                    <div class="bg-amber-50/80 border border-amber-200 p-2 rounded-xl">
+                        <span class="font-extrabold text-[10px] text-amber-900 uppercase tracking-wide block">Cost Price (Buy Breakdown)</span>
+                        <div class="font-mono text-slate-800 text-[11px] mt-0.5" id="modal-cost-breakdown-math">
+                            ₹0.00 base + ₹0.00 tax = <strong class="text-amber-950 font-bold">₹0.00 Landing</strong>
+                        </div>
+                    </div>
+                    <div class="bg-emerald-50/80 border border-emerald-200 p-2 rounded-xl">
+                        <span class="font-extrabold text-[10px] text-emerald-900 uppercase tracking-wide block">Selling Price (Sell Breakdown)</span>
+                        <div class="font-mono text-slate-800 text-[11px] mt-0.5" id="modal-sell-breakdown-math">
+                            ₹0.00 base + ₹0.00 tax = <strong class="text-emerald-950 font-bold">₹0.00 MRP</strong>
                         </div>
                     </div>
                 </div>
@@ -318,23 +377,26 @@
             <!-- Dynamic Trend Card -->
         </div>
 
-        <!-- Current Snapshot Grid -->
+        <!-- Current Snapshot Grid with Base + Tax = Unit Price Breakdown -->
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
             <div class="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
                 <span class="text-[10px] text-slate-400 block font-bold uppercase">Current Stock</span>
                 <span class="text-base font-black text-slate-800" id="hist-stock-qty">0</span>
             </div>
-            <div class="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                <span class="text-[10px] text-slate-400 block font-bold uppercase">Current Cost</span>
-                <span class="text-base font-black text-slate-800" id="hist-cost-price">₹0</span>
+            <div class="bg-amber-50/60 p-2.5 rounded-xl border border-amber-200">
+                <span class="text-[10px] text-amber-900 block font-bold uppercase">Cost (Buy) Unit</span>
+                <span class="text-sm font-black text-amber-950 font-mono" id="hist-cost-landing">₹0.00</span>
+                <span class="block text-[9px] text-amber-800 font-mono mt-0.5" id="hist-cost-breakdown">₹0 + tax</span>
+            </div>
+            <div class="bg-emerald-50/60 p-2.5 rounded-xl border border-emerald-200">
+                <span class="text-[10px] text-emerald-900 block font-bold uppercase">Selling (Sell) MRP</span>
+                <span class="text-sm font-black text-emerald-950 font-mono" id="hist-selling-mrp">₹0.00</span>
+                <span class="block text-[9px] text-emerald-800 font-mono mt-0.5" id="hist-selling-breakdown">₹0 + tax</span>
             </div>
             <div class="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                <span class="text-[10px] text-slate-400 block font-bold uppercase">Selling Price</span>
-                <span class="text-base font-black text-primary-700" id="hist-selling-price">₹0</span>
-            </div>
-            <div class="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                <span class="text-[10px] text-slate-400 block font-bold uppercase">Tax Rate</span>
-                <span class="text-base font-black text-slate-800" id="hist-tax-rate">18%</span>
+                <span class="text-[10px] text-slate-400 block font-bold uppercase">GST Tax Slab</span>
+                <span class="text-sm font-black text-slate-800" id="hist-tax-rate">18%</span>
+                <span class="block text-[9px] text-primary-700 font-mono mt-0.5" id="hist-tax-split">CGST 9% + SGST 9%</span>
             </div>
         </div>
 
@@ -370,7 +432,173 @@
             </button>
         </div>
     </div>
+<!-- Modal: Monthly Physical Stock Audit Sheet (Printable A4) -->
+<div id="stock-audit-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden items-center justify-center p-2 sm:p-4 overflow-y-auto">
+    <div class="bg-white rounded-3xl max-w-5xl w-full p-6 shadow-2xl border border-slate-100 my-4 space-y-4">
+        <!-- Modal Toolbar (Hidden during print) -->
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100 no-print">
+            <div class="flex items-center gap-2">
+                <div class="w-8 h-8 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center font-bold text-sm">
+                    📋
+                </div>
+                <div>
+                    <h3 class="font-extrabold text-slate-900 text-sm">Monthly Stock Taking & Physical Audit Sheet</h3>
+                    <p class="text-[11px] text-slate-500">A4 printable physical inventory count sheet with Rack, Bin & Valuation</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-2">
+                <button onclick="window.print()" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-purple-600/20">
+                    <i data-lucide="printer" class="w-4 h-4"></i>
+                    <span>Print Sheet (A4)</span>
+                </button>
+                <button onclick="closeModal('stock-audit-modal')" class="text-slate-400 hover:text-slate-700 text-lg font-bold px-2 py-1">✕</button>
+            </div>
+        </div>
+
+        <!-- Printable Document Area -->
+        <div id="printable-audit-sheet" class="bg-white p-4 sm:p-6 border border-slate-200 rounded-2xl print:border-none print:p-0">
+            <!-- Header for Print -->
+            <div class="text-center pb-4 mb-4 border-b-2 border-slate-800">
+                <h1 class="text-xl font-black uppercase tracking-wider text-slate-950">SPARK AUTO ELECTRICALS & ELECTRONICS</h1>
+                <p class="text-xs text-slate-600 font-medium">Near Highway Junction, Ernakulam, Kerala - 682001 | Phone: +91 98765 43210</p>
+                <div class="mt-2 inline-block px-3 py-1 bg-slate-100 border border-slate-300 rounded-lg text-xs font-black text-slate-900 tracking-wide uppercase">
+                    MONTHLY PHYSICAL INVENTORY AUDIT & STOCK-TAKING SHEET
+                </div>
+                <div class="flex items-center justify-between text-xs text-slate-700 font-bold mt-3 px-1">
+                    <span>Audit Date: <span class="underline decoration-slate-400 font-mono" id="audit-sheet-date"></span></span>
+                    <span>Auditor / In-Charge: ___________________</span>
+                    <span>Total SKUs Listed: {{ items|length }}</span>
+                </div>
+            </div>
+
+            <!-- Audit Table -->
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs border border-slate-300 border-collapse">
+                    <thead>
+                        <tr class="bg-slate-100 text-slate-900 font-extrabold text-[11px] border-b border-slate-300">
+                            <th class="py-2 px-2 border-r border-slate-300 text-center w-8">#</th>
+                            <th class="py-2 px-2.5 border-r border-slate-300">Part Description & OEM #</th>
+                            <th class="py-2 px-2 border-r border-slate-300 font-mono text-[10px]">Barcode</th>
+                            <th class="py-2 px-2 border-r border-slate-300">Rack & Bin</th>
+                            <th class="py-2 px-2 border-r border-slate-300 text-center">System Qty</th>
+                            <th class="py-2 px-2.5 border-r border-slate-300 text-center bg-yellow-50/80 font-black text-slate-950">Physical Count</th>
+                            <th class="py-2 px-2 border-r border-slate-300 text-right">Cost (Base)</th>
+                            <th class="py-2 px-2 border-r border-slate-300 text-right">Cost (Landing)</th>
+                            <th class="py-2 px-2.5 border-r border-slate-300 text-right">Valuation</th>
+                            <th class="py-2 px-2 text-center">Remarks / Variance</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-200 font-medium text-slate-800 text-[11px]">
+                        {% set total_sys_qty = namespace(val=0) %}
+                        {% set total_val = namespace(val=0.0) %}
+                        {% for item in items %}
+                        {% set landing_cost = item.cost_price * (1 + item.tax_rate / 100.0) %}
+                        {% set valuation = item.stock_qty * landing_cost %}
+                        {% set total_sys_qty.val = total_sys_qty.val + item.stock_qty %}
+                        {% set total_val.val = total_val.val + valuation %}
+                        <tr class="hover:bg-slate-50">
+                            <td class="py-2 px-2 border-r border-slate-200 text-center text-slate-500 font-mono">{{ loop.index }}</td>
+                            <td class="py-2 px-2.5 border-r border-slate-200">
+                                <span class="font-bold text-slate-900 block">{{ item.part_name }}</span>
+                                {% if item.part_number %}
+                                <span class="text-[10px] font-mono text-slate-600 block">OEM: {{ item.part_number }}</span>
+                                {% endif %}
+                            </td>
+                            <td class="py-2 px-2 border-r border-slate-200 font-mono font-bold text-slate-800 text-[10px]">{{ item.barcode }}</td>
+                            <td class="py-2 px-2 border-r border-slate-200">
+                                <span class="font-bold text-slate-800">{{ item.location_rack or 'Main' }}</span>
+                                {% if item.position_bin %}
+                                <span class="text-[10px] font-mono text-slate-600 block">Bin: {{ item.position_bin }}</span>
+                                {% endif %}
+                            </td>
+                            <td class="py-2 px-2 border-r border-slate-200 text-center font-bold font-mono {% if item.stock_qty <= item.min_stock_alert %}text-rose-700{% else %}text-slate-900{% endif %}">
+                                {{ item.stock_qty }} {{ item.unit }}
+                            </td>
+                            <td class="py-2 px-2.5 border-r border-slate-200 text-center bg-yellow-50/50">
+                                <span class="inline-block w-16 border-b-2 border-dotted border-slate-500 font-mono font-bold text-xs text-slate-900">&nbsp;</span>
+                            </td>
+                            <td class="py-2 px-2 border-r border-slate-200 text-right font-mono text-slate-600">₹{{ "{:,.2f}".format(item.cost_price) }}</td>
+                            <td class="py-2 px-2 border-r border-slate-200 text-right font-mono font-bold text-slate-900">₹{{ "{:,.2f}".format(landing_cost) }}</td>
+                            <td class="py-2 px-2.5 border-r border-slate-200 text-right font-mono font-black text-slate-950">₹{{ "{:,.2f}".format(valuation) }}</td>
+                            <td class="py-2 px-2 border-slate-200 text-center text-slate-400">
+                                <span class="inline-block w-20 border-b border-dotted border-slate-300">&nbsp;</span>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                        <tr class="bg-slate-100 font-black text-slate-950 border-t-2 border-slate-400 text-xs">
+                            <td colspan="4" class="py-2.5 px-3 border-r border-slate-300 text-right uppercase tracking-wider">Total Stock Valuation:</td>
+                            <td class="py-2.5 px-2 border-r border-slate-300 text-center font-mono">{{ total_sys_qty.val }}</td>
+                            <td class="py-2.5 px-2 border-r border-slate-300 text-center bg-yellow-100 font-bold">Physical Total</td>
+                            <td colspan="2" class="py-2.5 px-2 border-r border-slate-300"></td>
+                            <td class="py-2.5 px-2.5 border-r border-slate-300 text-right font-mono font-black text-emerald-900">₹{{ "{:,.2f}".format(total_val.val) }}</td>
+                            <td></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Signatures Section -->
+            <div class="mt-8 pt-4 border-t border-slate-300 grid grid-cols-3 gap-6 text-xs text-slate-700">
+                <div>
+                    <p class="font-bold">Store Keeper / Technician:</p>
+                    <p class="mt-6 border-t border-dotted border-slate-400 pt-1 text-slate-500">Signature & Date</p>
+                </div>
+                <div>
+                    <p class="font-bold">Auditor / Accountant:</p>
+                    <p class="mt-6 border-t border-dotted border-slate-400 pt-1 text-slate-500">Signature & Date</p>
+                </div>
+                <div>
+                    <p class="font-bold">Workshop Owner / Manager:</p>
+                    <p class="mt-6 border-t border-dotted border-slate-400 pt-1 text-slate-500">Signature & Date</p>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
+
+<style>
+@media print {
+    body * {
+        visibility: hidden !important;
+    }
+    #stock-audit-modal, #stock-audit-modal * {
+        visibility: visible !important;
+    }
+    #stock-audit-modal {
+        position: fixed !important;
+        inset: 0 !important;
+        width: 100vw !important;
+        height: auto !important;
+        background: white !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        display: block !important;
+        overflow: visible !important;
+        z-index: 9999 !important;
+    }
+    #stock-audit-modal > div {
+        max-width: 100% !important;
+        border: none !important;
+        box-shadow: none !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        border-radius: 0 !important;
+    }
+    .no-print {
+        display: none !important;
+    }
+    #printable-audit-sheet {
+        border: none !important;
+        padding: 10mm !important;
+        margin: 0 !important;
+        box-shadow: none !important;
+    }
+    @page {
+        size: A4 portrait;
+        margin: 8mm;
+    }
+}
+</style>
 {% endblock %}
 
 {% block scripts %}
@@ -400,15 +628,42 @@
         openModal('adjust-stock-modal');
     }
 
-    function updateTaxBreakdownPreview() {
+    function calcModalPrices() {
         const rate = parseFloat(document.getElementById('modal-tax-rate')?.value || 18.0);
-        const half = (rate / 2.0).toFixed(1);
+        const costBase = parseFloat(document.getElementById('modal-cost-base')?.value || 0.0);
+        const sellBase = parseFloat(document.getElementById('modal-sell-base')?.value || 0.0);
+
+        const halfRate = (rate / 2.0).toFixed(1);
         const cgstEl = document.getElementById('preview-cgst');
         const sgstEl = document.getElementById('preview-sgst');
         const igstEl = document.getElementById('preview-igst');
-        if (cgstEl) cgstEl.innerText = `CGST: ${half}%`;
-        if (sgstEl) sgstEl.innerText = `SGST: ${half}%`;
+        if (cgstEl) cgstEl.innerText = `CGST: ${halfRate}%`;
+        if (sgstEl) sgstEl.innerText = `SGST: ${halfRate}%`;
         if (igstEl) igstEl.innerText = `IGST: ${rate}%`;
+
+        // Cost price landing breakdown
+        const costTax = costBase * (rate / 100.0);
+        const costLanding = costBase + costTax;
+        const costUnitText = document.getElementById('modal-cost-unit-text');
+        if (costUnitText) costUnitText.innerText = `Landing: ₹${costLanding.toFixed(2)}`;
+        const costMath = document.getElementById('modal-cost-breakdown-math');
+        if (costMath) {
+            costMath.innerHTML = `₹${costBase.toFixed(2)} base + ₹${costTax.toFixed(2)} tax (${halfRate}%+${halfRate}%) = <strong class="text-amber-950 font-bold">₹${costLanding.toFixed(2)} Landing</strong>`;
+        }
+
+        // Sell price MRP breakdown
+        const sellTax = sellBase * (rate / 100.0);
+        const sellMrp = sellBase + sellTax;
+        const sellUnitText = document.getElementById('modal-sell-unit-text');
+        if (sellUnitText) sellUnitText.innerText = `MRP: ₹${sellMrp.toFixed(2)}`;
+        const sellMath = document.getElementById('modal-sell-breakdown-math');
+        if (sellMath) {
+            sellMath.innerHTML = `₹${sellBase.toFixed(2)} base + ₹${sellTax.toFixed(2)} tax (${halfRate}%+${halfRate}%) = <strong class="text-emerald-950 font-bold">₹${sellMrp.toFixed(2)} MRP</strong>`;
+        }
+    }
+
+    function updateTaxBreakdownPreview() {
+        calcModalPrices();
     }
 
     async function openProductHistoryModal(itemId) {
@@ -441,10 +696,25 @@
             document.getElementById('hist-category').innerText = item.category || 'N/A';
             document.getElementById('hist-rack').innerText = item.location_rack || 'Main';
 
+            const costBase = parseFloat(item.cost_price || 0.0);
+            const sellBase = parseFloat(item.selling_price || 0.0);
+            const taxRate = parseFloat(item.tax_rate || 0.0);
+            const halfTax = (taxRate / 2.0).toFixed(1);
+
+            const costTax = costBase * (taxRate / 100.0);
+            const costLanding = costBase + costTax;
+            const sellTax = sellBase * (taxRate / 100.0);
+            const sellMrp = sellBase + sellTax;
+
             document.getElementById('hist-stock-qty').innerText = `${item.stock_qty} ${item.unit || 'pcs'}`;
-            document.getElementById('hist-cost-price').innerText = `₹${parseFloat(item.cost_price).toFixed(2)}`;
-            document.getElementById('hist-selling-price').innerText = `₹${parseFloat(item.selling_price).toFixed(2)}`;
-            document.getElementById('hist-tax-rate').innerText = `${item.tax_rate}%`;
+            document.getElementById('hist-cost-landing').innerText = `₹${costLanding.toFixed(2)}`;
+            document.getElementById('hist-cost-breakdown').innerText = `Base ₹${costBase.toFixed(2)} + ₹${costTax.toFixed(2)} tax (${halfTax}%+${halfTax}%)`;
+
+            document.getElementById('hist-selling-mrp').innerText = `₹${sellMrp.toFixed(2)}`;
+            document.getElementById('hist-selling-breakdown').innerText = `Base ₹${sellBase.toFixed(2)} + ₹${sellTax.toFixed(2)} tax (${halfTax}%+${halfTax}%)`;
+
+            document.getElementById('hist-tax-rate').innerText = `${taxRate}% GST`;
+            document.getElementById('hist-tax-split').innerText = `CGST ${halfTax}% + SGST ${halfTax}%`;
 
             document.getElementById('hist-purchase-count').innerText = purchases.length;
             document.getElementById('hist-logs-count').innerText = logs.length;
@@ -613,6 +883,15 @@
             lBtn.className = "pb-2 text-primary-600 border-b-2 border-primary-600";
         }
     }
+
+    document.addEventListener("DOMContentLoaded", () => {
+        calcModalPrices();
+        const dateEl = document.getElementById('audit-sheet-date');
+        if (dateEl) {
+            const today = new Date();
+            dateEl.innerText = today.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+        }
+    });
 </script>
 {% endblock %}
 

@@ -12,16 +12,16 @@
                 👨‍🔧
             </div>
             <div>
-                <h2 class="font-extrabold text-slate-900 text-base">Electricians & Mechanics Management (5-6 Staff)</h2>
-                <p class="text-xs text-slate-500">Track worker assignments, daily attendance / leave status, weekly wages, and advances</p>
+                <h2 class="font-extrabold text-slate-900 text-base">Electricians & Mechanics Directory</h2>
+                <p class="text-xs text-slate-500">Track staff assignments, job cards history, weekly wages, and financial advances ledger</p>
             </div>
         </div>
 
         <div class="flex flex-wrap items-center gap-2">
-            <button onclick="openModal('record-advance-modal')" class="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-800 font-bold text-xs rounded-xl border border-rose-200 transition flex items-center gap-1.5">
-                <span>💸 Give Staff Advance</span>
+            <button onclick="openModal('record-advance-modal')" class="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-800 font-bold text-xs rounded-xl border border-rose-200 transition flex items-center gap-1.5 shadow-xs">
+                <span>💸 Disburse Advance</span>
             </button>
-            <button onclick="openModal('pay-wage-modal')" class="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold text-xs rounded-xl border border-emerald-200 transition flex items-center gap-1.5">
+            <button onclick="openModal('pay-wage-modal')" class="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold text-xs rounded-xl border border-emerald-200 transition flex items-center gap-1.5 shadow-xs">
                 <span>💵 Pay Weekly Wages</span>
             </button>
             <button onclick="openModal('add-tech-modal')" class="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs rounded-xl shadow transition flex items-center gap-1.5">
@@ -31,77 +31,248 @@
         </div>
     </div>
 
-    <!-- Technicians Roster Cards Grid -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-        {% for tech in technicians %}
-        <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-5 space-y-4 hover:border-amber-400 transition flex flex-col justify-between">
-            <div class="space-y-3">
-                <div class="flex items-start justify-between">
-                    <div class="flex items-center gap-3">
-                        <div class="w-12 h-12 rounded-2xl bg-slate-900 text-amber-400 flex items-center justify-center font-black text-lg relative">
-                            🔧
-                            {% if tech.is_on_leave %}
-                            <span class="absolute -top-1 -right-1 w-3.5 h-3.5 bg-rose-500 border-2 border-white rounded-full" title="On Leave"></span>
-                            {% else %}
-                            <span class="absolute -top-1 -right-1 w-3.5 h-3.5 bg-emerald-500 border-2 border-white rounded-full" title="Present Today"></span>
-                            {% endif %}
-                        </div>
-                        <div>
-                            <h3 class="font-extrabold text-slate-900 text-sm flex items-center gap-1.5">
-                                {{ tech.name }}
-                                {% if tech.is_on_leave %}
-                                <span class="text-[10px] text-rose-600 font-bold bg-rose-50 px-1.5 py-0.2 rounded border border-rose-200">On Leave</span>
-                                {% endif %}
-                            </h3>
-                            <span class="text-xs text-amber-700 font-semibold bg-amber-50 px-2 py-0.5 rounded-full">{{ tech.role }}</span>
-                        </div>
-                    </div>
-                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold {% if tech.status == 'Active' %}bg-emerald-100 text-emerald-700{% else %}bg-slate-100 text-slate-600{% endif %}">
-                        {{ tech.status }}
-                    </span>
-                </div>
+    <!-- Quick Metrics Bar -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {% set total_staff = technicians|length %}
+        {% set on_leave_count = 0 %}
+        {% set total_adv_bal = namespace(val=0.0) %}
+        {% for t in technicians %}
+            {% if t.is_on_leave %}{% set on_leave_count = on_leave_count + 1 %}{% endif %}
+            {% set total_adv_bal.val = total_adv_bal.val + (t.advance_balance or 0.0) %}
+        {% endfor %}
 
-                <div class="bg-slate-50 p-3 rounded-2xl border border-slate-100 text-xs space-y-1.5 text-slate-700">
-                    <p class="flex items-center justify-between">
-                        <span class="text-slate-500">Phone:</span>
-                        <a href="tel:{{ tech.phone }}" class="font-bold text-primary-700 underline">{{ tech.phone }}</a>
-                    </p>
-                    <p class="flex items-center justify-between">
-                        <span class="text-slate-500">Completed Jobs:</span>
-                        <span class="font-extrabold text-slate-900 bg-white px-2 py-0.5 rounded-lg border border-slate-200">{{ tech.total_jobs }} vehicles</span>
-                    </p>
-                    <p class="flex items-center justify-between">
-                        <span class="text-slate-500">Labor Commission:</span>
-                        <span class="font-bold text-emerald-700">{{ tech.commission_pct }}%</span>
-                    </p>
-                    <p class="flex items-center justify-between">
-                        <span class="text-slate-500">Pending Advance Balance:</span>
-                        <span class="font-bold {% if tech.advance_balance and tech.advance_balance > 0 %}text-rose-600{% else %}text-slate-500{% endif %}">
-                            ₹{{ "{:,.2f}".format(tech.advance_balance or 0.0) }}
-                        </span>
-                    </p>
-                </div>
-
-                {% if tech.notes %}
-                <p class="text-[11px] text-slate-500 italic">"{{ tech.notes }}"</p>
-                {% endif %}
+        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+            <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Total Staff</span>
+            <div class="flex items-center justify-between mt-1">
+                <span class="text-xl font-black text-slate-900">{{ total_staff }}</span>
+                <span class="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-bold">Roster</span>
             </div>
+        </div>
 
-            <!-- Action Controls -->
-            <div class="pt-3 border-t border-slate-100 flex items-center justify-between gap-2 text-xs">
-                <button onclick="toggleTechnicianLeave('{{ tech.id }}', {{ 'true' if tech.is_on_leave else 'false' }})" class="px-2.5 py-1.5 rounded-xl font-bold transition flex items-center gap-1 {% if tech.is_on_leave %}bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200{% else %}bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200{% endif %}">
-                    {% if tech.is_on_leave %}
-                    <span>✅ Mark Present</span>
+        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+            <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Present Today</span>
+            <div class="flex items-center justify-between mt-1">
+                <span class="text-xl font-black text-emerald-700">{{ total_staff - on_leave_count }}</span>
+                <span class="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold">Active</span>
+            </div>
+        </div>
+
+        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+            <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">On Leave</span>
+            <div class="flex items-center justify-between mt-1">
+                <span class="text-xl font-black {% if on_leave_count > 0 %}text-rose-600{% else %}text-slate-400{% endif %}">{{ on_leave_count }}</span>
+                <span class="text-xs px-2 py-0.5 rounded-full {% if on_leave_count > 0 %}bg-rose-100 text-rose-800{% else %}bg-slate-100 text-slate-500{% endif %} font-bold">Leave</span>
+            </div>
+        </div>
+
+        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+            <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Total Advance Balance</span>
+            <div class="flex items-center justify-between mt-1">
+                <span class="text-xl font-black text-rose-700 font-mono">₹{{ "{:,.2f}".format(total_adv_bal.val) }}</span>
+                <span class="text-xs px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 font-bold">Pending</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Search & Filter Bar -->
+    <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div class="relative w-full sm:w-96">
+            <input type="text" id="tech-search-input" oninput="filterTechTable()" placeholder="🔍 Instant search staff name, phone, role..." class="w-full px-4 py-2 text-xs rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-amber-500 shadow-inner">
+        </div>
+        <div class="text-xs text-slate-500 font-medium self-end sm:self-center">
+            Showing <strong class="text-slate-800" id="tech-count-badge">{{ technicians|length }}</strong> active staff members
+        </div>
+    </div>
+
+    <!-- Clean Staff Table / List View -->
+    <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-5 space-y-4">
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs" id="tech-table">
+                <thead>
+                    <tr class="text-slate-400 uppercase tracking-wider font-semibold border-b border-slate-100 bg-slate-50">
+                        <th class="py-2.5 px-3">Electrician / Technician</th>
+                        <th class="py-2.5 px-3">Phone</th>
+                        <th class="py-2.5 px-3">Attendance Today</th>
+                        <th class="py-2.5 px-3 text-center">Jobs Done</th>
+                        <th class="py-2.5 px-3 text-center">Labor Comm %</th>
+                        <th class="py-2.5 px-3 text-right">Pending Advance</th>
+                        <th class="py-2.5 px-3 text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 font-medium text-slate-700">
+                    {% for tech in technicians %}
+                    <tr class="hover:bg-slate-50/80 transition tech-row" data-search="{{ tech.name|lower }} {{ tech.phone|lower }} {{ tech.role|lower }} {{ tech.notes|lower if tech.notes else '' }}">
+                        <td class="py-3 px-3">
+                            <div class="flex items-center gap-3">
+                                <div class="w-9 h-9 rounded-xl bg-slate-900 text-amber-400 flex items-center justify-center font-bold text-sm shrink-0">
+                                    🔧
+                                </div>
+                                <div>
+                                    <span class="font-bold text-slate-900 block text-sm">{{ tech.name }}</span>
+                                    <div class="flex items-center gap-1.5 mt-0.5">
+                                        <span class="text-[10px] text-amber-800 font-bold bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">{{ tech.role }}</span>
+                                        {% if tech.notes %}
+                                        <span class="text-[10px] text-slate-400 italic truncate max-w-xs" title="{{ tech.notes }}">"{{ tech.notes }}"</span>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="py-3 px-3">
+                            <a href="tel:{{ tech.phone }}" class="font-mono font-bold text-primary-700 hover:underline flex items-center gap-1">
+                                <i data-lucide="phone" class="w-3.5 h-3.5 text-primary-600"></i>
+                                <span>{{ tech.phone }}</span>
+                            </a>
+                        </td>
+                        <td class="py-3 px-3">
+                            {% if tech.is_on_leave %}
+                            <button onclick="toggleTechnicianLeave('{{ tech.id }}', true)" class="px-2.5 py-1 rounded-xl text-xs font-bold bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 transition flex items-center gap-1.5" title="Click to Mark Present">
+                                <span class="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></span>
+                                <span>On Leave</span>
+                            </button>
+                            {% else %}
+                            <button onclick="toggleTechnicianLeave('{{ tech.id }}', false)" class="px-2.5 py-1 rounded-xl text-xs font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition flex items-center gap-1.5" title="Click to Mark Leave">
+                                <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                                <span>Present</span>
+                            </button>
+                            {% endif %}
+                        </td>
+                        <td class="py-3 px-3 text-center">
+                            <span class="font-extrabold text-slate-900 bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200 font-mono">
+                                {{ tech.total_jobs }}
+                            </span>
+                        </td>
+                        <td class="py-3 px-3 text-center">
+                            <span class="font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200 font-mono">
+                                {{ tech.commission_pct }}%
+                            </span>
+                        </td>
+                        <td class="py-3 px-3 text-right">
+                            {% if tech.advance_balance and tech.advance_balance > 0 %}
+                            <span class="font-mono font-black text-rose-600 bg-rose-50 px-2 py-0.5 rounded-lg border border-rose-200 text-xs">
+                                ₹{{ "{:,.2f}".format(tech.advance_balance) }}
+                            </span>
+                            {% else %}
+                            <span class="font-mono text-slate-400 text-xs">₹0.00</span>
+                            {% endif %}
+                        </td>
+                        <td class="py-3 px-3 text-right space-x-1 whitespace-nowrap">
+                            <!-- Ledger & History Button -->
+                            <button onclick="openTechLedgerModal('{{ tech.id }}', '{{ tech.name }}')" class="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-xl text-xs transition border border-indigo-200 inline-flex items-center gap-1 shadow-xs" title="View Full Financial Ledger & Job Cards History">
+                                <span>📜 Ledger & Jobs</span>
+                            </button>
+                            <!-- Quick Advance Button -->
+                            <button onclick="quickGiveAdvance('{{ tech.id }}', '{{ tech.name }}')" class="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold rounded-xl text-xs transition border border-rose-200">
+                                💸 Advance
+                            </button>
+                            <!-- Pay Wages Button -->
+                            <button onclick="quickPayWage('{{ tech.id }}', '{{ tech.name }}', {{ tech.advance_balance or 0 }})" class="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs transition shadow-sm">
+                                💵 Pay Wages
+                            </button>
+                        </td>
+                    </tr>
                     {% else %}
-                    <span>⛔ Mark Leave</span>
-                    {% endif %}
+                    <tr>
+                        <td colspan="7" class="text-center py-8 text-slate-400 text-xs">No technicians added yet. Click "+ Add Electrician" above.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Comprehensive Technician Ledger & Assigned Job Cards History -->
+<div id="tech-ledger-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden items-center justify-center p-2 sm:p-4 overflow-y-auto">
+    <div class="bg-white rounded-3xl max-w-4xl w-full p-6 shadow-2xl border border-slate-100 my-4 space-y-4">
+        <!-- Modal Header -->
+        <div class="flex items-start justify-between pb-3 border-b border-slate-100">
+            <div>
+                <div class="flex items-center gap-2 flex-wrap">
+                    <h3 class="font-extrabold text-slate-900 text-base" id="ledger-tech-name">Loading...</h3>
+                    <span id="ledger-tech-role" class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300"></span>
+                    <span id="ledger-tech-status" class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">Active</span>
+                </div>
+                <div class="flex items-center gap-3 text-xs text-slate-500 mt-1">
+                    <span>Phone: <strong class="font-mono text-slate-800" id="ledger-tech-phone">-</strong></span>
+                    <span>Labor Commission: <strong class="text-emerald-700 font-bold" id="ledger-tech-comm">-</strong></span>
+                </div>
+            </div>
+            <button onclick="closeModal('tech-ledger-modal')" class="text-slate-400 hover:text-slate-700 text-xl font-bold px-2">✕</button>
+        </div>
+
+        <!-- Financial KPI Summary Cards -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+            <div class="bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                <span class="text-[10px] text-slate-400 block font-bold uppercase">Total Assigned Jobs</span>
+                <span class="text-base font-black text-slate-900 font-mono" id="ledger-sum-jobs">0</span>
+            </div>
+            <div class="bg-emerald-50/70 p-3 rounded-2xl border border-emerald-200">
+                <span class="text-[10px] text-emerald-900 block font-bold uppercase">Labor Generated</span>
+                <span class="text-base font-black text-emerald-950 font-mono" id="ledger-sum-labor">₹0.00</span>
+                <span class="text-[9px] text-emerald-700 font-semibold block" id="ledger-sum-comm-earned">₹0 comm</span>
+            </div>
+            <div class="bg-rose-50/70 p-3 rounded-2xl border border-rose-200">
+                <span class="text-[10px] text-rose-900 block font-bold uppercase">Outstanding Advance</span>
+                <span class="text-base font-black text-rose-700 font-mono" id="ledger-sum-adv-bal">₹0.00</span>
+                <span class="text-[9px] text-rose-600 font-semibold block" id="ledger-sum-adv-given">₹0 given</span>
+            </div>
+            <div class="bg-blue-50/70 p-3 rounded-2xl border border-blue-200">
+                <span class="text-[10px] text-blue-900 block font-bold uppercase">Total Wages Paid</span>
+                <span class="text-base font-black text-blue-950 font-mono" id="ledger-sum-wages-paid">₹0.00</span>
+            </div>
+        </div>
+
+        <!-- Navigation Tabs: Assigned Jobs vs Wages vs Advances -->
+        <div class="border-b border-slate-200">
+            <div class="flex gap-4 text-xs font-bold">
+                <button type="button" onclick="switchLedgerTab('jobs')" id="tech-tab-btn-jobs" class="pb-2 text-primary-600 border-b-2 border-primary-600">
+                    🚗 Assigned Job Cards (<span id="ledger-badge-jobs-count">0</span>)
                 </button>
-                <button onclick="quickPayWage('{{ tech.id }}', '{{ tech.name }}', {{ tech.advance_balance or 0 }})" class="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl transition">
-                    Pay Wages →
+                <button type="button" onclick="switchLedgerTab('wages')" id="tech-tab-btn-wages" class="pb-2 text-slate-400 hover:text-slate-600 border-b-2 border-transparent">
+                    💵 Wages Payment History (<span id="ledger-badge-wages-count">0</span>)
+                </button>
+                <button type="button" onclick="switchLedgerTab('advances')" id="tech-tab-btn-advances" class="pb-2 text-slate-400 hover:text-slate-600 border-b-2 border-transparent">
+                    💸 Advances Disbursed (<span id="ledger-badge-advances-count">0</span>)
                 </button>
             </div>
         </div>
-        {% endfor %}
+
+        <!-- Tab 1: Assigned Job Cards Table -->
+        <div id="tech-tab-jobs" class="space-y-2 max-h-72 overflow-y-auto pr-1">
+            <div id="ledger-jobs-container">
+                <p class="text-xs text-slate-400 text-center py-8">Loading assigned job cards...</p>
+            </div>
+        </div>
+
+        <!-- Tab 2: Wages History Table -->
+        <div id="tech-tab-wages" class="space-y-2 max-h-72 overflow-y-auto pr-1 hidden">
+            <div id="ledger-wages-container">
+                <p class="text-xs text-slate-400 text-center py-8">Loading wages history...</p>
+            </div>
+        </div>
+
+        <!-- Tab 3: Advances Disbursed Table -->
+        <div id="tech-tab-advances" class="space-y-2 max-h-72 overflow-y-auto pr-1 hidden">
+            <div id="ledger-advances-container">
+                <p class="text-xs text-slate-400 text-center py-8">Loading advances history...</p>
+            </div>
+        </div>
+
+        <!-- Modal Footer Actions -->
+        <div class="flex items-center justify-between pt-3 border-t border-slate-100 text-xs">
+            <div class="flex items-center gap-2">
+                <button id="modal-btn-advance" onclick="" class="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold rounded-xl border border-rose-200 transition">
+                    + Give Advance
+                </button>
+                <button id="modal-btn-wage" onclick="" class="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold rounded-xl border border-emerald-200 transition">
+                    + Pay Wages
+                </button>
+            </div>
+            <button type="button" onclick="closeModal('tech-ledger-modal')" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition">
+                Close
+            </button>
+        </div>
     </div>
 </div>
 
@@ -116,7 +287,7 @@
         <form action="/api/technicians/advances" method="POST" class="mt-4 space-y-3 text-xs font-medium text-slate-700">
             <div>
                 <label class="block font-bold text-slate-900 mb-1">Select Technician *</label>
-                <select name="technician_id" required class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                <select name="technician_id" id="advance-tech-select" required class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none bg-white">
                     {% for tech in technicians %}
                     <option value="{{ tech.id }}">{{ tech.name }} (Current Advance: ₹{{ tech.advance_balance or 0 }})</option>
                     {% endfor %}
@@ -126,11 +297,11 @@
             <div class="grid grid-cols-2 gap-3">
                 <div>
                     <label class="block font-bold text-slate-900 mb-1">Advance Amount (₹) *</label>
-                    <input type="number" step="0.01" name="amount" required placeholder="1000.00" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                    <input type="number" step="0.01" name="amount" required placeholder="1000.00" class="w-full font-mono px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
                 </div>
                 <div>
                     <label class="block font-bold text-slate-900 mb-1">Payment Mode</label>
-                    <select name="payment_mode" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                    <select name="payment_mode" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none bg-white">
                         <option value="CASH">💵 Cash</option>
                         <option value="UPI">📱 UPI / GPay</option>
                         <option value="BANK_TRANSFER">🏦 Bank Transfer</option>
@@ -140,7 +311,7 @@
 
             <div>
                 <label class="block font-bold text-slate-900 mb-1">Reason / Notes</label>
-                <input type="text" name="notes" placeholder="e.g. Festival advance / emergency" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                <input type="text" name="notes" placeholder="e.g. Festival advance / personal emergency" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
             </div>
 
             <div class="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
@@ -162,7 +333,7 @@
         <form action="/api/technicians/wages" method="POST" class="mt-4 space-y-3 text-xs font-medium text-slate-700">
             <div>
                 <label class="block font-bold text-slate-900 mb-1">Technician *</label>
-                <select name="technician_id" id="wage-tech-select" required class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                <select name="technician_id" id="wage-tech-select" required class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none bg-white">
                     {% for tech in technicians %}
                     <option value="{{ tech.id }}">{{ tech.name }}</option>
                     {% endfor %}
@@ -172,22 +343,22 @@
             <div class="grid grid-cols-2 gap-3">
                 <div>
                     <label class="block font-bold text-slate-900 mb-1">Base Wages (₹)</label>
-                    <input type="number" step="0.01" name="base_wages" value="4000.00" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                    <input type="number" step="0.01" name="base_wages" value="4000.00" class="w-full font-mono px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
                 </div>
                 <div>
                     <label class="block font-bold text-slate-900 mb-1">Commission (₹)</label>
-                    <input type="number" step="0.01" name="commission_amount" value="500.00" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                    <input type="number" step="0.01" name="commission_amount" value="500.00" class="w-full font-mono px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
                 </div>
             </div>
 
             <div class="grid grid-cols-2 gap-3">
                 <div>
                     <label class="block font-bold text-slate-900 mb-1">Advance Deducted (₹)</label>
-                    <input type="number" step="0.01" name="advance_deducted" id="wage-advance-deduct" value="0.00" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                    <input type="number" step="0.01" name="advance_deducted" id="wage-advance-deduct" value="0.00" class="w-full font-mono px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
                 </div>
                 <div>
                     <label class="block font-bold text-slate-900 mb-1">Payment Mode</label>
-                    <select name="payment_mode" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                    <select name="payment_mode" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none bg-white">
                         <option value="CASH">💵 Cash</option>
                         <option value="UPI">📱 UPI / GPay</option>
                         <option value="BANK_TRANSFER">🏦 Bank Transfer</option>
@@ -225,7 +396,7 @@
             <div class="grid grid-cols-2 gap-3">
                 <div>
                     <label class="block font-bold text-slate-900 mb-1">Specialization / Role</label>
-                    <select name="role" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none">
+                    <select name="role" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none bg-white">
                         <option value="Senior Auto Electrician">Senior Auto Electrician</option>
                         <option value="Wiring Specialist">Wiring Specialist</option>
                         <option value="AC & Cooling Specialist">AC & Cooling Specialist</option>
@@ -256,6 +427,22 @@
 
 {% block scripts %}
 <script>
+    function filterTechTable() {
+        const query = (document.getElementById('tech-search-input')?.value || '').toLowerCase().trim();
+        let visibleCount = 0;
+        document.querySelectorAll('.tech-row').forEach(row => {
+            const searchData = (row.getAttribute('data-search') || row.innerText).toLowerCase();
+            if (!query || searchData.includes(query)) {
+                row.style.display = '';
+                visibleCount++;
+            } else {
+                row.style.display = 'none';
+            }
+        });
+        const badge = document.getElementById('tech-count-badge');
+        if (badge) badge.innerText = visibleCount;
+    }
+
     async function toggleTechnicianLeave(techId, currentlyOnLeave) {
         try {
             const resp = await fetch(`/api/technicians/${techId}/toggle-leave`, {
@@ -273,14 +460,244 @@
         }
     }
 
+    function quickGiveAdvance(techId, techName) {
+        const select = document.getElementById('advance-tech-select');
+        if (select) select.value = techId;
+        openModal('record-advance-modal');
+    }
+
     function quickPayWage(techId, techName, advanceBalance) {
-        document.getElementById('wage-tech-select').value = techId;
-        if (advanceBalance > 0) {
-            document.getElementById('wage-advance-deduct').value = Math.min(1000, advanceBalance);
-        } else {
-            document.getElementById('wage-advance-deduct').value = "0.00";
+        const select = document.getElementById('wage-tech-select');
+        if (select) select.value = techId;
+        const advDeductInput = document.getElementById('wage-advance-deduct');
+        if (advDeductInput) {
+            if (advanceBalance > 0) {
+                advDeductInput.value = Math.min(1000, advanceBalance);
+            } else {
+                advDeductInput.value = "0.00";
+            }
         }
         openModal('pay-wage-modal');
+    }
+
+    async function openTechLedgerModal(techId, techName) {
+        openModal('tech-ledger-modal');
+        document.getElementById('ledger-tech-name').innerText = techName;
+        document.getElementById('ledger-tech-role').innerText = "Loading...";
+        document.getElementById('ledger-jobs-container').innerHTML = '<p class="text-xs text-slate-400 text-center py-8">Fetching ledger data...</p>';
+        document.getElementById('ledger-wages-container').innerHTML = '<p class="text-xs text-slate-400 text-center py-8">Fetching wages...</p>';
+        document.getElementById('ledger-advances-container').innerHTML = '<p class="text-xs text-slate-400 text-center py-8">Fetching advances...</p>';
+
+        switchLedgerTab('jobs');
+
+        // Hook up bottom buttons
+        document.getElementById('modal-btn-advance').onclick = () => {
+            closeModal('tech-ledger-modal');
+            quickGiveAdvance(techId, techName);
+        };
+        document.getElementById('modal-btn-wage').onclick = () => {
+            closeModal('tech-ledger-modal');
+            quickPayWage(techId, techName, 0);
+        };
+
+        try {
+            const resp = await fetch(`/api/technicians/${techId}/ledger`);
+            if (!resp.ok) throw new Error("Failed to load staff ledger");
+            const data = await resp.json();
+
+            const tech = data.technician;
+            const summary = data.summary;
+            const jobs = data.jobs || [];
+            const wages = data.wages || [];
+            const advances = data.advances || [];
+
+            document.getElementById('ledger-tech-name').innerText = tech.name;
+            document.getElementById('ledger-tech-role').innerText = tech.role;
+            document.getElementById('ledger-tech-phone').innerText = tech.phone;
+            document.getElementById('ledger-tech-comm').innerText = `${tech.commission_pct}%`;
+
+            const statusEl = document.getElementById('ledger-tech-status');
+            if (tech.is_on_leave) {
+                statusEl.className = "px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800";
+                statusEl.innerText = "On Leave Today";
+            } else {
+                statusEl.className = "px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800";
+                statusEl.innerText = "Present Today";
+            }
+
+            // Summary KPIs
+            document.getElementById('ledger-sum-jobs').innerText = summary.total_jobs;
+            document.getElementById('ledger-sum-labor').innerText = `₹${parseFloat(summary.total_labor_generated).toFixed(2)}`;
+            document.getElementById('ledger-sum-comm-earned').innerText = `₹${parseFloat(summary.total_commissions_earned).toFixed(2)} commission`;
+            document.getElementById('ledger-sum-adv-bal').innerText = `₹${parseFloat(summary.current_advance_balance).toFixed(2)}`;
+            document.getElementById('ledger-sum-adv-given').innerText = `₹${parseFloat(summary.total_advances_given).toFixed(2)} total given`;
+            document.getElementById('ledger-sum-wages-paid').innerText = `₹${parseFloat(summary.total_wages_paid).toFixed(2)}`;
+
+            // Badges
+            document.getElementById('ledger-badge-jobs-count').innerText = jobs.length;
+            document.getElementById('ledger-badge-wages-count').innerText = wages.length;
+            document.getElementById('ledger-badge-advances-count').innerText = advances.length;
+
+            // Render Jobs Table with Clickable Link
+            const jobsContainer = document.getElementById('ledger-jobs-container');
+            if (jobs.length === 0) {
+                jobsContainer.innerHTML = '<p class="text-xs text-slate-400 text-center py-8">No vehicle job cards assigned to this staff yet.</p>';
+            } else {
+                let html = `
+                    <table class="w-full text-left text-xs border-collapse">
+                        <thead class="bg-slate-50 text-slate-500 font-bold border-b border-slate-100">
+                            <tr>
+                                <th class="py-2 px-2.5">Job #</th>
+                                <th class="py-2 px-2">Vehicle</th>
+                                <th class="py-2 px-2">Customer</th>
+                                <th class="py-2 px-2 text-center">Status</th>
+                                <th class="py-2 px-2 text-right">Labor Total</th>
+                                <th class="py-2 px-2 text-right">Commission</th>
+                                <th class="py-2 px-2.5 text-right">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100">
+                `;
+                jobs.forEach(j => {
+                    const statusColors = {
+                        'RECEIVED': 'bg-blue-100 text-blue-800',
+                        'DIAGNOSED': 'bg-indigo-100 text-indigo-800',
+                        'IN_PROGRESS': 'bg-amber-100 text-amber-800',
+                        'READY': 'bg-emerald-100 text-emerald-800',
+                        'DELIVERED': 'bg-slate-100 text-slate-700'
+                    };
+                    const badgeColor = statusColors[j.status] || 'bg-slate-100 text-slate-700';
+
+                    html += `
+                        <tr class="hover:bg-slate-50/80">
+                            <td class="py-2.5 px-2.5 font-mono font-bold text-slate-900">${j.job_number}</td>
+                            <td class="py-2.5 px-2">
+                                <span class="font-bold text-slate-800 block">${j.vehicle_reg_no}</span>
+                                <span class="text-[10px] text-slate-500">${j.vehicle_make_model}</span>
+                            </td>
+                            <td class="py-2.5 px-2">
+                                <span class="font-medium text-slate-800 block">${j.customer_name}</span>
+                                <span class="text-[10px] text-slate-400 font-mono">${j.customer_phone}</span>
+                            </td>
+                            <td class="py-2.5 px-2 text-center">
+                                <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${badgeColor}">${j.status}</span>
+                            </td>
+                            <td class="py-2.5 px-2 text-right font-mono font-bold text-slate-900">₹${parseFloat(j.total_labor || 0).toFixed(2)}</td>
+                            <td class="py-2.5 px-2 text-right font-mono font-bold text-emerald-700">₹${parseFloat(j.commission_earned || 0).toFixed(2)}</td>
+                            <td class="py-2.5 px-2.5 text-right">
+                                <a href="/job-cards?search=${encodeURIComponent(j.job_number)}" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg text-[10px] transition inline-flex items-center gap-1 shadow-xs">
+                                    <span>👁️ View</span>
+                                </a>
+                            </td>
+                        </tr>
+                    `;
+                });
+                html += `</tbody></table>`;
+                jobsContainer.innerHTML = html;
+            }
+
+            // Render Wages Table
+            const wagesContainer = document.getElementById('ledger-wages-container');
+            if (wages.length === 0) {
+                wagesContainer.innerHTML = '<p class="text-xs text-slate-400 text-center py-8">No wages payment records found.</p>';
+            } else {
+                let html = `
+                    <table class="w-full text-left text-xs border-collapse">
+                        <thead class="bg-slate-50 text-slate-500 font-bold border-b border-slate-100">
+                            <tr>
+                                <th class="py-2 px-2.5">Date</th>
+                                <th class="py-2 px-2">Period</th>
+                                <th class="py-2 px-2 text-right">Gross Wages</th>
+                                <th class="py-2 px-2 text-right">Advance Deducted</th>
+                                <th class="py-2 px-2.5 text-right">Net Paid</th>
+                                <th class="py-2 px-2 text-center">Mode</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100">
+                `;
+                wages.forEach(w => {
+                    html += `
+                        <tr class="hover:bg-slate-50/80">
+                            <td class="py-2.5 px-2.5 text-slate-600 font-medium">${w.payment_date}</td>
+                            <td class="py-2.5 px-2 text-slate-500 font-mono text-[11px]">${w.period_start} to ${w.period_end}</td>
+                            <td class="py-2.5 px-2 text-right font-mono font-medium text-slate-700">₹${parseFloat(w.gross_amount).toFixed(2)}</td>
+                            <td class="py-2.5 px-2 text-right font-mono font-bold text-rose-600">-₹${parseFloat(w.advance_deducted).toFixed(2)}</td>
+                            <td class="py-2.5 px-2.5 text-right font-mono font-black text-emerald-800 text-sm">₹${parseFloat(w.net_paid).toFixed(2)}</td>
+                            <td class="py-2.5 px-2 text-center font-bold text-[10px] text-slate-600">${w.payment_mode}</td>
+                        </tr>
+                    `;
+                });
+                html += `</tbody></table>`;
+                wagesContainer.innerHTML = html;
+            }
+
+            // Render Advances Table
+            const advContainer = document.getElementById('ledger-advances-container');
+            if (advances.length === 0) {
+                advContainer.innerHTML = '<p class="text-xs text-slate-400 text-center py-8">No advance disbursements recorded.</p>';
+            } else {
+                let html = `
+                    <table class="w-full text-left text-xs border-collapse">
+                        <thead class="bg-slate-50 text-slate-500 font-bold border-b border-slate-100">
+                            <tr>
+                                <th class="py-2 px-2.5">Date</th>
+                                <th class="py-2 px-2 text-right">Amount</th>
+                                <th class="py-2 px-2 text-center">Mode</th>
+                                <th class="py-2 px-2 text-center">Status</th>
+                                <th class="py-2 px-2.5">Notes</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100">
+                `;
+                advances.forEach(a => {
+                    const isSettled = (a.status === 'SETTLED');
+                    const badge = isSettled ? 'bg-slate-100 text-slate-600' : 'bg-rose-100 text-rose-800';
+                    html += `
+                        <tr class="hover:bg-slate-50/80">
+                            <td class="py-2.5 px-2.5 text-slate-600 font-medium">${a.advance_date}</td>
+                            <td class="py-2.5 px-2 text-right font-mono font-bold text-rose-700">₹${parseFloat(a.amount).toFixed(2)}</td>
+                            <td class="py-2.5 px-2 text-center font-bold text-[10px] text-slate-600">${a.payment_mode}</td>
+                            <td class="py-2.5 px-2 text-center">
+                                <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${badge}">${a.status}</span>
+                            </td>
+                            <td class="py-2.5 px-2.5 text-slate-500 italic text-[11px]">${a.notes || '-'}</td>
+                        </tr>
+                    `;
+                });
+                html += `</tbody></table>`;
+                advContainer.innerHTML = html;
+            }
+
+        } catch (e) {
+            console.error(e);
+            showToast("Failed to load staff ledger: " + e, "error");
+        }
+    }
+
+    function switchLedgerTab(tab) {
+        const jTab = document.getElementById('tech-tab-jobs');
+        const wTab = document.getElementById('tech-tab-wages');
+        const aTab = document.getElementById('tech-tab-advances');
+
+        const jBtn = document.getElementById('tech-tab-btn-jobs');
+        const wBtn = document.getElementById('tech-tab-btn-wages');
+        const aBtn = document.getElementById('tech-tab-btn-advances');
+
+        [jTab, wTab, aTab].forEach(t => t.classList.add('hidden'));
+        [jBtn, wBtn, aBtn].forEach(b => {
+            b.className = "pb-2 text-slate-400 hover:text-slate-600 border-b-2 border-transparent";
+        });
+
+        if (tab === 'jobs') {
+            jTab.classList.remove('hidden');
+            jBtn.className = "pb-2 text-primary-600 border-b-2 border-primary-600";
+        } else if (tab === 'wages') {
+            wTab.classList.remove('hidden');
+            wBtn.className = "pb-2 text-primary-600 border-b-2 border-primary-600";
+        } else if (tab === 'advances') {
+            aTab.classList.remove('hidden');
+            aBtn.className = "pb-2 text-primary-600 border-b-2 border-primary-600";
+        }
     }
 </script>
 {% endblock %}
