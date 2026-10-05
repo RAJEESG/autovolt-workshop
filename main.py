@@ -457,11 +457,39 @@ async def job_detail_page(request: Request, job_id: str):
         complaints_list = [job["complaints"]] if job["complaints"] else []
         
     cursor.execute("SELECT * FROM job_items WHERE job_card_id = ?", (job_id,))
-    items = [dict(row) for row in cursor.fetchall()]
+    raw_items = [dict(row) for row in cursor.fetchall()]
     
-    total_labor = sum(i["total_price"] for i in items if i["item_type"] == "LABOR")
-    total_parts = sum(i["total_price"] for i in items if i["item_type"] == "PART")
-    grand_total = total_labor + total_parts
+    items = []
+    total_labor = 0.0
+    total_parts = 0.0
+    total_tax = 0.0
+    
+    for i in raw_items:
+        qty = int(i.get("quantity") or 1)
+        unit_price = float(i.get("unit_price") or 0.0)
+        base = round(unit_price * qty, 2)
+        t_rate = float(i.get("tax_rate") if i.get("tax_rate") is not None else (18.0 if i.get("item_type") == "LABOR" else 18.0))
+        tax_amt = round(base * (t_rate / 100.0), 2)
+        line_tot = round(base + tax_amt, 2)
+        
+        i["base_amount"] = base
+        i["tax_rate"] = t_rate
+        i["tax_amount"] = tax_amt
+        i["total_price"] = line_tot
+        
+        if i.get("item_type") == "LABOR":
+            total_labor += base
+        else:
+            total_parts += base
+        total_tax += tax_amt
+        items.append(i)
+        
+    grand_total = round(total_labor + total_parts + total_tax, 2)
+    
+    cursor.execute("""
+    UPDATE job_cards SET total_labor = ?, total_parts = ?, grand_total = ? WHERE id = ?
+    """, (total_labor, total_parts, grand_total, job_id))
+    conn.commit()
     
     cursor.execute("SELECT * FROM technicians WHERE status = 'Active'")
     technicians = [dict(row) for row in cursor.fetchall()]
@@ -604,6 +632,7 @@ async def add_job_card_item(
     item_id: Optional[str] = Form(None),
     quantity: int = Form(1),
     unit_price: Optional[float] = Form(None),
+    tax_rate: Optional[float] = Form(None),
     technician_id: Optional[str] = Form(None)
 ):
     conn = db.get_db_connection()
@@ -618,7 +647,7 @@ async def add_job_card_item(
             
     barcode = None
     hsn_code = "8536"
-    tax_rate = 18.0
+    final_tax_rate = float(tax_rate) if tax_rate is not None else 18.0
     
     if item_type == "PART" and item_id:
         cursor.execute("SELECT * FROM inventory_items WHERE id = ?", (item_id,))
@@ -627,16 +656,20 @@ async def add_job_card_item(
             name = p_row["part_name"]
             barcode = p_row["barcode"]
             hsn_code = p_row["hsn_code"] or "8536"
-            tax_rate = p_row["tax_rate"] or 18.0
+            if tax_rate is None:
+                final_tax_rate = float(p_row["tax_rate"] if p_row["tax_rate"] is not None else 18.0)
             if unit_price is None or unit_price == 0:
-                unit_price = p_row["selling_price"]
+                unit_price = float(p_row["selling_price"] or 0.0)
                 
             cursor.execute("UPDATE inventory_items SET stock_qty = MAX(0, stock_qty - ?) WHERE id = ?", (quantity, item_id))
     else:
         hsn_code = "9987"
-        tax_rate = 0.0
+        if tax_rate is None:
+            final_tax_rate = 18.0
         
-    line_total = (unit_price or 0.0) * quantity
+    base_amount = round((unit_price or 0.0) * quantity, 2)
+    tax_amount = round(base_amount * (final_tax_rate / 100.0), 2)
+    line_total = round(base_amount + tax_amount, 2)
     line_id = f"ji_{uuid.uuid4().hex[:8]}"
     
     cursor.execute("""
@@ -646,9 +679,18 @@ async def add_job_card_item(
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         line_id, job_id, item_type, item_id, barcode, name or "Labor Charge",
-        hsn_code, quantity, unit_price or 0.0, tax_rate, line_total, technician_id, tech_name
+        hsn_code, quantity, unit_price or 0.0, final_tax_rate, line_total, technician_id, tech_name
     ))
     
+    # Recalculate job totals
+    cursor.execute("SELECT * FROM job_items WHERE job_card_id = ?", (job_id,))
+    all_items = [dict(r) for r in cursor.fetchall()]
+    tot_labor = sum(i["unit_price"] * i["quantity"] for i in all_items if i["item_type"] == "LABOR")
+    tot_parts = sum(i["unit_price"] * i["quantity"] for i in all_items if i["item_type"] == "PART")
+    tot_tax = sum((i["unit_price"] * i["quantity"]) * ((i["tax_rate"] or 0.0) / 100.0) for i in all_items)
+    tot_grand = round(tot_labor + tot_parts + tot_tax, 2)
+    cursor.execute("UPDATE job_cards SET total_labor = ?, total_parts = ?, grand_total = ? WHERE id = ?", (tot_labor, tot_parts, tot_grand, job_id))
+
     conn.commit()
     conn.close()
     return RedirectResponse(url=f"/job-cards/{job_id}", status_code=303)
@@ -657,7 +699,21 @@ async def add_job_card_item(
 async def delete_job_card_item(job_id: str, item_id: str):
     conn = db.get_db_connection()
     cursor = conn.cursor()
+    cursor.execute("SELECT item_type, item_id, quantity FROM job_items WHERE id = ? AND job_card_id = ?", (item_id, job_id))
+    del_row = cursor.fetchone()
+    if del_row and del_row["item_type"] == "PART" and del_row["item_id"]:
+        cursor.execute("UPDATE inventory_items SET stock_qty = stock_qty + ? WHERE id = ?", (del_row["quantity"], del_row["item_id"]))
     cursor.execute("DELETE FROM job_items WHERE id = ? AND job_card_id = ?", (item_id, job_id))
+    
+    # Recalculate job totals
+    cursor.execute("SELECT * FROM job_items WHERE job_card_id = ?", (job_id,))
+    all_items = [dict(r) for r in cursor.fetchall()]
+    tot_labor = sum(i["unit_price"] * i["quantity"] for i in all_items if i["item_type"] == "LABOR")
+    tot_parts = sum(i["unit_price"] * i["quantity"] for i in all_items if i["item_type"] == "PART")
+    tot_tax = sum((i["unit_price"] * i["quantity"]) * ((i["tax_rate"] or 0.0) / 100.0) for i in all_items)
+    tot_grand = round(tot_labor + tot_parts + tot_tax, 2)
+    cursor.execute("UPDATE job_cards SET total_labor = ?, total_parts = ?, grand_total = ? WHERE id = ?", (tot_labor, tot_parts, tot_grand, job_id))
+
     conn.commit()
     conn.close()
     return RedirectResponse(url=f"/job-cards/{job_id}", status_code=303)
@@ -1368,6 +1424,11 @@ async def barcode_labels_page(request: Request):
     inventory_items = [dict(row) for row in cursor.fetchall()]
     conn.close()
     
+    for item in inventory_items:
+        sp = float(item.get("selling_price") or 0.0)
+        t_rate = float(item.get("tax_rate") if item.get("tax_rate") is not None else 18.0)
+        item["mrp"] = round(sp * (1.0 + t_rate / 100.0), 2)
+    
     return templates.TemplateResponse(
         request=request,
         name="barcode_labels.html",
@@ -1460,6 +1521,10 @@ async def technicians_page(request: Request):
     for t in technicians:
         t["advance_balance"] = t.get("current_advance_balance", 0.0)
 
+    on_leave_count = sum(1 for t in technicians if t.get("is_on_leave") == 1)
+    present_count = len(technicians) - on_leave_count
+    total_advance_balance = sum(float(t.get("advance_balance") or 0.0) for t in technicians)
+
     conn.close()
     
     return templates.TemplateResponse(
@@ -1467,7 +1532,11 @@ async def technicians_page(request: Request):
         name="technicians.html",
         context={
             "active_page": "technicians",
-            "technicians": technicians
+            "technicians": technicians,
+            "total_staff": len(technicians),
+            "present_count": present_count,
+            "on_leave_count": on_leave_count,
+            "total_advance_balance": total_advance_balance
         }
     )
 

@@ -226,7 +226,7 @@
                                     <button type="button" onclick="setCreditUnpaid()" class="text-[10px] bg-amber-600/80 hover:bg-amber-500 text-white font-bold px-1.5 py-0.5 rounded transition">Credit (₹0)</button>
                                 </div>
                             </div>
-                            <input type="number" id="pos-amount-paid" value="{% if editing_invoice %}{{ editing_invoice.amount_paid }}{% endif %}" placeholder="0.00" oninput="this.dataset.customSet = 'true'; this.dataset.userManuallyChanged = 'true'; this.dataset.autoSyncPaid = 'false';" class="w-full text-xs font-bold px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none">
+                            <input type="number" id="pos-amount-paid" placeholder="0.00" oninput="this.dataset.userManuallyChanged = 'true';" class="w-full text-xs font-bold px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none">
                         </div>
                     </div>
 
@@ -786,21 +786,15 @@
 
         const paidField = document.getElementById('pos-amount-paid');
         const mode = document.getElementById('pos-payment-mode').value;
-        const wasFullPaid = document.getElementById('editing-was-full-paid')?.value === 'true';
-        const isEditing = Boolean(document.getElementById('editing-invoice-id')?.value);
 
         if (mode === 'KHATA_CREDIT') {
             paidField.placeholder = "0.00";
-            if (!paidField.dataset.customSet) {
+            if (paidField.dataset.userManuallyChanged !== 'true') {
                 paidField.value = "0.00";
             }
         } else {
-            // When editing an invoice that was full paid (or adding new items), auto-update to full paid!
-            if (wasFullPaid && !paidField.dataset.userManuallyChanged) {
-                paidField.value = roundedGrandTotal;
-            } else if (paidField.dataset.autoSyncPaid === 'true') {
-                paidField.value = roundedGrandTotal;
-            } else if (!isEditing && (!paidField.dataset.customSet || !paidField.value || parseFloat(paidField.value) === 0)) {
+            // Default to full paid: automatically equal to roundedGrandTotal!
+            if (paidField.dataset.userManuallyChanged !== 'true') {
                 paidField.value = roundedGrandTotal;
             }
         }
@@ -810,21 +804,21 @@
         const totalText = document.getElementById('pos-grand-total').innerText.replace(/[^\d.]/g, '');
         const num = parseFloat(totalText) || 0;
         const paidField = document.getElementById('pos-amount-paid');
-        paidField.value = num;
-        paidField.dataset.customSet = "false";
         paidField.dataset.userManuallyChanged = "false";
-        paidField.dataset.autoSyncPaid = "true";
+        paidField.value = num;
         if (document.getElementById('pos-payment-mode').value === 'KHATA_CREDIT') {
             document.getElementById('pos-payment-mode').value = 'UPI';
         }
+        recalculateTotals();
         showToast(`Paid amount set to full (₹${num.toLocaleString('en-IN')})`, "info");
     }
 
     function setCreditUnpaid() {
         const paidField = document.getElementById('pos-amount-paid');
-        paidField.value = "0";
-        paidField.dataset.customSet = "true";
+        paidField.dataset.userManuallyChanged = "true";
+        paidField.value = "0.00";
         document.getElementById('pos-payment-mode').value = 'KHATA_CREDIT';
+        recalculateTotals();
         showToast("Marked as Credit / Khata (₹0 paid)", "info");
     }
 
@@ -833,8 +827,9 @@
         const paidField = document.getElementById('pos-amount-paid');
         if (mode === 'KHATA_CREDIT') {
             paidField.value = "0.00";
-            paidField.dataset.customSet = "true";
-        } else if (!paidField.dataset.customSet) {
+            paidField.dataset.userManuallyChanged = "true";
+        } else {
+            paidField.dataset.userManuallyChanged = "false";
             const totalText = document.getElementById('pos-grand-total').innerText.replace(/[^\d.]/g, '');
             paidField.value = parseFloat(totalText) || 0;
         }
@@ -963,9 +958,15 @@
         document.getElementById('bill-cust-name').value = inv.customer_name || '';
         document.getElementById('bill-cust-phone').value = inv.customer_phone || '';
         document.getElementById('bill-veh-no').value = inv.vehicle_reg_no || '';
-        document.getElementById('pos-payment-mode').value = inv.payment_mode || 'UPI';
+        if (inv.payment_mode === 'KHATA_CREDIT') {
+            document.getElementById('pos-payment-mode').value = 'KHATA_CREDIT';
+            document.getElementById('pos-amount-paid').dataset.userManuallyChanged = 'true';
+            document.getElementById('pos-amount-paid').value = "0.00";
+        } else {
+            document.getElementById('pos-payment-mode').value = inv.payment_mode || 'UPI';
+            document.getElementById('pos-amount-paid').dataset.userManuallyChanged = 'false';
+        }
         document.getElementById('pos-discount').value = inv.discount_amount || 0;
-        document.getElementById('pos-amount-paid').value = inv.amount_paid != null ? inv.amount_paid : '';
         
         if (document.getElementById('pos-gst-type')) {
             document.getElementById('pos-gst-type').value = inv.is_interstate ? 'INTER_STATE' : 'INTRA_STATE';

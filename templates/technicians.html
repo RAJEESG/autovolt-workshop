@@ -33,14 +33,6 @@
 
     <!-- Quick Metrics Bar -->
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {% set total_staff = technicians|length %}
-        {% set on_leave_count = 0 %}
-        {% set total_adv_bal = namespace(val=0.0) %}
-        {% for t in technicians %}
-            {% if t.is_on_leave %}{% set on_leave_count = on_leave_count + 1 %}{% endif %}
-            {% set total_adv_bal.val = total_adv_bal.val + (t.advance_balance or 0.0) %}
-        {% endfor %}
-
         <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
             <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Total Staff</span>
             <div class="flex items-center justify-between mt-1">
@@ -52,7 +44,7 @@
         <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
             <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Present Today</span>
             <div class="flex items-center justify-between mt-1">
-                <span class="text-xl font-black text-emerald-700">{{ total_staff - on_leave_count }}</span>
+                <span class="text-xl font-black text-emerald-700">{{ present_count }}</span>
                 <span class="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold">Active</span>
             </div>
         </div>
@@ -68,7 +60,7 @@
         <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
             <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Total Advance Balance</span>
             <div class="flex items-center justify-between mt-1">
-                <span class="text-xl font-black text-rose-700 font-mono">₹{{ "{:,.2f}".format(total_adv_bal.val) }}</span>
+                <span class="text-xl font-black text-rose-700 font-mono">₹{{ "{:,.2f}".format(total_advance_balance) }}</span>
                 <span class="text-xs px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 font-bold">Pending</span>
             </div>
         </div>
@@ -585,8 +577,8 @@
                             <td class="py-2.5 px-2 text-right font-mono font-bold text-slate-900">₹${parseFloat(j.total_labor || 0).toFixed(2)}</td>
                             <td class="py-2.5 px-2 text-right font-mono font-bold text-emerald-700">₹${parseFloat(j.commission_earned || 0).toFixed(2)}</td>
                             <td class="py-2.5 px-2.5 text-right">
-                                <a href="/job-cards?search=${encodeURIComponent(j.job_number)}" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg text-[10px] transition inline-flex items-center gap-1 shadow-xs">
-                                    <span>👁️ View</span>
+                                <a href="/job-cards/${j.id}" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg text-[10px] transition inline-flex items-center gap-1 shadow-xs" title="Open Job Card #${j.job_number}">
+                                    <span>👁️ View Job Card</span>
                                 </a>
                             </td>
                         </tr>
