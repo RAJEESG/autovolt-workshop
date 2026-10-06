@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monthly Physical Inventory Audit Sheet — {{ workshop.name }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @media print {
+            .no-print { display: none !important; }
+            body { background: white !important; font-size: 11px; }
+            @page { size: A4 portrait; margin: 10mm; }
+        }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-900 p-4 sm:p-8 min-h-screen">
+
+    <div class="no-print max-w-5xl mx-auto mb-4 flex items-center justify-between bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+        <div class="flex items-center gap-2">
+            <span class="text-xl">🖨️</span>
+            <div>
+                <h2 class="font-black text-sm">Monthly Physical Inventory Audit Sheet</h2>
+                <p class="text-xs text-slate-500">Ready for A4 printing or physical stock taking</p>
+            </div>
+        </div>
+        <div class="flex items-center gap-2">
+            <button onclick="window.print()" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl text-xs shadow-md transition flex items-center gap-1.5">
+                <span>Print Stock Sheet (A4)</span>
+            </button>
+            <a href="/inventory" class="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold rounded-xl text-xs transition">
+                Back to Inventory
+            </a>
+        </div>
+    </div>
+
+    <!-- Printable A4 Document Area -->
+    <div class="max-w-5xl mx-auto bg-white p-6 sm:p-8 rounded-2xl border border-slate-200 shadow-lg print:shadow-none print:border-none print:p-0">
+        <!-- Document Header -->
+        <div class="text-center pb-4 mb-4 border-b-2 border-slate-900 space-y-1">
+            <h1 class="text-xl font-black uppercase tracking-wider text-slate-950">{{ workshop.name }}</h1>
+            <p class="text-xs text-slate-600 font-semibold">{{ workshop.subtitle }} • {{ workshop.address }} • Phone: {{ workshop.phone }}</p>
+            <div class="mt-2 inline-block px-4 py-1 bg-slate-900 text-white font-black text-xs rounded-lg uppercase tracking-wider">
+                MONTHLY PHYSICAL INVENTORY AUDIT & STOCK-TAKING SHEET
+            </div>
+            <div class="flex items-center justify-between text-xs text-slate-800 font-bold pt-3 px-1">
+                <span>Audit Date: <span class="font-mono text-purple-700">{{ today_date }}</span></span>
+                <span>Auditor / In-Charge: ______________________</span>
+                <span>Total SKUs Listed: {{ items|length }}</span>
+            </div>
+        </div>
+
+        <!-- Audit Items Table -->
+        <table class="w-full text-left text-xs border border-slate-300 border-collapse">
+            <thead>
+                <tr class="bg-slate-100 text-slate-900 font-black text-[11px] border-b border-slate-300">
+                    <th class="py-2 px-2 border-r border-slate-300 text-center w-8">#</th>
+                    <th class="py-2 px-2.5 border-r border-slate-300">Part Description & OEM #</th>
+                    <th class="py-2 px-2 border-r border-slate-300 font-mono text-[10px]">Barcode</th>
+                    <th class="py-2 px-2 border-r border-slate-300">Rack & Bin</th>
+                    <th class="py-2 px-2 border-r border-slate-300 text-center">System Qty</th>
+                    <th class="py-2 px-2.5 border-r border-slate-300 text-center bg-yellow-100 font-black text-slate-950">Physical Count</th>
+                    <th class="py-2 px-2 border-r border-slate-300 text-right">Cost (Landing)</th>
+                    <th class="py-2 px-2.5 border-r border-slate-300 text-right">Valuation</th>
+                    <th class="py-2 px-2 text-center">Remarks / Variance</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-200 font-medium text-slate-800 text-[11px]">
+                {% set total_sys_qty = namespace(val=0) %}
+                {% set total_val = namespace(val=0.0) %}
+                {% for item in items %}
+                {% set landing_cost = item.cost_price * (1 + item.tax_rate / 100.0) %}
+                {% set valuation = item.stock_qty * landing_cost %}
+                {% set total_sys_qty.val = total_sys_qty.val + item.stock_qty %}
+                {% set total_val.val = total_val.val + valuation %}
+                <tr class="hover:bg-slate-50">
+                    <td class="py-2 px-2 border-r border-slate-200 text-center text-slate-500 font-mono">{{ loop.index }}</td>
+                    <td class="py-2 px-2.5 border-r border-slate-200">
+                        <span class="font-bold text-slate-900 block">{{ item.part_name }}</span>
+                        {% if item.part_number %}
+                        <span class="text-[10px] font-mono text-slate-600 block">OEM: {{ item.part_number }}</span>
+                        {% endif %}
+                    </td>
+                    <td class="py-2 px-2 border-r border-slate-200 font-mono font-bold text-slate-800 text-[10px]">{{ item.barcode }}</td>
+                    <td class="py-2 px-2 border-r border-slate-200">
+                        <span class="font-bold text-slate-800">{{ item.location_rack or 'Main' }}</span>
+                        {% if item.position_bin %}
+                        <span class="text-[10px] font-mono text-slate-600 block">Bin: {{ item.position_bin }}</span>
+                        {% endif %}
+                    </td>
+                    <td class="py-2 px-2 border-r border-slate-200 text-center font-bold font-mono {% if item.stock_qty <= item.min_stock_alert %}text-rose-700{% else %}text-slate-900{% endif %}">
+                        {{ item.stock_qty }} {{ item.unit }}
+                    </td>
+                    <td class="py-2 px-2.5 border-r border-slate-200 text-center bg-yellow-50/50">
+                        <span class="inline-block w-16 border-b-2 border-dotted border-slate-500 font-mono font-bold text-xs text-slate-900">&nbsp;</span>
+                    </td>
+                    <td class="py-2 px-2 border-r border-slate-200 text-right font-mono font-bold text-slate-900">₹{{ "{:,.2f}".format(landing_cost) }}</td>
+                    <td class="py-2 px-2.5 border-r border-slate-200 text-right font-mono font-black text-slate-950">₹{{ "{:,.2f}".format(valuation) }}</td>
+                    <td class="py-2 px-2 border-slate-200 text-center text-slate-400">
+                        <span class="inline-block w-20 border-b border-dotted border-slate-300">&nbsp;</span>
+                    </td>
+                </tr>
+                {% endfor %}
+                <tr class="bg-slate-100 font-black text-slate-950 border-t-2 border-slate-400 text-xs">
+                    <td colspan="4" class="py-2.5 px-3 border-r border-slate-300 text-right uppercase tracking-wider">Total Stock Valuation:</td>
+                    <td class="py-2.5 px-2 border-r border-slate-300 text-center font-mono">{{ total_sys_qty.val }}</td>
+                    <td class="py-2.5 px-2 border-r border-slate-300 text-center bg-yellow-100 font-bold">Physical Total</td>
+                    <td class="py-2.5 px-2 border-r border-slate-300"></td>
+                    <td class="py-2.5 px-2.5 border-r border-slate-300 text-right font-mono font-black text-purple-950">₹{{ "{:,.2f}".format(total_val.val) }}</td>
+                    <td></td>
+                </tr>
+            </tbody>
+        </table>
+
+        <!-- Signatures Section -->
+        <div class="mt-8 pt-4 border-t border-slate-300 grid grid-cols-3 gap-6 text-xs text-slate-700">
+            <div>
+                <p class="font-bold">Store Keeper / Technician:</p>
+                <p class="mt-8 border-t border-dotted border-slate-400 pt-1 text-slate-500">Signature & Date</p>
+            </div>
+            <div>
+                <p class="font-bold">Auditor / Accountant:</p>
+                <p class="mt-8 border-t border-dotted border-slate-400 pt-1 text-slate-500">Signature & Date</p>
+            </div>
+            <div>
+                <p class="font-bold">Workshop Owner / Manager:</p>
+                <p class="mt-8 border-t border-dotted border-slate-400 pt-1 text-slate-500">Signature & Date</p>
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>

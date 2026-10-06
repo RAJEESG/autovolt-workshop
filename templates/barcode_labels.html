@@ -99,11 +99,12 @@
     }
     .print-area {
         position: fixed !important;
-        inset: 0 !important;
-        width: 100vw !important;
-        height: auto !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100% !important;
+        height: 100% !important;
         background: white !important;
-        padding: 5mm !important;
+        padding: 0 !important;
         margin: 0 !important;
         border: none !important;
     }
@@ -112,17 +113,25 @@
     }
     .barcode-sticker-grid {
         display: grid !important;
+        gap: 1.5mm !important;
+    }
+    .grid-fmt-24 {
         grid-template-columns: repeat(3, 1fr) !important;
-        gap: 2mm !important;
+    }
+    .grid-fmt-40 {
+        grid-template-columns: repeat(4, 1fr) !important;
     }
     .barcode-sticker-item {
-        border: 1px dashed #94a3b8 !important;
+        border: 1px dashed #cbd5e1 !important;
         page-break-inside: avoid !important;
         break-inside: avoid !important;
+        padding: 1.5mm 2.5mm !important;
+        box-shadow: none !important;
+        border-radius: 4px !important;
     }
     @page {
         size: A4 portrait;
-        margin: 8mm;
+        margin: 4mm 5mm;
     }
 }
 </style>
@@ -161,9 +170,9 @@
         const fmt = document.getElementById('label-format')?.value || 'a4_24';
         const grid = document.getElementById('stickers-container');
         if (fmt === 'a4_40') {
-            grid.className = "barcode-sticker-grid grid grid-cols-2 sm:grid-cols-4 md:grid-cols-4 gap-2 print:gap-1.5";
+            grid.className = "barcode-sticker-grid grid-fmt-40 grid grid-cols-2 sm:grid-cols-4 md:grid-cols-4 gap-2 print:gap-1.5";
         } else {
-            grid.className = "barcode-sticker-grid grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 gap-3 print:gap-2";
+            grid.className = "barcode-sticker-grid grid-fmt-24 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 gap-3 print:gap-1.5";
         }
         updateStickerPreview();
     }
@@ -194,29 +203,31 @@
             let html = "";
             for (let i = 0; i < count; i++) {
                 html += `
-                    <div class="barcode-sticker-item bg-white border border-slate-300 rounded-xl p-2.5 text-center flex flex-col justify-between shadow-xs">
-                        <!-- Part Name & OEM PN -->
-                        <div class="text-[9px] font-black text-slate-900 tracking-tight leading-tight line-clamp-1">
-                            ${name}
+                    <div class="barcode-sticker-item bg-white border border-slate-300 rounded-xl p-2 text-center flex flex-col justify-between shadow-xs">
+                        <!-- Part Name (Up to 2 lines wrapping cleanly) & OEM PN -->
+                        <div>
+                            <div class="text-[9.5px] font-black text-slate-950 tracking-tight leading-snug line-clamp-2 uppercase max-h-7 overflow-hidden">
+                                ${name}
+                            </div>
+                            ${partNo ? `<div class="text-[8px] font-mono font-bold text-slate-500 truncate">PN: ${partNo}</div>` : ''}
                         </div>
-                        ${partNo ? `<div class="text-[8px] font-mono font-bold text-slate-500 line-clamp-1">PN: ${partNo}</div>` : ''}
 
                         <!-- Barcode SVG Lines -->
-                        <div class="my-1 flex items-center justify-center max-h-11 overflow-hidden">
+                        <div class="my-0.5 flex items-center justify-center max-h-9 overflow-hidden">
                             ${svgContent}
                         </div>
 
                         <!-- EXPLICIT HUMAN READABLE DIGITS -->
-                        <div class="font-mono font-black text-xs tracking-widest text-slate-950 py-0.5 border-y border-dashed border-slate-200">
+                        <div class="font-mono font-black text-[10.5px] tracking-widest text-slate-950 py-0.5 border-y border-dashed border-slate-200">
                             ${barcode}
                         </div>
 
                         <!-- Workshop Name & MRP (Tax Included) -->
-                        <div class="flex items-center justify-between text-[9px] font-bold text-slate-800 pt-1 mt-0.5">
-                            <span class="text-slate-500 font-mono text-[8px] uppercase">SPARK AUTO</span>
+                        <div class="flex items-center justify-between text-[8.5px] font-bold text-slate-800 pt-0.5 mt-0.5">
+                            <span class="text-slate-500 font-mono text-[7.5px] uppercase">AUTVOLT</span>
                             <div class="text-right">
                                 <span class="text-emerald-700 font-black">MRP: ₹${parseFloat(mrp).toFixed(2)}</span>
-                                <span class="block text-[7px] text-slate-400 font-normal leading-none">(Incl. GST)</span>
+                                <span class="block text-[6.5px] text-slate-400 font-normal leading-none">(Incl. GST)</span>
                             </div>
                         </div>
                     </div>

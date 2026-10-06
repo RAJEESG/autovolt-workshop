@@ -301,18 +301,38 @@ def generate_invoice_pdf_bytes(invoice: Dict[str, Any], workshop: Dict[str, Any]
         ('BACKGROUND', (0,-2), (-1,-2), colors.HexColor('#f8fafc')),
     ]))
 
-    # Bank Details Text
+    # Bank Details Text & Dynamic UPI QR Image
     bank_text = f"""<b>BANK & PAYMENT DETAILS FOR DIRECT SETTLEMENT</b><br/>
     <b>Bank:</b> {workshop.get('bank_name', 'State Bank of India')}<br/>
     <b>A/c No:</b> {workshop.get('bank_account_no', '39876543210')}<br/>
     <b>IFSC:</b> {workshop.get('bank_ifsc', 'SBIN0001234')} | <b>Branch:</b> {workshop.get('bank_branch', 'Main')}<br/>
     <b>UPI ID:</b> <font color='#0284c7'><b>{vpa}</b></font><br/>
-    <i>Scan UPI QR with GPay, PhonePe, or Paytm to Pay Instantly.</i>
+    <font size=7 color='#64748b'>Scan UPI QR Code with GPay, PhonePe, or Paytm to Pay Instantly.</font>
     """
     bank_p = Paragraph(bank_text, normal_cell)
 
+    qr_img_flowable = None
+    qr_data_url = generate_upi_qr_data_url(upi_link)
+    if qr_data_url and qr_data_url.startswith("data:image/png;base64,"):
+        try:
+            b64_data = qr_data_url.split(",")[1]
+            qr_bytes = base64.b64decode(b64_data)
+            qr_buf = io.BytesIO(qr_bytes)
+            qr_img_flowable = Image(qr_buf, width=24 * mm, height=24 * mm)
+        except Exception as e:
+            print(f"[PDF QR Embed Error] {e}")
+
+    if qr_img_flowable:
+        bank_box = Table([[bank_p, qr_img_flowable]], colWidths=[76 * mm, 28 * mm])
+        bank_box.setStyle(TableStyle([
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('PADDING', (0,0), (-1,-1), 0),
+        ]))
+    else:
+        bank_box = bank_p
+
     footer_grid = [
-        [bank_p, summary_table]
+        [bank_box, summary_table]
     ]
     footer_table = Table(footer_grid, colWidths=[104 * mm, 78 * mm])
     footer_table.setStyle(TableStyle([

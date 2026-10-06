@@ -233,10 +233,29 @@ def generate_daily_collection_register(start_date: Optional[str] = None, end_dat
     query += " GROUP BY date(invoice_date) ORDER BY date(invoice_date) DESC"
     cursor.execute(query, params)
     registers = [dict(row) for row in cursor.fetchall()]
+
+    # Detailed collection transactions list
+    dt_query = """
+    SELECT invoice_number, invoice_date, customer_name, customer_phone, vehicle_reg_no, amount_paid, payment_mode, payment_status, grand_total, balance_due
+    FROM invoices
+    WHERE amount_paid > 0
+    """
+    dt_params = []
+    if start_date:
+        dt_query += " AND date(invoice_date) >= date(?)"
+        dt_params.append(start_date)
+    if end_date:
+        dt_query += " AND date(invoice_date) <= date(?)"
+        dt_params.append(end_date)
+    dt_query += " ORDER BY date(invoice_date) DESC, invoice_number DESC"
+    cursor.execute(dt_query, dt_params)
+    transactions = [dict(row) for row in cursor.fetchall()]
+
     conn.close()
 
     return {
         "registers": registers,
+        "transactions": transactions,
         "grand_total_collected": sum(r["day_total"] for r in registers),
         "total_cash": sum(r["cash_total"] for r in registers),
         "total_upi": sum(r["upi_total"] for r in registers),

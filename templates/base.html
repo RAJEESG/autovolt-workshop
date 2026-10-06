@@ -242,6 +242,25 @@
     <script src="/static/js/print.js"></script>
     <script>
         lucide.createIcons();
+
+        // Security: 30-Minute Client-Side Inactivity Monitor & Auto-Logout
+        (function() {
+            let idleTimer;
+            const INACTIVITY_LIMIT_MS = 30 * 60 * 1000; // 30 Minutes
+
+            function resetTimer() {
+                if (idleTimer) clearTimeout(idleTimer);
+                idleTimer = setTimeout(function() {
+                    window.location.href = "/logout?reason=inactivity";
+                }, INACTIVITY_LIMIT_MS);
+            }
+
+            const events = ['mousemove', 'mousedown', 'keypress', 'scroll', 'touchstart', 'click'];
+            events.forEach(function(evt) {
+                document.addEventListener(evt, resetTimer, true);
+            });
+            resetTimer();
+        })();
     </script>
     {% block scripts %}{% endblock %}
 </body>

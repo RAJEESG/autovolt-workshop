@@ -867,6 +867,20 @@
         const amountPaidInput = document.getElementById('pos-amount-paid').value.trim();
         const amountPaid = amountPaidInput !== "" ? parseFloat(amountPaidInput) : (paymentMode === 'KHATA_CREDIT' ? 0.0 : roundedGrandTotal);
 
+        // Confirmation Message Popup before billing
+        const actionLabel = editingInvoiceId ? "Update" : "Generate & Print";
+        const confirmMsg = `⚡ Confirm Bill ${actionLabel}:\n\n` +
+            `• Customer: ${customerName} (${customerPhone})\n` +
+            `• Vehicle Reg: ${vehicleReg || 'Counter Sale'}\n` +
+            `• Total Amount: ₹${roundedGrandTotal.toLocaleString('en-IN')}\n` +
+            `• Payment Mode: ${paymentMode}\n` +
+            `• Amount Paid: ₹${amountPaid.toLocaleString('en-IN')}\n\n` +
+            `Are you sure you want to ${actionLabel.toLowerCase()} this bill?`;
+
+        if (!confirm(confirmMsg)) {
+            return;
+        }
+
         const payload = {
             editing_invoice_id: editingInvoiceId,
             is_interstate: isInterstate,

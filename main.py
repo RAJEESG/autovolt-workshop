@@ -133,16 +133,41 @@ async def auth_and_subscription_middleware(request: Request, call_next):
     
     is_exempt = any(path.startswith(prefix) for prefix in exempt_prefixes)
     session_user = request.cookies.get("session_user")
+    last_active_str = request.cookies.get("session_last_active")
     
-    # If not logged in and accessing protected page, redirect to login
-    if not is_exempt and not session_user:
-        if request.method == "GET":
-            return RedirectResponse(url="/login", status_code=303)
-        else:
-            return JSONResponse({"error": "Authentication required", "redirect": "/login"}, status_code=401)
-            
-    # If already logged in and visiting login page, redirect to dashboard
-    if path == "/login" and session_user and request.method == "GET":
+    now_ts = datetime.now().timestamp()
+    is_session_expired = False
+    valid_db_user = None
+
+    if session_user:
+        # Check 30-minute inactivity timeout (1800 seconds)
+        if last_active_str:
+            try:
+                if now_ts - float(last_active_str) > 1800:
+                    is_session_expired = True
+            except Exception:
+                pass
+
+        # Verify active user in DB
+        if not is_session_expired:
+            conn = db.get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, username FROM users WHERE username = ? AND status = 'ACTIVE'", (session_user,))
+            valid_db_user = cursor.fetchone()
+            conn.close()
+            if not valid_db_user:
+                is_session_expired = True
+
+    # If session expired or invalid user, force redirect to login
+    if not is_exempt and (not session_user or is_session_expired):
+        redirect_url = "/login?error=" + ("Session+expired+due+to+inactivity.+Please+log+in+again." if is_session_expired else "Authentication+required.")
+        response = RedirectResponse(url=redirect_url, status_code=303) if request.method == "GET" else JSONResponse({"error": "Authentication required", "redirect": "/login"}, status_code=401)
+        response.delete_cookie("session_user")
+        response.delete_cookie("session_last_active")
+        return response
+
+    # If already logged in with valid session visiting login page, redirect to dashboard
+    if path == "/login" and session_user and not is_session_expired and request.method == "GET":
         return RedirectResponse(url="/", status_code=303)
     
     # SaaS Expiration Check for authenticated users
@@ -152,6 +177,11 @@ async def auth_and_subscription_middleware(request: Request, call_next):
             return RedirectResponse(url="/subscription-expired", status_code=303)
             
     response = await call_next(request)
+    
+    # Refresh inactivity timestamp cookie for active logged-in user
+    if session_user and not is_session_expired:
+        response.set_cookie(key="session_last_active", value=str(int(now_ts)), max_age=86400, httponly=True)
+        
     return response
 
 # Helper to get current logged in user dict
@@ -168,7 +198,27 @@ def get_session_user(request: Request) -> Optional[dict]:
 
 templates.env.globals["get_session_user"] = get_session_user
 
-# Base URL for public links
+# Dynamic Base URL resolver for public share links & WhatsApp downloads
+def get_base_url(request: Optional[Request] = None) -> str:
+    env_url = os.getenv("APP_BASE_URL", "").strip()
+    if env_url and "localhost" not in env_url and "127.0.0.1" not in env_url:
+        return env_url.rstrip("/")
+
+    if request:
+        forwarded_host = request.headers.get("x-forwarded-host")
+        forwarded_proto = request.headers.get("x-forwarded-proto", "https")
+        if forwarded_host:
+            return f"{forwarded_proto}://{forwarded_host}".rstrip("/")
+        
+        host = request.headers.get("host")
+        if host:
+            proto = "https" if request.url.scheme == "https" or "onrender.com" in host or "herokuapp.com" in host else "http"
+            return f"{proto}://{host}".rstrip("/")
+
+        return str(request.base_url).rstrip("/")
+
+    return os.getenv("APP_BASE_URL", "http://localhost:8000").rstrip("/")
+
 APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:8000")
 
 # =========================================================
@@ -208,13 +258,16 @@ async def handle_login(
     conn.close()
     
     response = RedirectResponse(url="/", status_code=303)
-    response.set_cookie(key="session_user", value=user["username"], max_age=86400 * 30, httponly=True)
+    now_ts_str = str(int(datetime.now().timestamp()))
+    response.set_cookie(key="session_user", value=user["username"], max_age=86400 * 7, httponly=True)
+    response.set_cookie(key="session_last_active", value=now_ts_str, max_age=86400 * 7, httponly=True)
     return response
 
 @app.get("/logout")
 async def handle_logout():
     response = RedirectResponse(url="/login", status_code=303)
     response.delete_cookie("session_user")
+    response.delete_cookie("session_last_active")
     return response
 
 @app.get("/forgot-password", response_class=HTMLResponse)
@@ -476,6 +529,7 @@ async def job_detail_page(request: Request, job_id: str):
         i["tax_rate"] = t_rate
         i["tax_amount"] = tax_amt
         i["total_price"] = line_tot
+        i["line_total"] = line_tot
         
         if i.get("item_type") == "LABOR":
             total_labor += base
@@ -522,26 +576,36 @@ async def job_detail_page(request: Request, job_id: str):
             "items": items,
             "total_labor": total_labor,
             "total_parts": total_parts,
+            "total_tax": total_tax,
             "grand_total": grand_total,
             "technicians": technicians,
             "inventory_items": inventory_items,
             "linked_invoice": linked_invoice,
-            "milestones": milestones
+            "milestones": milestones,
+            "workshop": get_current_workshop()
         }
     )
 
 
 @app.post("/api/job-cards")
 async def create_job_card(
+    request: Request,
     vehicle_reg_no: str = Form(...),
     vehicle_make_model: str = Form(...),
     customer_name: str = Form(...),
     customer_phone: str = Form(...),
     assigned_technician_id: Optional[str] = Form(None),
     odometer: Optional[int] = Form(0),
-    complaints: List[str] = Form([]),
     custom_complaint_notes: Optional[str] = Form(None)
 ):
+    form_data = await request.form()
+    complaints = form_data.getlist("complaints")
+    if isinstance(complaints, str):
+        comp_list = [complaints] if complaints.strip() else []
+    elif isinstance(complaints, list):
+        comp_list = [str(c).strip() for c in complaints if str(c).strip()]
+    else:
+        comp_list = []
     conn = db.get_db_connection()
     cursor = conn.cursor()
     
@@ -579,7 +643,7 @@ async def create_job_card(
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (vehicle_id, vehicle_reg_no.strip().upper(), customer_id, customer_name, customer_phone, vehicle_make_model, odometer, now_ist))
         
-    complaints_json = json.dumps(complaints)
+    complaints_json = json.dumps(comp_list)
     cursor.execute("""
     INSERT INTO job_cards (
         id, job_number, customer_id, customer_name, customer_phone, vehicle_id, vehicle_reg_no,
@@ -1207,7 +1271,7 @@ async def download_invoice_pdf(invoice_id: str):
     )
 
 @app.get("/api/invoices/{invoice_id}/whatsapp-link")
-async def get_invoice_whatsapp_link(invoice_id: str):
+async def get_invoice_whatsapp_link(request: Request, invoice_id: str):
     conn = db.get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,))
@@ -1219,7 +1283,8 @@ async def get_invoice_whatsapp_link(invoice_id: str):
     conn.close()
     
     workshop = get_current_workshop()
-    public_url = f"{APP_BASE_URL}/view/invoice/{invoice_id}"
+    base_url = get_base_url(request)
+    public_url = f"{base_url}/view/invoice/{invoice_id}"
     lang = workshop.get("language", "en")
     
     msg = format_invoice_whatsapp_message(
@@ -1241,7 +1306,7 @@ async def get_invoice_whatsapp_link(invoice_id: str):
     return {"whatsapp_url": wa_url, "message": msg}
 
 @app.get("/api/job-cards/{job_id}/whatsapp-link")
-async def get_job_whatsapp_link(job_id: str):
+async def get_job_whatsapp_link(request: Request, job_id: str):
     conn = db.get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM job_cards WHERE id = ?", (job_id,))
@@ -1253,7 +1318,8 @@ async def get_job_whatsapp_link(job_id: str):
     conn.close()
     
     workshop = get_current_workshop()
-    public_url = f"{APP_BASE_URL}/view/job/{job_id}"
+    base_url = get_base_url(request)
+    public_url = f"{base_url}/view/job/{job_id}"
     lang = workshop.get("language", "en")
     
     msg = format_job_status_whatsapp_message(
@@ -1338,7 +1404,26 @@ async def inventory_page(request: Request, category: Optional[str] = None, filte
             "categories": categories,
             "selected_category": category,
             "is_low_filter": filter == "low",
-            "low_stock_count": low_stock_count
+            "low_stock_count": low_stock_count,
+            "workshop": get_current_workshop()
+        }
+    )
+
+@app.get("/inventory/stock-audit-sheet", response_class=HTMLResponse)
+async def stock_audit_sheet_page(request: Request):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM inventory_items ORDER BY category, location_rack, part_name")
+    items = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    
+    return templates.TemplateResponse(
+        request=request,
+        name="stock_audit_sheet.html",
+        context={
+            "items": items,
+            "workshop": get_current_workshop(),
+            "today_date": datetime.now().strftime("%d %b %Y")
         }
     )
 
