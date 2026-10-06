@@ -83,7 +83,7 @@
             <span class="text-xs text-slate-400 font-mono" id="sticker-summary-text">24 Stickers</span>
         </div>
         
-        <div id="stickers-container" class="barcode-sticker-grid grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 gap-3 print:gap-2">
+        <div id="stickers-container" class="barcode-sticker-grid grid-fmt-24 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 gap-3 print:gap-2">
             <!-- Stickers populated by JavaScript -->
         </div>
     </div>
@@ -98,11 +98,10 @@
         visibility: visible !important;
     }
     .print-area {
-        position: fixed !important;
+        position: absolute !important;
         top: 0 !important;
         left: 0 !important;
         width: 100% !important;
-        height: 100% !important;
         background: white !important;
         padding: 0 !important;
         margin: 0 !important;
@@ -113,7 +112,9 @@
     }
     .barcode-sticker-grid {
         display: grid !important;
-        gap: 1.5mm !important;
+        grid-template-columns: repeat(3, 1fr) !important;
+        gap: 2mm 3mm !important;
+        width: 100% !important;
     }
     .grid-fmt-24 {
         grid-template-columns: repeat(3, 1fr) !important;
@@ -131,7 +132,7 @@
     }
     @page {
         size: A4 portrait;
-        margin: 4mm 5mm;
+        margin: 6mm 5mm;
     }
 }
 </style>
@@ -224,8 +225,8 @@
 
                         <!-- Workshop Name & MRP (Tax Included) -->
                         <div class="flex items-center justify-between text-[8.5px] font-bold text-slate-800 pt-0.5 mt-0.5">
-                            <span class="text-slate-500 font-mono text-[7.5px] uppercase">AUTVOLT</span>
-                            <div class="text-right">
+                            <span class="text-slate-500 font-mono text-[7.5px] uppercase shrink-0">AUTVOLT</span>
+                            <div class="text-right shrink-0">
                                 <span class="text-emerald-700 font-black">MRP: ₹${parseFloat(mrp).toFixed(2)}</span>
                                 <span class="block text-[6.5px] text-slate-400 font-normal leading-none">(Incl. GST)</span>
                             </div>
@@ -240,6 +241,6 @@
     }
 
     // Run on page load
-    document.addEventListener("DOMContentLoaded", updateStickerPreview);
+    document.addEventListener("DOMContentLoaded", toggleFormatGrid);
 </script>
 {% endblock %}

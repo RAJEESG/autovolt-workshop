@@ -186,12 +186,30 @@
 
     <!-- Labor Charges & Spare Parts Added on Job Card -->
     <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-5">
+        {% if linked_invoice %}
+        <div id="job-card-lock-banner" class="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+            <div class="flex items-center gap-3">
+                <span class="w-9 h-9 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center font-black text-lg shrink-0">🔒</span>
+                <div>
+                    <div class="flex items-center gap-2">
+                        <h4 class="font-extrabold text-xs uppercase tracking-wider text-amber-950">Job Card Billed (#{{ linked_invoice.invoice_number }})</h4>
+                        <span class="text-[10px] bg-amber-200 text-amber-950 px-2 py-0.5 rounded font-bold uppercase">Locked</span>
+                    </div>
+                    <p class="text-xs text-amber-800">This Job Card has already been billed. Modifying items requires Master Security PIN verification.</p>
+                </div>
+            </div>
+            <button type="button" id="btn-unlock-job-card" onclick="promptUnlockJobCard('{{ job.id }}')" class="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow transition flex items-center gap-1.5 shrink-0">
+                <span>🔑 Unlock Job Card for Edit</span>
+            </button>
+        </div>
+        {% endif %}
+
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
             <div>
                 <h3 class="font-bold text-slate-900 text-base">Services (Labor) & Spare Parts Used</h3>
                 <p class="text-xs text-slate-500">Scan box barcode or select parts from inventory to deduct stock automatically</p>
             </div>
-            <div class="flex items-center gap-2">
+            <div id="job-items-action-controls" class="flex items-center gap-2 {% if linked_invoice %}hidden{% endif %}">
                 <button onclick="openModal('add-labor-modal')" class="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs rounded-xl shadow-sm transition">
                     + Add Labor Charge
                 </button>
@@ -242,7 +260,7 @@
                         <td class="py-3 px-3 text-slate-600">{{ item.technician_name or '-' }}</td>
                         <td class="py-3 px-3 text-right">
                             <form action="/api/job-cards/{{ job.id }}/items/{{ item.id }}/delete" method="POST" onsubmit="return confirm('Remove item?')">
-                                <button type="submit" class="text-rose-500 hover:text-rose-700 font-bold px-2 py-1">✕</button>
+                                <button type="submit" class="item-delete-btn text-rose-500 hover:text-rose-700 font-bold px-2 py-1 {% if linked_invoice %}hidden{% endif %}">✕</button>
                             </form>
                         </td>
                     </tr>
@@ -467,5 +485,67 @@
             showToast("WhatsApp error: " + e, "error");
         }
     }
+
+    async function promptUnlockJobCard(jobId) {
+        const pin = prompt("🔐 Enter Master Security PIN (default: 1234) to unlock this billed Job Card for modification:");
+        if (!pin) return;
+
+        try {
+            const resp = await fetch(`/api/job-cards/${jobId}/verify-edit-pin`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pin: pin })
+            });
+            const data = await resp.json();
+            if (resp.ok && data.success) {
+                sessionStorage.setItem('unlocked_job_' + jobId, 'true');
+                applyJobCardUnlockedState();
+                showToast("🔓 Job Card unlocked! Modifications will automatically update linked invoice.", "success");
+            } else {
+                showToast(data.detail || "Invalid Master Security PIN", "error");
+            }
+        } catch (e) {
+            showToast("Error verifying PIN: " + e, "error");
+        }
+    }
+
+    function applyJobCardUnlockedState() {
+        const isBilled = {% if linked_invoice %}true{% else %}false{% endif %};
+        const jobId = "{{ job.id }}";
+        const isUnlocked = !isBilled || sessionStorage.getItem('unlocked_job_' + jobId) === 'true';
+
+        const actionControls = document.getElementById('job-items-action-controls');
+        if (actionControls) {
+            if (isUnlocked) actionControls.classList.remove('hidden');
+            else actionControls.classList.add('hidden');
+        }
+
+        document.querySelectorAll('.item-delete-btn').forEach(btn => {
+            if (isUnlocked) btn.classList.remove('hidden');
+            else btn.classList.add('hidden');
+        });
+
+        const lockBanner = document.getElementById('job-card-lock-banner');
+        if (lockBanner && isUnlocked && isBilled) {
+            lockBanner.className = "p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs";
+            lockBanner.innerHTML = `
+                <div class="flex items-center gap-3">
+                    <span class="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-black text-lg shrink-0">🔓</span>
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <h4 class="font-extrabold text-xs uppercase tracking-wider text-emerald-950">Job Card Unlocked (Editing Active)</h4>
+                            <span class="text-[10px] bg-emerald-200 text-emerald-950 px-2 py-0.5 rounded font-bold uppercase">Master PIN Verified</span>
+                        </div>
+                        <p class="text-xs text-emerald-800">Item changes will automatically sync into linked Invoice #{{ linked_invoice.invoice_number or '' }}.</p>
+                    </div>
+                </div>
+                <button type="button" onclick="sessionStorage.removeItem('unlocked_job_${jobId}'); location.reload();" class="px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs rounded-xl shadow transition shrink-0">
+                    🔒 Lock Job Card
+                </button>
+            `;
+        }
+    }
+
+    document.addEventListener("DOMContentLoaded", applyJobCardUnlockedState);
 </script>
 {% endblock %}

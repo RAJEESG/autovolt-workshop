@@ -260,13 +260,16 @@
                 <div class="p-2.5 rounded-2xl bg-slate-50 border border-slate-200/80 hover:border-slate-300 transition space-y-1.5 recent-bill-card" data-search-text="{{ inv.invoice_number|lower }} {{ inv.customer_name|lower }} {{ inv.customer_phone }} {{ inv.vehicle_reg_no|lower }}">
                     <div class="flex items-start justify-between gap-1">
                         <div class="min-w-0 flex-1">
-                            <div class="flex items-center gap-1.5">
+                            <div class="flex items-center gap-1.5 flex-wrap">
                                 <span class="font-bold text-slate-900 text-xs truncate">{{ inv.invoice_number }}</span>
+                                {% if inv.job_card_id %}
+                                <span class="text-[9px] px-1.5 py-0.5 rounded font-bold bg-amber-100 text-amber-900 border border-amber-200 shadow-2xs" title="Generated from Job Card">⚡ Job Card</span>
+                                {% endif %}
                                 <span class="text-[9px] px-1.5 py-0.5 rounded font-bold {% if inv.payment_status == 'PAID' %}text-emerald-700 bg-emerald-100{% elif inv.payment_status == 'PARTIAL' %}text-amber-700 bg-amber-100{% elif inv.payment_status == 'CANCELLED' %}text-rose-700 bg-rose-100 line-through{% else %}text-rose-700 bg-rose-100{% endif %}">
                                     {{ inv.payment_status }}
                                 </span>
                             </div>
-                            <p class="text-[11px] text-slate-700 font-medium truncate">{{ inv.customer_name }}</p>
+                            <p class="text-[11px] text-slate-700 font-medium truncate mt-0.5">{{ inv.customer_name }}</p>
                             <span class="text-[10px] text-slate-400 font-mono block">{{ inv.vehicle_reg_no or 'Counter Sale' }}</span>
                         </div>
                         <div class="text-right shrink-0">
@@ -286,7 +289,7 @@
                             </button>
                             {% endif %}
                             {% if inv.payment_status != 'CANCELLED' %}
-                            <button onclick="startEditInvoice('{{ inv.id }}')" class="p-1 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 text-xs font-bold" title="Edit Bill (Master PIN Required)">
+                            <button onclick="startEditInvoice('{{ inv.id }}', '{{ inv.job_card_id or '' }}', '{{ inv.invoice_number }}')" class="p-1 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 text-xs font-bold" title="Edit Bill (Master PIN Required)">
                                 ✏️
                             </button>
                             {% endif %}
@@ -939,8 +942,18 @@
         window.open(`/api/invoices/${invoiceId}/pdf`, '_blank');
     }
 
-    // Start Editing an Invoice with Master PIN
-    async function startEditInvoice(invoiceId) {
+    // Start Editing an Invoice with Master PIN & Job Card check
+    async function startEditInvoice(invoiceId, jobCardId = '', invoiceNumber = '') {
+        if (jobCardId) {
+            const choice = confirm(`⚡ Invoice #${invoiceNumber || invoiceId} was generated from a Job Card.\n\n` +
+                `• Click OK to open the Job Card page to edit items/labor (Recommended for automatic sync).\n` +
+                `• Click CANCEL to enter Master PIN and force edit this bill directly.`);
+            if (choice) {
+                window.location.href = `/job-cards/${jobCardId}`;
+                return;
+            }
+        }
+
         const pin = prompt("🔐 Enter Master Security PIN (default: 1234) to edit this bill:");
         if (!pin) return;
 

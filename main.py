@@ -688,6 +688,106 @@ async def update_job_diagnosis(job_id: str, diagnosis_notes: str = Form(...)):
     conn.close()
     return RedirectResponse(url=f"/job-cards/{job_id}", status_code=303)
 
+def sync_job_card_to_invoice(cursor, job_id: str):
+    """If an active (non-cancelled) invoice is linked to this job card, update its items & totals to match current job_items"""
+    cursor.execute("SELECT * FROM invoices WHERE job_card_id = ? AND payment_status != 'CANCELLED' ORDER BY created_at DESC LIMIT 1", (job_id,))
+    inv = cursor.fetchone()
+    if not inv:
+        return
+        
+    inv_id = inv["id"]
+    
+    # Fetch current job items
+    cursor.execute("SELECT * FROM job_items WHERE job_card_id = ?", (job_id,))
+    job_items = [dict(r) for r in cursor.fetchall()]
+    
+    # Remove old invoice items
+    cursor.execute("DELETE FROM invoice_items WHERE invoice_id = ?", (inv_id,))
+    
+    subtotal_labor = 0.0
+    subtotal_parts = 0.0
+    total_tax = 0.0
+    
+    # Re-insert invoice items matching job items
+    for ji in job_items:
+        qty = int(ji.get("quantity") or 1)
+        u_price = float(ji.get("unit_price") or 0.0)
+        t_rate = float(ji.get("tax_rate") or 0.0)
+        item_t = ji.get("item_type") or "PART"
+        
+        line_base = round(qty * u_price, 2)
+        line_tax = round(line_base * (t_rate / 100.0), 2)
+        line_tot = round(line_base + line_tax, 2)
+        
+        if item_t == "LABOR":
+            subtotal_labor += line_base
+        else:
+            subtotal_parts += line_base
+            
+        total_tax += line_tax
+        
+        ii_id = f"ii_{uuid.uuid4().hex[:8]}"
+        cursor.execute("""
+        INSERT INTO invoice_items (
+            id, invoice_id, item_type, item_id, name, barcode, hsn_sac,
+            quantity, unit_price, tax_rate, taxable_amount, total_price
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            ii_id, inv_id, item_t, ji.get("item_id"), ji.get("name"), ji.get("barcode"),
+            ji.get("hsn_code") or ("9987" if item_t == "LABOR" else "8536"),
+            qty, u_price, t_rate, line_base, line_tot
+        ))
+        
+    taxable_subtotal = subtotal_labor + subtotal_parts
+    total_tax = round(total_tax, 2)
+    is_interstate = inv["is_interstate"] if "is_interstate" in inv.keys() else 0
+    
+    if is_interstate:
+        cgst_total = 0.0
+        sgst_total = 0.0
+        igst_total = total_tax
+    else:
+        cgst_total = round(total_tax / 2.0, 2)
+        sgst_total = round(total_tax - cgst_total, 2)
+        igst_total = 0.0
+        
+    discount = float(inv["discount_amount"] or 0.0)
+    raw_grand_total = max(0.0, (taxable_subtotal + total_tax) - discount)
+    rounded_grand_total = float(round(raw_grand_total))
+    round_off = round(rounded_grand_total - raw_grand_total, 2)
+    grand_total = rounded_grand_total
+    
+    old_paid = float(inv["amount_paid"] or 0.0)
+    old_payment_status = inv["payment_status"]
+    
+    if old_payment_status == "PAID" or old_paid >= inv["grand_total"]:
+        amount_paid = grand_total
+        balance_due = 0.0
+        payment_status = "PAID"
+    elif inv["payment_mode"] == "KHATA_CREDIT" or old_paid <= 0:
+        amount_paid = 0.0
+        balance_due = grand_total
+        payment_status = "UNPAID"
+    else:
+        amount_paid = min(old_paid, grand_total)
+        balance_due = max(0.0, grand_total - amount_paid)
+        payment_status = "PAID" if balance_due <= 0 else ("PARTIAL" if amount_paid > 0 else "UNPAID")
+        
+    now_ist = get_ist_now_str()
+    cursor.execute("""
+    UPDATE invoices SET
+        subtotal_labor = ?, subtotal_parts = ?, taxable_subtotal = ?,
+        cgst_total = ?, sgst_total = ?, igst_total = ?, tax_total = ?,
+        round_off = ?, grand_total = ?, amount_paid = ?, balance_due = ?,
+        payment_status = ?, updated_at = ?
+    WHERE id = ?
+    """, (
+        subtotal_labor, subtotal_parts, taxable_subtotal,
+        cgst_total, sgst_total, igst_total, total_tax,
+        round_off, grand_total, amount_paid, balance_due,
+        payment_status, now_ist, inv_id
+    ))
+
 @app.post("/api/job-cards/{job_id}/items")
 async def add_job_card_item(
     job_id: str,
@@ -755,6 +855,9 @@ async def add_job_card_item(
     tot_grand = round(tot_labor + tot_parts + tot_tax, 2)
     cursor.execute("UPDATE job_cards SET total_labor = ?, total_parts = ?, grand_total = ? WHERE id = ?", (tot_labor, tot_parts, tot_grand, job_id))
 
+    # Auto-sync to linked invoice if already billed
+    sync_job_card_to_invoice(cursor, job_id)
+
     conn.commit()
     conn.close()
     return RedirectResponse(url=f"/job-cards/{job_id}", status_code=303)
@@ -778,9 +881,20 @@ async def delete_job_card_item(job_id: str, item_id: str):
     tot_grand = round(tot_labor + tot_parts + tot_tax, 2)
     cursor.execute("UPDATE job_cards SET total_labor = ?, total_parts = ?, grand_total = ? WHERE id = ?", (tot_labor, tot_parts, tot_grand, job_id))
 
+    # Auto-sync to linked invoice if already billed
+    sync_job_card_to_invoice(cursor, job_id)
+
     conn.commit()
     conn.close()
     return RedirectResponse(url=f"/job-cards/{job_id}", status_code=303)
+
+@app.post("/api/job-cards/{job_id}/verify-edit-pin")
+async def verify_job_card_edit_pin(job_id: str, payload: Dict[str, Any]):
+    pin = payload.get("pin", "")
+    workshop = get_current_workshop()
+    if not verify_master_pin(pin, workshop.get("master_pin", "1234")):
+        raise HTTPException(status_code=403, detail="Invalid Master Security PIN")
+    return {"success": True}
 
 @app.post("/api/job-cards/{job_id}/delete")
 async def delete_job_card_with_pin(job_id: str, payload: Dict[str, Any]):
