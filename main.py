@@ -20,10 +20,11 @@ from whatsapp_helper import (
     generate_wa_me_url,
     format_invoice_whatsapp_message,
     format_job_status_whatsapp_message,
-    format_khata_due_reminder_whatsapp_message
+    format_khata_due_reminder_whatsapp_message,
+    format_proforma_whatsapp_message
 )
 import ca_reports
-from pdf_generator import generate_invoice_pdf_bytes
+from pdf_generator import generate_invoice_pdf_bytes, generate_proforma_pdf_bytes
 from excel_importer import generate_inventory_import_template, parse_inventory_file
 from auth_helper import hash_password, verify_password, verify_master_pin, generate_reset_token
 import otp_helper
@@ -911,6 +912,303 @@ async def delete_job_card_with_pin(job_id: str, payload: Dict[str, Any]):
     conn.commit()
     conn.close()
     return {"success": True}
+
+@app.get("/api/customers/dues-check")
+async def check_customer_dues(phone: Optional[str] = None, customer_name: Optional[str] = None, vehicle_reg_no: Optional[str] = None):
+    """Check if customer/vehicle has previous unpaid Khata dues or unpaid invoices"""
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    
+    dues_amount = 0.0
+    cust = None
+    unpaid_invoices = []
+    
+    if phone and phone.strip():
+        cursor.execute("SELECT * FROM customers WHERE phone = ? LIMIT 1", (phone.strip(),))
+        c_row = cursor.fetchone()
+        if c_row:
+            cust = dict(c_row)
+            dues_amount += float(cust.get("khata_balance") or 0.0)
+            
+        cursor.execute("SELECT * FROM invoices WHERE customer_phone = ? AND balance_due > 0 AND payment_status != 'CANCELLED'", (phone.strip(),))
+        unpaid_invoices = [dict(r) for r in cursor.fetchall()]
+        
+    elif vehicle_reg_no and vehicle_reg_no.strip():
+        cursor.execute("SELECT * FROM vehicles WHERE reg_number = ? LIMIT 1", (vehicle_reg_no.strip().upper(),))
+        v_row = cursor.fetchone()
+        if v_row and v_row.get("customer_phone"):
+            c_phone = v_row["customer_phone"]
+            cursor.execute("SELECT * FROM customers WHERE phone = ? LIMIT 1", (c_phone,))
+            c_row = cursor.fetchone()
+            if c_row:
+                cust = dict(c_row)
+                dues_amount += float(cust.get("khata_balance") or 0.0)
+                
+            cursor.execute("SELECT * FROM invoices WHERE (vehicle_reg_no = ? OR customer_phone = ?) AND balance_due > 0 AND payment_status != 'CANCELLED'", (vehicle_reg_no.strip().upper(), c_phone))
+            unpaid_invoices = [dict(r) for r in cursor.fetchall()]
+
+    conn.close()
+    
+    inv_dues = sum(float(inv.get("balance_due") or 0.0) for inv in unpaid_invoices)
+    total_dues = max(dues_amount, inv_dues)
+    
+    return {
+        "has_dues": total_dues > 0,
+        "dues_amount": round(total_dues, 2),
+        "customer": cust,
+        "unpaid_invoices": unpaid_invoices
+    }
+
+
+@app.post("/api/job-cards/{job_id}/regenerate-invoice")
+async def regenerate_job_invoice(job_id: str):
+    """Regenerate existing linked invoice for a job card with updated charges, keeping same invoice number"""
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT * FROM invoices WHERE job_card_id = ? AND payment_status != 'CANCELLED' ORDER BY created_at DESC LIMIT 1", (job_id,))
+    inv = cursor.fetchone()
+    if not inv:
+        conn.close()
+        raise HTTPException(status_code=404, detail="No linked invoice found for this job card to regenerate. Generate a new bill first.")
+        
+    sync_job_card_to_invoice(cursor, job_id)
+    conn.commit()
+    
+    cursor.execute("SELECT * FROM invoices WHERE id = ?", (inv["id"],))
+    updated_inv = dict(cursor.fetchone())
+    conn.close()
+    
+    return {
+        "success": True,
+        "invoice_id": updated_inv["id"],
+        "invoice_number": updated_inv["invoice_number"],
+        "grand_total": updated_inv["grand_total"],
+        "message": f"Bill #{updated_inv['invoice_number']} updated successfully with revised Job Card charges!"
+    }
+
+
+@app.post("/api/job-cards/{job_id}/generate-proforma")
+async def generate_job_proforma(job_id: str):
+    """Generate or update Proforma Service Estimate (Pre-Bill) for a job card"""
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT * FROM job_cards WHERE id = ?", (job_id,))
+    j_row = cursor.fetchone()
+    if not j_row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Job Card not found")
+    job = dict(j_row)
+    
+    cursor.execute("SELECT * FROM job_items WHERE job_card_id = ?", (job_id,))
+    job_items = [dict(r) for r in cursor.fetchall()]
+    
+    workshop = get_current_workshop()
+    vpa = workshop.get("upi_id", "sparkautoworkshop@okaxis")
+    now_ist = get_ist_now_str()
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    
+    cursor.execute("SELECT * FROM invoices WHERE job_card_id = ? AND invoice_type = 'PROFORMA' LIMIT 1", (job_id,))
+    existing_prof = cursor.fetchone()
+    
+    subtotal_labor = sum(float(ji["unit_price"] or 0) * int(ji["quantity"] or 1) for ji in job_items if ji.get("item_type") == "LABOR")
+    subtotal_parts = sum(float(ji["unit_price"] or 0) * int(ji["quantity"] or 1) for ji in job_items if ji.get("item_type") == "PART")
+    taxable_subtotal = subtotal_labor + subtotal_parts
+    tax_total = sum((float(ji["unit_price"] or 0) * int(ji["quantity"] or 1)) * (float(ji.get("tax_rate") or 0.0) / 100.0) for ji in job_items)
+    tax_total = round(tax_total, 2)
+    grand_total = round(taxable_subtotal + tax_total, 2)
+    
+    if existing_prof:
+        prof_id = existing_prof["id"]
+        prof_number = existing_prof["invoice_number"]
+        upi_link = generate_upi_link(vpa, workshop.get("name", "Auto Workshop"), grand_total, f"Est_{prof_number}")
+        
+        cursor.execute("DELETE FROM invoice_items WHERE invoice_id = ?", (prof_id,))
+        cursor.execute("""
+        UPDATE invoices SET
+            subtotal_labor = ?, subtotal_parts = ?, taxable_subtotal = ?,
+            tax_total = ?, grand_total = ?, balance_due = ?, upi_payment_link = ?, updated_at = ?
+        WHERE id = ?
+        """, (subtotal_labor, subtotal_parts, taxable_subtotal, tax_total, grand_total, grand_total, upi_link, now_ist, prof_id))
+    else:
+        cursor.execute("SELECT COUNT(*) FROM invoices WHERE invoice_type = 'PROFORMA'")
+        cnt = cursor.fetchone()[0] + 1
+        prof_number = f"EST-2026-{cnt:03d}"
+        prof_id = f"prof_{uuid.uuid4().hex[:8]}"
+        upi_link = generate_upi_link(vpa, workshop.get("name", "Auto Workshop"), grand_total, f"Est_{prof_number}")
+        
+        cursor.execute("""
+        INSERT INTO invoices (
+            id, invoice_number, invoice_date, invoice_type, job_card_id, job_number,
+            customer_name, customer_phone, vehicle_reg_no, vehicle_make_model, odometer,
+            subtotal_labor, subtotal_parts, taxable_subtotal, tax_total, grand_total,
+            amount_paid, balance_due, payment_status, payment_mode, upi_payment_link, created_at
+        ) VALUES (?, ?, ?, 'PROFORMA', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.0, ?, 'UNPAID', 'UPI', ?, ?)
+        """, (
+            prof_id, prof_number, today_str, job_id, job["job_number"],
+            job["customer_name"], job["customer_phone"], job["vehicle_reg_no"], job["vehicle_make_model"], job.get("odometer", 0),
+            subtotal_labor, subtotal_parts, taxable_subtotal, tax_total, grand_total, grand_total, upi_link, now_ist
+        ))
+        
+    for ji in job_items:
+        ii_id = f"ii_{uuid.uuid4().hex[:8]}"
+        qty = int(ji.get("quantity") or 1)
+        u_price = float(ji.get("unit_price") or 0.0)
+        t_rate = float(ji.get("tax_rate") or 0.0)
+        line_base = round(qty * u_price, 2)
+        line_tot = round(line_base + (line_base * t_rate / 100.0), 2)
+        cursor.execute("""
+        INSERT INTO invoice_items (id, invoice_id, item_type, item_id, name, barcode, hsn_sac, quantity, unit_price, tax_rate, taxable_amount, total_price)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (ii_id, prof_id, ji.get("item_type"), ji.get("item_id"), ji.get("name"), ji.get("barcode"), ji.get("hsn_code") or "8536", qty, u_price, t_rate, line_base, line_tot))
+        
+    db.log_audit("GENERATE_PROFORMA", "invoices", prof_id, f"Generated proforma estimate #{prof_number} (₹{grand_total:.2f}) for job {job['job_number']}", cursor=cursor)
+    conn.commit()
+    conn.close()
+    
+    return {
+        "success": True,
+        "proforma_id": prof_id,
+        "proforma_number": prof_number,
+        "grand_total": grand_total,
+        "message": f"Proforma Estimate #{prof_number} generated successfully!"
+    }
+
+
+@app.get("/api/proforma/{proforma_id}/pdf")
+async def download_proforma_pdf(proforma_id: str):
+    """Generate printable PDF for Proforma Service Estimate"""
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM invoices WHERE id = ? OR job_card_id = ? ORDER BY created_at DESC LIMIT 1", (proforma_id, proforma_id))
+    prof_row = cursor.fetchone()
+    if not prof_row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Proforma Estimate not found")
+    proforma = dict(prof_row)
+    
+    cursor.execute("SELECT * FROM invoice_items WHERE invoice_id = ?", (proforma["id"],))
+    proforma["items"] = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    
+    workshop = get_current_workshop()
+    pdf_bytes = generate_proforma_pdf_bytes(proforma, workshop)
+    
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename=Proforma_{proforma.get('invoice_number') or proforma_id}.pdf"}
+    )
+
+
+@app.get("/api/job-cards/{job_id}/whatsapp-proforma-link")
+async def get_job_proforma_whatsapp_link(request: Request, job_id: str):
+    """Generate WhatsApp Work Complete message with Proforma Estimate & UPI/Bank details"""
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM job_cards WHERE id = ?", (job_id,))
+    job_row = cursor.fetchone()
+    if not job_row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Job Card not found")
+    job = dict(job_row)
+    
+    cursor.execute("SELECT * FROM invoices WHERE job_card_id = ? ORDER BY created_at DESC LIMIT 1", (job_id,))
+    prof_row = cursor.fetchone()
+    conn.close()
+    
+    if not prof_row:
+        await generate_job_proforma(job_id)
+        conn = db.get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM invoices WHERE job_card_id = ? ORDER BY created_at DESC LIMIT 1", (job_id,))
+        prof_row = cursor.fetchone()
+        conn.close()
+        
+    proforma = dict(prof_row)
+    workshop = get_current_workshop()
+    base_url = get_base_url(request)
+    public_url = f"{base_url}/view/proforma/{proforma['id']}"
+    lang = workshop.get("language", "en")
+    
+    msg = format_proforma_whatsapp_message(
+        workshop_name=workshop["name"],
+        proforma_number=proforma["invoice_number"],
+        customer_name=job["customer_name"],
+        vehicle_reg_no=job["vehicle_reg_no"],
+        vehicle_make_model=job["vehicle_make_model"],
+        grand_total=proforma["grand_total"],
+        public_proforma_url=public_url,
+        upi_payment_link=proforma.get("upi_payment_link", ""),
+        bank_name=workshop.get("bank_name", "State Bank of India"),
+        bank_account_no=workshop.get("bank_account_no", "39876543210"),
+        bank_ifsc=workshop.get("bank_ifsc", "SBIN0001234"),
+        upi_id=workshop.get("upi_id", "sparkautoworkshop@okaxis"),
+        workshop_phone=workshop["phone"],
+        lang=lang
+    )
+    
+    wa_url = generate_wa_me_url(job["customer_phone"], msg)
+    return {"whatsapp_url": wa_url, "message": msg}
+
+
+@app.post("/api/job-cards/{job_id}/convert-proforma-to-invoice")
+async def convert_proforma_to_final_tax_invoice(job_id: str, payment_mode: str = Form("UPI"), amount_paid: Optional[float] = Form(None)):
+    """Convert Proforma Estimate to official Tax Invoice (INV-2026-XXX) and mark as PAID"""
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT * FROM invoices WHERE job_card_id = ? ORDER BY created_at DESC LIMIT 1", (job_id,))
+    prof_row = cursor.fetchone()
+    if not prof_row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="No Proforma Estimate or linked bill found to convert.")
+        
+    prof = dict(prof_row)
+    now_ist = get_ist_now_str()
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    
+    if prof["invoice_type"] != "PROFORMA":
+        new_tax_inv_no = prof["invoice_number"]
+    else:
+        cursor.execute("SELECT COUNT(*) FROM invoices WHERE invoice_type != 'PROFORMA'")
+        cnt = cursor.fetchone()[0] + 1
+        new_tax_inv_no = f"INV-2026-{cnt:03d}"
+    
+    g_total = float(prof["grand_total"] or 0.0)
+    paid = float(amount_paid) if amount_paid is not None else g_total
+    bal_due = max(0.0, g_total - paid)
+    pay_status = "PAID" if bal_due <= 0 else ("PARTIAL" if paid > 0 else "UNPAID")
+    
+    cursor.execute("""
+    UPDATE invoices SET
+        invoice_number = ?, invoice_type = 'JOB_SERVICE', payment_status = ?,
+        amount_paid = ?, balance_due = ?, payment_mode = ?, updated_at = ?
+    WHERE id = ?
+    """, (new_tax_inv_no, pay_status, paid, bal_due, payment_mode, now_ist, prof["id"]))
+    
+    cursor.execute("UPDATE job_cards SET status = 'COMPLETED', completed_at = COALESCE(completed_at, ?) WHERE id = ?", (now_ist, job_id))
+    
+    if paid > 0:
+        pay_id = f"pay_{uuid.uuid4().hex[:8]}"
+        cursor.execute("""
+        INSERT INTO payments (id, invoice_id, amount, payment_mode, payment_date, notes, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (pay_id, prof["id"], paid, payment_mode, today_str, f"Payment for Tax Inv {new_tax_inv_no}", now_ist))
+        
+    db.log_audit("CONVERT_PROFORMA_TO_TAX_INVOICE", "invoices", prof["id"], f"Converted Proforma to Tax Invoice #{new_tax_inv_no} (Paid: ₹{paid:.2f})", cursor=cursor)
+    conn.commit()
+    conn.close()
+    
+    return {
+        "success": True,
+        "invoice_id": prof["id"],
+        "invoice_number": new_tax_inv_no,
+        "payment_status": pay_status,
+        "message": f"Tax Invoice #{new_tax_inv_no} generated successfully!"
+    }
+
 
 @app.get("/api/job-cards/{job_id}/create-invoice")
 @app.post("/api/job-cards/{job_id}/create-invoice")

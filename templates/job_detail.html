@@ -23,27 +23,44 @@
         </div>
 
         <div class="flex flex-wrap items-center gap-2">
-            <!-- Send WhatsApp Update -->
-            <button onclick="sendJobStatusWhatsApp('{{ job.id }}')" class="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition shadow flex items-center gap-1.5">
-                <span>💬 WhatsApp Status</span>
+            <!-- Edit Job Card Button -->
+            <button type="button" id="btn-edit-job-card" onclick="promptEditJobCard('{{ job.id }}')" class="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl transition shadow flex items-center gap-1.5">
+                <span>✏️ Edit Job Card</span>
+            </button>
+
+            <!-- Save Job Card Changes Button (Visible when editing) -->
+            <button type="button" id="btn-save-job-card" onclick="saveJobCardChanges()" class="hidden px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition shadow flex items-center gap-1.5">
+                <span>💾 Save Job Card</span>
+            </button>
+
+            <!-- Work Complete & Send Proforma WhatsApp -->
+            <button onclick="sendJobProformaWhatsApp('{{ job.id }}')" class="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition shadow flex items-center gap-1.5" title="Generate Proforma bill with dynamic UPI QR & send WhatsApp">
+                <span>💬 WhatsApp Work Complete & Estimate</span>
+            </button>
+
+            <!-- Download / Print Proforma PDF -->
+            <button onclick="generateAndDownloadProforma('{{ job.id }}')" class="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl transition shadow flex items-center gap-1.5">
+                <span>📄 Proforma Estimate</span>
             </button>
             
             {% if linked_invoice %}
-            <!-- View / Print existing PDF bill -->
-            <a href="/api/invoices/{{ linked_invoice.id }}/pdf" target="_blank" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-xl transition shadow flex items-center gap-1.5">
+            <!-- View / Print existing Tax Invoice PDF -->
+            <a href="/api/invoices/{{ linked_invoice.id }}/pdf" target="_blank" class="px-3.5 py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-xl transition shadow flex items-center gap-1.5">
                 <i data-lucide="printer" class="w-4 h-4"></i>
-                <span>Print PDF Bill (#{{ linked_invoice.invoice_number }})</span>
+                <span>Print Tax Invoice (#{{ linked_invoice.invoice_number }})</span>
             </a>
-            <!-- Edit Existing Bill -->
-            <a href="/billing?edit_invoice={{ linked_invoice.id }}" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl transition shadow flex items-center gap-1.5">
-                <i data-lucide="edit" class="w-4 h-4"></i>
-                <span>Edit Bill (#{{ linked_invoice.invoice_number }})</span>
-            </a>
+            <!-- Regenerate Invoice with modified Job Card items (same Inv #) -->
+            <button onclick="regenerateJobInvoice('{{ job.id }}')" class="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl transition shadow flex items-center gap-1.5" title="Regenerate bill preserving existing invoice number #{{ linked_invoice.invoice_number }}">
+                <span>🔄 Regenerate Bill (#{{ linked_invoice.invoice_number }})</span>
+            </button>
             {% else %}
-            <!-- Generate Final Invoice Bill (Direct to POS pre-filled) -->
-            <a href="/billing?from_job={{ job.id }}" class="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white font-bold text-xs rounded-xl transition shadow flex items-center gap-1.5">
-                <i data-lucide="receipt" class="w-4 h-4"></i>
-                <span>Generate Bill & Print</span>
+            <!-- Convert Proforma / Job to Final Tax Invoice -->
+            <button onclick="openModal('convert-to-tax-invoice-modal')" class="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold text-xs rounded-xl transition shadow flex items-center gap-1.5">
+                <span>💳 Record Payment & Tax Invoice</span>
+            </button>
+            <!-- Direct to POS pre-filled -->
+            <a href="/billing?from_job={{ job.id }}" class="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs rounded-xl transition border border-slate-200 flex items-center gap-1.5">
+                <span>⚡ Open POS Billing</span>
             </a>
             {% endif %}
         </div>
@@ -172,10 +189,10 @@
             {% endif %}
             
             <!-- Update Diagnosis & Status Form -->
-            <form action="/api/job-cards/{{ job.id }}/update-diagnosis" method="POST" class="pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-end gap-3">
+            <form id="diagnosis-form" action="/api/job-cards/{{ job.id }}/update-diagnosis" method="POST" class="pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-end gap-3">
                 <div class="flex-1 w-full">
                     <label class="block text-[11px] font-bold text-slate-700 mb-1">Technician Diagnosis & Inspection Notes:</label>
-                    <input type="text" name="diagnosis_notes" value="{{ job.diagnosis_notes or '' }}" placeholder="e.g. Starter solenoid kit changed. Voltage tested 14.2V." class="w-full text-xs px-3 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500">
+                    <input type="text" id="diagnosis-input" name="diagnosis_notes" value="{{ job.diagnosis_notes or '' }}" placeholder="e.g. Starter solenoid kit changed. Voltage tested 14.2V." class="w-full text-xs px-3 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500">
                 </div>
                 <button type="submit" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded-lg transition whitespace-nowrap">
                     Save Notes
@@ -189,17 +206,17 @@
         {% if linked_invoice %}
         <div id="job-card-lock-banner" class="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
             <div class="flex items-center gap-3">
-                <span class="w-9 h-9 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center font-black text-lg shrink-0">🔒</span>
+                <span id="lock-banner-icon" class="w-9 h-9 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center font-black text-lg shrink-0">🔒</span>
                 <div>
                     <div class="flex items-center gap-2">
-                        <h4 class="font-extrabold text-xs uppercase tracking-wider text-amber-950">Job Card Billed (#{{ linked_invoice.invoice_number }})</h4>
-                        <span class="text-[10px] bg-amber-200 text-amber-950 px-2 py-0.5 rounded font-bold uppercase">Locked</span>
+                        <h4 id="lock-banner-title" class="font-extrabold text-xs uppercase tracking-wider text-amber-950">Job Card Billed (#{{ linked_invoice.invoice_number }})</h4>
+                        <span id="lock-banner-tag" class="text-[10px] bg-amber-200 text-amber-950 px-2 py-0.5 rounded font-bold uppercase">Locked</span>
                     </div>
-                    <p class="text-xs text-amber-800">This Job Card has already been billed. Modifying items requires Master Security PIN verification.</p>
+                    <p id="lock-banner-desc" class="text-xs text-amber-800">This Job Card has been billed. Click "Edit Job Card" above to unlock with Master PIN. After editing, click "Regenerate Bill" to update Tax Invoice #{{ linked_invoice.invoice_number }}.</p>
                 </div>
             </div>
-            <button type="button" id="btn-unlock-job-card" onclick="promptUnlockJobCard('{{ job.id }}')" class="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow transition flex items-center gap-1.5 shrink-0">
-                <span>🔑 Unlock Job Card for Edit</span>
+            <button type="button" onclick="promptEditJobCard('{{ job.id }}')" class="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow transition flex items-center gap-1.5 shrink-0">
+                <span>✏️ Edit Job Card</span>
             </button>
         </div>
         {% endif %}
@@ -293,6 +310,95 @@
                 <span class="text-xs text-slate-500 block">Estimated Grand Total (Incl. GST):</span>
                 <span class="text-2xl font-black text-emerald-700 font-mono">₹{{ "{:,.2f}".format(grand_total) }}</span>
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Record Payment & Generate Tax Invoice -->
+<div id="convert-to-tax-invoice-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+            <h3 class="font-bold text-slate-900 text-sm">💳 Record Payment & Generate Tax Invoice</h3>
+            <button onclick="closeModal('convert-to-tax-invoice-modal')" class="text-slate-400 hover:text-slate-700 text-lg font-bold">✕</button>
+        </div>
+        <form onsubmit="submitConvertProformaToInvoice(event)" class="mt-4 space-y-4 text-xs">
+            <div class="p-3 bg-emerald-50 rounded-2xl border border-emerald-200 text-emerald-900">
+                <span class="block text-[11px] font-bold uppercase tracking-wider text-emerald-800">Grand Total Payable:</span>
+                <span class="text-2xl font-black text-emerald-700 font-mono">₹{{ "{:,.2f}".format(grand_total) }}</span>
+            </div>
+            <div>
+                <label class="block font-bold text-slate-800 mb-1">Payment Method</label>
+                <select id="convert-pay-mode" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none text-xs font-bold">
+                    <option value="UPI">📱 UPI / GPay / PhonePe</option>
+                    <option value="CASH">💵 Cash In Hand</option>
+                    <option value="BANK_TRANSFER">🏦 Bank Transfer</option>
+                    <option value="CARD">💳 Card</option>
+                </select>
+            </div>
+            <div>
+                <label class="block font-bold text-slate-800 mb-1">Amount Received (₹)</label>
+                <input type="number" step="0.01" id="convert-pay-amount" value="{{ grand_total }}" required class="w-full px-3 py-2 rounded-xl border border-slate-200 font-bold font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+            </div>
+            <div class="flex justify-end gap-2 pt-2">
+                <button type="button" onclick="closeModal('convert-to-tax-invoice-modal')" class="px-3 py-1.5 text-slate-600 font-bold">Cancel</button>
+                <button type="submit" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow">Generate Official Tax Invoice ⚡</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal: Previous Customer Dues Warning Popup -->
+<div id="dues-warning-modal" class="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-amber-200 space-y-4">
+        <div class="flex items-center gap-3 border-b border-slate-100 pb-3">
+            <div class="w-10 h-10 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center font-black text-xl shrink-0">
+                ⚠️
+            </div>
+            <div>
+                <h3 class="font-extrabold text-slate-900 text-base">Previous Customer Dues Warning!</h3>
+                <p class="text-xs text-slate-500">Customer has unpaid balance in workshop Khata</p>
+            </div>
+        </div>
+
+        <div class="space-y-2 text-xs">
+            <div class="p-3 bg-rose-50 rounded-2xl border border-rose-200 space-y-1 text-slate-800">
+                <div class="flex justify-between font-medium">
+                    <span>Customer:</span>
+                    <b class="text-slate-900">{{ job.customer_name }}</b>
+                </div>
+                <div class="flex justify-between font-medium">
+                    <span>Vehicle Reg:</span>
+                    <b class="font-mono text-slate-900">{{ job.vehicle_reg_no }}</b>
+                </div>
+                <div class="flex justify-between border-t border-rose-200/60 pt-1 text-rose-700 font-bold">
+                    <span>Previous Unpaid Dues:</span>
+                    <span id="dues-modal-prev-amount" class="font-mono text-sm">₹0.00</span>
+                </div>
+            </div>
+
+            <div class="p-3 bg-slate-50 rounded-2xl border border-slate-200 space-y-1">
+                <div class="flex justify-between text-slate-600">
+                    <span>Current Job Charges:</span>
+                    <span id="dues-modal-curr-amount" class="font-bold font-mono text-slate-900">₹{{ "{:,.2f}".format(grand_total) }}</span>
+                </div>
+                <div class="flex justify-between border-t border-slate-200 pt-1 text-slate-900 font-extrabold text-sm">
+                    <span>Total Outstanding Payable:</span>
+                    <span id="dues-modal-total-amount" class="font-mono text-emerald-700 text-base">₹0.00</span>
+                </div>
+            </div>
+        </div>
+
+        <p class="text-[11px] text-slate-500 leading-snug">
+            Please notify customer about previous pending balance of <b id="dues-modal-prev-text" class="text-rose-600">₹0</b> when requesting payment or sending estimate.
+        </p>
+
+        <div class="flex flex-col gap-2 pt-2">
+            <button type="button" id="btn-confirm-dues-proceed" onclick="confirmDuesAction()" class="w-full py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold text-xs rounded-xl shadow transition text-center">
+                Proceed & Send Proforma Estimate
+            </button>
+            <button type="button" onclick="closeModal('dues-warning-modal')" class="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition text-center">
+                Cancel
+            </button>
         </div>
     </div>
 </div>
@@ -415,6 +521,8 @@
 
 {% block scripts %}
 <script>
+    let pendingDuesAction = null;
+
     function calcLaborPreview() {
         const rate = parseFloat(document.getElementById('labor-base-price')?.value || 0);
         const taxRate = parseFloat(document.getElementById('labor-tax-rate')?.value || 18);
@@ -442,7 +550,7 @@
     }
 
     // Auto-update price and tax rate when part select changes
-    document.getElementById('job-part-select').addEventListener('change', function() {
+    document.getElementById('job-part-select')?.addEventListener('change', function() {
         const selected = this.options[this.selectedIndex];
         const price = selected.getAttribute('data-price');
         const taxRate = selected.getAttribute('data-tax-rate');
@@ -456,7 +564,7 @@
     });
 
     // Barcode listener callback for this screen
-    window.barcodeScanner.setScanCallback((item) => {
+    window.barcodeScanner?.setScanCallback((item) => {
         const select = document.getElementById('job-part-select');
         for (let i = 0; i < select.options.length; i++) {
             if (select.options[i].value === item.id) {
@@ -472,80 +580,183 @@
         }
     });
 
-    async function sendJobStatusWhatsApp(jobId) {
-        try {
-            const resp = await fetch(`/api/job-cards/${jobId}/whatsapp-link`);
-            const data = await resp.json();
-            if (data.whatsapp_url) {
-                window.open(data.whatsapp_url, '_blank');
-            } else {
-                showToast("Could not generate WhatsApp message", "error");
+    async function promptEditJobCard(jobId) {
+        const isBilled = {% if linked_invoice %}true{% else %}false{% endif %};
+        if (isBilled) {
+            const pin = prompt("🔐 Master PIN Required (default: 1234) to edit billed Job Card:");
+            if (!pin) return;
+
+            try {
+                const resp = await fetch(`/api/job-cards/${jobId}/verify-edit-pin`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pin: pin })
+                });
+                const data = await resp.json();
+                if (resp.ok && data.success) {
+                    sessionStorage.setItem('editing_job_' + jobId, 'true');
+                    applyJobCardEditState();
+                    showToast("🔓 Job Card unlocked for editing! Modifying items will preserve Invoice number.", "success");
+                } else {
+                    showToast(data.detail || "Invalid Master Security PIN", "error");
+                }
+            } catch (e) {
+                showToast("Error verifying Master PIN: " + e, "error");
             }
-        } catch (e) {
-            showToast("WhatsApp error: " + e, "error");
+        } else {
+            sessionStorage.setItem('editing_job_' + jobId, 'true');
+            applyJobCardEditState();
+            showToast("✏️ Job Card edit mode enabled!", "info");
         }
     }
 
-    async function promptUnlockJobCard(jobId) {
-        const pin = prompt("🔐 Enter Master Security PIN (default: 1234) to unlock this billed Job Card for modification:");
-        if (!pin) return;
-
-        try {
-            const resp = await fetch(`/api/job-cards/${jobId}/verify-edit-pin`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ pin: pin })
-            });
-            const data = await resp.json();
-            if (resp.ok && data.success) {
-                sessionStorage.setItem('unlocked_job_' + jobId, 'true');
-                applyJobCardUnlockedState();
-                showToast("🔓 Job Card unlocked! Modifications will automatically update linked invoice.", "success");
-            } else {
-                showToast(data.detail || "Invalid Master Security PIN", "error");
-            }
-        } catch (e) {
-            showToast("Error verifying PIN: " + e, "error");
-        }
+    function saveJobCardChanges() {
+        const diagForm = document.getElementById('diagnosis-form');
+        if (diagForm) diagForm.submit();
+        else showToast("Saved Job Card changes!", "success");
     }
 
-    function applyJobCardUnlockedState() {
+    function applyJobCardEditState() {
         const isBilled = {% if linked_invoice %}true{% else %}false{% endif %};
         const jobId = "{{ job.id }}";
-        const isUnlocked = !isBilled || sessionStorage.getItem('unlocked_job_' + jobId) === 'true';
+        const isEditing = !isBilled || sessionStorage.getItem('editing_job_' + jobId) === 'true';
 
         const actionControls = document.getElementById('job-items-action-controls');
         if (actionControls) {
-            if (isUnlocked) actionControls.classList.remove('hidden');
+            if (isEditing) actionControls.classList.remove('hidden');
             else actionControls.classList.add('hidden');
         }
 
+        const saveBtn = document.getElementById('btn-save-job-card');
+        if (saveBtn) {
+            if (isEditing) saveBtn.classList.remove('hidden');
+            else saveBtn.classList.add('hidden');
+        }
+
         document.querySelectorAll('.item-delete-btn').forEach(btn => {
-            if (isUnlocked) btn.classList.remove('hidden');
+            if (isEditing) btn.classList.remove('hidden');
             else btn.classList.add('hidden');
         });
 
         const lockBanner = document.getElementById('job-card-lock-banner');
-        if (lockBanner && isUnlocked && isBilled) {
+        if (lockBanner && isEditing && isBilled) {
             lockBanner.className = "p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs";
-            lockBanner.innerHTML = `
-                <div class="flex items-center gap-3">
-                    <span class="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-black text-lg shrink-0">🔓</span>
-                    <div>
-                        <div class="flex items-center gap-2">
-                            <h4 class="font-extrabold text-xs uppercase tracking-wider text-emerald-950">Job Card Unlocked (Editing Active)</h4>
-                            <span class="text-[10px] bg-emerald-200 text-emerald-950 px-2 py-0.5 rounded font-bold uppercase">Master PIN Verified</span>
-                        </div>
-                        <p class="text-xs text-emerald-800">Item changes will automatically sync into linked Invoice #{{ linked_invoice.invoice_number or '' }}.</p>
-                    </div>
-                </div>
-                <button type="button" onclick="sessionStorage.removeItem('unlocked_job_${jobId}'); location.reload();" class="px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs rounded-xl shadow transition shrink-0">
-                    🔒 Lock Job Card
-                </button>
-            `;
+            document.getElementById('lock-banner-icon').innerText = "🔓";
+            document.getElementById('lock-banner-title').innerText = "Job Card Unlocked (Editing Active)";
+            document.getElementById('lock-banner-tag').innerText = "Master PIN Verified";
+            document.getElementById('lock-banner-tag').className = "text-[10px] bg-emerald-200 text-emerald-950 px-2 py-0.5 rounded font-bold uppercase";
+            document.getElementById('lock-banner-desc').innerText = "Item modifications active. Click 'Regenerate Bill' above to update Tax Invoice #{{ linked_invoice.invoice_number or '' }}.";
         }
     }
 
-    document.addEventListener("DOMContentLoaded", applyJobCardUnlockedState);
+    async function checkDuesAndExecute(jobId, actionFn) {
+        try {
+            const phone = "{{ job.customer_phone }}";
+            const veh = "{{ job.vehicle_reg_no }}";
+            const resp = await fetch(`/api/customers/dues-check?phone=${encodeURIComponent(phone)}&vehicle_reg=${encodeURIComponent(veh)}`);
+            const data = await resp.json();
+            
+            if (data.has_dues && data.dues_amount > 0) {
+                const currGrand = parseFloat("{{ grand_total }}") || 0;
+                const totalWithDues = data.dues_amount + currGrand;
+                
+                document.getElementById('dues-modal-prev-amount').innerText = '₹' + data.dues_amount.toLocaleString('en-IN', {minimumFractionDigits: 2});
+                document.getElementById('dues-modal-total-amount').innerText = '₹' + totalWithDues.toLocaleString('en-IN', {minimumFractionDigits: 2});
+                document.getElementById('dues-modal-prev-text').innerText = '₹' + data.dues_amount.toLocaleString('en-IN');
+                
+                pendingDuesAction = actionFn;
+                openModal('dues-warning-modal');
+            } else {
+                actionFn();
+            }
+        } catch (e) {
+            console.warn("Dues check error:", e);
+            actionFn();
+        }
+    }
+
+    function confirmDuesAction() {
+        closeModal('dues-warning-modal');
+        if (pendingDuesAction) {
+            pendingDuesAction();
+            pendingDuesAction = null;
+        }
+    }
+
+    async function sendJobProformaWhatsApp(jobId) {
+        checkDuesAndExecute(jobId, async () => {
+            try {
+                showToast("Generating Proforma Estimate & WhatsApp link...", "info");
+                const resp = await fetch(`/api/job-cards/${jobId}/whatsapp-proforma-link`);
+                const data = await resp.json();
+                if (data.whatsapp_url) {
+                    window.open(data.whatsapp_url, '_blank');
+                } else {
+                    showToast("Could not generate WhatsApp message", "error");
+                }
+            } catch (e) {
+                showToast("WhatsApp error: " + e, "error");
+            }
+        });
+    }
+
+    async function generateAndDownloadProforma(jobId) {
+        checkDuesAndExecute(jobId, async () => {
+            try {
+                showToast("Generating Proforma Estimate PDF...", "info");
+                await fetch(`/api/job-cards/${jobId}/generate-proforma`, { method: 'POST' });
+                window.open(`/api/proforma/${jobId}/pdf`, '_blank');
+            } catch (e) {
+                showToast("Proforma PDF error: " + e, "error");
+            }
+        });
+    }
+
+    async function regenerateJobInvoice(jobId) {
+        try {
+            showToast("Updating linked Tax Invoice with revised charges...", "info");
+            const resp = await fetch(`/api/job-cards/${jobId}/regenerate-invoice`, { method: 'POST' });
+            const data = await resp.json();
+            if (resp.ok && data.success) {
+                showToast(data.message || "Bill updated successfully!", "success");
+                setTimeout(() => location.reload(), 1200);
+            } else {
+                showToast(data.detail || "Failed to regenerate bill", "error");
+            }
+        } catch (e) {
+            showToast("Error regenerating bill: " + e, "error");
+        }
+    }
+
+    async function submitConvertProformaToInvoice(e) {
+        e.preventDefault();
+        const jobId = "{{ job.id }}";
+        const mode = document.getElementById('convert-pay-mode').value;
+        const amount = document.getElementById('convert-pay-amount').value;
+
+        try {
+            showToast("Generating official Tax Invoice & recording payment...", "info");
+            const formData = new FormData();
+            formData.append("payment_mode", mode);
+            formData.append("amount_paid", amount);
+
+            const resp = await fetch(`/api/job-cards/${jobId}/convert-proforma-to-invoice`, {
+                method: 'POST',
+                body: formData
+            });
+            const data = await resp.json();
+            if (resp.ok && data.success) {
+                closeModal('convert-to-tax-invoice-modal');
+                showToast(data.message || "Tax Invoice Generated!", "success");
+                setTimeout(() => location.reload(), 1200);
+            } else {
+                showToast(data.detail || "Error converting to Tax Invoice", "error");
+            }
+        } catch (err) {
+            showToast("Error converting: " + err, "error");
+        }
+    }
+
+    document.addEventListener("DOMContentLoaded", applyJobCardEditState);
 </script>
 {% endblock %}

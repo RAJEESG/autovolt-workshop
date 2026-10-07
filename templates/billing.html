@@ -406,6 +406,63 @@
         </form>
     </div>
 </div>
+
+<!-- Modal: Previous Customer Dues Warning Popup for POS -->
+<div id="pos-dues-warning-modal" class="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-amber-200 space-y-4">
+        <div class="flex items-center gap-3 border-b border-slate-100 pb-3">
+            <div class="w-10 h-10 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center font-black text-xl shrink-0">
+                ⚠️
+            </div>
+            <div>
+                <h3 class="font-extrabold text-slate-900 text-base">Previous Customer Dues Warning!</h3>
+                <p class="text-xs text-slate-500">Customer has unpaid balance in workshop Khata</p>
+            </div>
+        </div>
+
+        <div class="space-y-2 text-xs">
+            <div class="p-3 bg-rose-50 rounded-2xl border border-rose-200 space-y-1 text-slate-800">
+                <div class="flex justify-between font-medium">
+                    <span>Customer:</span>
+                    <b id="pos-dues-cust-name" class="text-slate-900">Walk-in Customer</b>
+                </div>
+                <div class="flex justify-between font-medium">
+                    <span>Vehicle Reg:</span>
+                    <b id="pos-dues-veh-no" class="font-mono text-slate-900">-</b>
+                </div>
+                <div class="flex justify-between border-t border-rose-200/60 pt-1 text-rose-700 font-bold">
+                    <span>Previous Unpaid Dues:</span>
+                    <span id="pos-dues-prev-amount" class="font-mono text-sm">₹0.00</span>
+                </div>
+            </div>
+
+            <div class="p-3 bg-slate-50 rounded-2xl border border-slate-200 space-y-1">
+                <div class="flex justify-between text-slate-600">
+                    <span>Current Bill Amount:</span>
+                    <span id="pos-dues-curr-amount" class="font-bold font-mono text-slate-900">₹0.00</span>
+                </div>
+                <div class="flex justify-between border-t border-slate-200 pt-1 text-slate-900 font-extrabold text-sm">
+                    <span>Total Outstanding Payable:</span>
+                    <span id="pos-dues-total-amount" class="font-mono text-emerald-700 text-base">₹0.00</span>
+                </div>
+            </div>
+        </div>
+
+        <p class="text-[11px] text-slate-500 leading-snug">
+            Previous dues of <b id="pos-dues-prev-text" class="text-rose-600">₹0</b> found. How would you like to proceed with this bill?
+        </p>
+
+        <div class="flex flex-col gap-2 pt-2">
+            <button type="button" onclick="confirmPOSDuesProceed()" class="w-full py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold text-xs rounded-xl shadow transition text-center">
+                Proceed with Current Bill Only
+            </button>
+            <button type="button" onclick="closeModal('pos-dues-warning-modal')" class="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition text-center">
+                Cancel Billing
+            </button>
+        </div>
+    </div>
+</div>
+
 <!-- Modal: Live Camera Barcode Scanner -->
 <div id="camera-scanner-modal" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
     <div class="bg-white rounded-3xl max-w-md w-full p-5 shadow-2xl border border-slate-100 space-y-4">
@@ -839,6 +896,14 @@
         recalculateTotals();
     }
 
+    let skipPosDuesCheck = false;
+
+    function confirmPOSDuesProceed() {
+        closeModal('pos-dues-warning-modal');
+        skipPosDuesCheck = true;
+        submitPOSInvoice();
+    }
+
     async function submitPOSInvoice() {
         if (posItems.length === 0) {
             showToast("Please add at least one item to the bill", "warning");
@@ -866,6 +931,28 @@
         });
         const rawGrandTotal = Math.max(0, (laborTotal + partsTotal + taxTotal) - discount);
         const roundedGrandTotal = Math.round(rawGrandTotal);
+
+        // Check previous customer dues warning modal before billing
+        if (!skipPosDuesCheck && customerPhone && customerPhone !== "9876543210") {
+            try {
+                const duesResp = await fetch(`/api/customers/dues-check?phone=${encodeURIComponent(customerPhone)}&vehicle_reg=${encodeURIComponent(vehicleReg)}`);
+                const duesData = await duesResp.json();
+                if (duesData.has_dues && duesData.dues_amount > 0) {
+                    const totalWithDues = duesData.dues_amount + roundedGrandTotal;
+                    document.getElementById('pos-dues-cust-name').innerText = customerName;
+                    document.getElementById('pos-dues-veh-no').innerText = vehicleReg || 'Counter Sale';
+                    document.getElementById('pos-dues-prev-amount').innerText = '₹' + duesData.dues_amount.toLocaleString('en-IN', {minimumFractionDigits: 2});
+                    document.getElementById('pos-dues-curr-amount').innerText = '₹' + roundedGrandTotal.toLocaleString('en-IN', {minimumFractionDigits: 2});
+                    document.getElementById('pos-dues-total-amount').innerText = '₹' + totalWithDues.toLocaleString('en-IN', {minimumFractionDigits: 2});
+                    document.getElementById('pos-dues-prev-text').innerText = '₹' + duesData.dues_amount.toLocaleString('en-IN');
+                    openModal('pos-dues-warning-modal');
+                    return;
+                }
+            } catch (e) {
+                console.warn("POS Dues check error:", e);
+            }
+        }
+        skipPosDuesCheck = false;
 
         const amountPaidInput = document.getElementById('pos-amount-paid').value.trim();
         const amountPaid = amountPaidInput !== "" ? parseFloat(amountPaidInput) : (paymentMode === 'KHATA_CREDIT' ? 0.0 : roundedGrandTotal);

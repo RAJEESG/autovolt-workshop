@@ -263,3 +263,112 @@ This is a gentle reminder regarding your outstanding workshop balance of *₹{du
 
 📞 *Questions? Call:* {workshop_phone}
 _Thank you!_"""
+
+def format_proforma_whatsapp_message(
+    workshop_name: str,
+    proforma_number: str,
+    customer_name: str,
+    vehicle_reg_no: str,
+    vehicle_make_model: str,
+    grand_total: float,
+    public_proforma_url: str,
+    upi_payment_link: str,
+    bank_name: str,
+    bank_account_no: str,
+    bank_ifsc: str,
+    upi_id: str,
+    workshop_phone: str,
+    language: str = "en",
+    lang: Optional[str] = None
+) -> str:
+    """Generate professional Proforma Estimate WhatsApp message with Bank & UPI QR payment details"""
+    target_lang = (lang or language or "en").lower()
+
+    if target_lang == "ml":
+        msg = f"""⚡ *{workshop_name}* ⚡
+_Auto Electrical Service Estimate_
+
+പ്രിയമുള്ള *{customer_name}*,
+നിങ്ങളുടെ വാഹനം *{vehicle_reg_no}* ({vehicle_make_model})-ന്റെ ഇലക്ട്രിക്കൽ ജോലികൾ പൂർത്തിയായിരിക്കുന്നു! 🛠️
+
+📄 *PROFORMA ESTIMATE AMOUNT:* *₹{grand_total:,.2f}*
+📌 *Estimate No:* #{proforma_number}
+
+🔗 *View & Download Estimate PDF:*
+{public_proforma_url}
+
+💳 *BANK & UPI PAYMENT DETAILS:*
+• Bank: *{bank_name}*
+• A/c No: *{bank_account_no}*
+• IFSC Code: *{bank_ifsc}*
+• UPI ID: *{upi_id}*
+"""
+        if upi_payment_link:
+            msg += f"""
+📱 *Pay Now via GooglePay / PhonePe:*
+{upi_payment_link}
+"""
+        msg += f"""
+പണം അടച്ച ശേഷം വാഹന സർവീസ് ബിൽ (Tax Invoice) ലഭിക്കുന്നതാണ്.
+📞 *Contact Workshop:* {workshop_phone}
+_Thank you for choosing {workshop_name}!_"""
+        return msg
+
+    elif target_lang == "ta":
+        msg = f"""⚡ *{workshop_name}* ⚡
+_வாகன மின் சேவை மதிப்பீடு (Estimate)_
+
+வணக்கம் *{customer_name}*,
+உங்கள் வாகனம் *{vehicle_reg_no}* ({vehicle_make_model})-ன் வேலைகள் நிறைவடைந்தன! 🛠️
+
+📄 *மதிப்பீட்டுத் தொகை (Estimate):* *₹{grand_total:,.2f}*
+📌 *எண்:* #{proforma_number}
+
+🔗 *PDF பதிவிறக்க:*
+{public_proforma_url}
+
+💳 *வங்கி & UPI கணக்கு వివరங்கள்:*
+• Bank: *{bank_name}*
+• A/c No: *{bank_account_no}*
+• IFSC: *{bank_ifsc}*
+• UPI ID: *{upi_id}*
+"""
+        if upi_payment_link:
+            msg += f"""
+📱 *GPay / PhonePe மூலம் செலுத்த:*
+{upi_payment_link}
+"""
+        msg += f"""
+📞 *தொடர்புக்கு:* {workshop_phone}
+_நன்றி!_"""
+        return msg
+
+    else:
+        msg = f"""⚡ *{workshop_name}* ⚡
+_Auto Electrical & Electronic Service Center_
+
+Dear *{customer_name}*,
+Your vehicle *{vehicle_reg_no}* ({vehicle_make_model}) electrical service & repairs are COMPLETED! 🛠️
+
+📄 *PROFORMA ESTIMATE:* *₹{grand_total:,.2f}*
+📌 *Estimate No:* #{proforma_number}
+
+🔗 *View & Download Estimate PDF:*
+{public_proforma_url}
+
+💳 *BANK & UPI PAYMENT DETAILS:*
+• Bank: *{bank_name}*
+• Account No: *{bank_account_no}*
+• IFSC: *{bank_ifsc}*
+• UPI ID: *{upi_id}*
+"""
+        if upi_payment_link:
+            msg += f"""
+📱 *Pay Now via Google Pay / PhonePe:*
+{upi_payment_link}
+"""
+        msg += f"""
+Please complete payment via UPI QR or Bank Transfer to collect your vehicle & receive the final Tax Invoice.
+📞 *Contact Workshop:* {workshop_phone}
+_Thank you for choosing {workshop_name}!_"""
+        return msg
