@@ -7,6 +7,7 @@ if sys.platform == "win32":
 from fastapi.testclient import TestClient
 import database as db
 import otp_helper
+import auth_helper
 
 # Import both applications
 from main import app as client_app
@@ -28,8 +29,8 @@ def run_tests():
     assert r_unauth.status_code == 303 and r_unauth.headers.get("location") == "/login"
     print("  ✅ HQ Unauthenticated user redirected to /login (Status 303)", flush=True)
 
-    # Set authenticated vendor session
-    hq_client.cookies.set("vendor_session", "admin")
+    # Set authenticated vendor session with HMAC signature
+    hq_client.cookies.set("vendor_session", auth_helper.create_signed_session_cookie("admin"))
 
     # Test HQ Dashboard
     r_dash = hq_client.get("/")
@@ -169,7 +170,7 @@ def run_tests():
     print("    - POST /verify-otp -> Password Reset and Login Prompt Verified", flush=True)
 
     # Set authenticated cookie on workshop client
-    workshop_client.cookies.set("session_user", "admin")
+    workshop_client.cookies.set("session_user", auth_helper.create_signed_session_cookie("admin"))
 
     # Test Billing page contains dynamic GST slabs dropdown
     r_billing = workshop_client.get("/billing")

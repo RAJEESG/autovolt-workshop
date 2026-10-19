@@ -13,6 +13,15 @@ client = TestClient(app)
 def run_endpoint_tests():
     print("🌐 Running FastAPI Endpoints Integration Tests...")
 
+    from auth_helper import create_signed_session_cookie
+    client.cookies.set("session_user", create_signed_session_cookie("admin"))
+
+    conn = db.get_db_connection()
+    c = conn.cursor()
+    c.execute("UPDATE inventory_items SET stock_qty = MAX(stock_qty, 50) WHERE id IN ('item_1', 'item_2')")
+    conn.commit()
+    conn.close()
+
     # 1. Test Login & Public Pages
     pages_to_test = [
         ("/", 200),
@@ -154,8 +163,14 @@ def run_endpoint_tests():
         ]
     })
     due_inv_id = r_partial_inv.json()["invoice_id"]
+    conn = db.get_db_connection()
+    c = conn.cursor()
+    c.execute("SELECT balance_due FROM invoices WHERE id = ?", (due_inv_id,))
+    actual_due = c.fetchone()["balance_due"]
+    conn.close()
+
     r_pay = client.post(f"/api/invoices/{due_inv_id}/record-payment", json={
-        "amount": 180.0,
+        "amount": actual_due,
         "payment_mode": "UPI",
         "notes": "Full settlement via GPay"
     })

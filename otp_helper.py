@@ -1,3 +1,4 @@
+import secrets
 import random
 import re
 import urllib.parse
@@ -8,7 +9,8 @@ from auth_helper import hash_password
 
 def generate_numeric_otp(length: int = 6) -> str:
     """Generate a cryptographically randomized 6-digit numeric OTP"""
-    return "".join([str(random.randint(0, 9)) for _ in range(length)])
+    digits = "0123456789"
+    return "".join(secrets.choice(digits) for _ in range(length))
 
 def clean_whatsapp_mobile(mobile: str) -> str:
     """Clean and normalize phone number for WhatsApp wa.me links (e.g. 919876543210)"""

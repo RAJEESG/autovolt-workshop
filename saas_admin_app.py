@@ -15,7 +15,7 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 import database as db
-from auth_helper import hash_password, verify_password
+from auth_helper import hash_password, verify_password, create_signed_session_cookie, verify_signed_session_cookie
 
 load_dotenv()
 
@@ -44,7 +44,8 @@ async def vendor_auth_middleware(request: Request, call_next):
     exempt_prefixes = ["/static", "/login", "/logout"]
     is_exempt = any(path.startswith(p) for p in exempt_prefixes)
     
-    session_user = request.cookies.get("vendor_session")
+    raw_cookie = request.cookies.get("vendor_session")
+    session_user = verify_signed_session_cookie(raw_cookie)
     if not is_exempt and not session_user and request.method == "GET":
         return RedirectResponse(url="/login", status_code=303)
         
@@ -98,7 +99,8 @@ async def handle_login(
     conn.close()
 
     response = RedirectResponse(url="/", status_code=303)
-    response.set_cookie(key="vendor_session", value=user["username"], max_age=86400 * 30, httponly=True)
+    signed_val = create_signed_session_cookie(user["username"], expires_in=86400 * 30)
+    response.set_cookie(key="vendor_session", value=signed_val, max_age=86400 * 30, httponly=True, samesite="lax")
     return response
 
 @app.get("/logout")

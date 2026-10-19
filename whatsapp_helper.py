@@ -223,43 +223,53 @@ def format_khata_due_reminder_whatsapp_message(
     upi_payment_link: str,
     workshop_phone: str,
     language: str = "en",
-    lang: Optional[str] = None
+    lang: Optional[str] = None,
+    public_view_url: Optional[str] = None
 ) -> str:
     """Generate friendly WhatsApp reminder for pending khata dues in English, Tamil, or Malayalam"""
     target_lang = (lang or language or "en").lower()
 
     if target_lang == "ta":
+        pay_section = f"""📱 *கீழே உள்ள லிங்க்கை கிளிக் செய்து பில் பார்க்கவும், GPay / PhonePe மூலம் செலுத்தவும்:*
+{public_view_url}""" if public_view_url else f"""📱 *GPay / PhonePe UPI:*
+{upi_payment_link}"""
+
         return f"""⚡ *{workshop_name}* ⚡
 
 வணக்கம் *{customer_name}*,
 உங்கள் கணக்கில் *₹{due_amount:,.2f}* நிலுவைத் தொகை உள்ளது.
 
-📱 *கீழே உள்ள லிங்க்கை கிளிக் செய்து GPay / PhonePe மூலம் உடனடியாக செலுத்தலாம்:*
-{upi_payment_link}
+{pay_section}
 
 📞 *தொடர்புக்கு:* {workshop_phone}
 _நன்றி!_"""
 
     elif target_lang == "ml":
+        pay_section = f"""📱 *താഴെയുള്ള ലിങ്കിൽ ക്ലിക്ക് ചെയ്ത് ബിൽ കാണാനും GPay / PhonePe വഴി പണമടയ്ക്കാനും സാധിക്കും:*
+{public_view_url}""" if public_view_url else f"""📱 *GPay / PhonePe UPI:*
+{upi_payment_link}"""
+
         return f"""⚡ *{workshop_name}* ⚡
 
 പ്രിയമുള്ള *{customer_name}*,
 നിങ്ങളുടെ വർക്ക്‌ഷോപ്പ് അക്കൗണ്ടിൽ *₹{due_amount:,.2f}* കുടിശ്ശികയുള്ളതായി കാണുന്നു.
 
-📱 *താഴെയുള്ള ലിങ്കിൽ ക്ലിക്ക് ചെയ്ത് GPay / PhonePe വഴി ഉടൻ പണമടയ്ക്കാം:*
-{upi_payment_link}
+{pay_section}
 
 📞 *വിളിക്കുക:* {workshop_phone}
 _നന്ദി!_"""
 
     else:
+        pay_section = f"""📱 *Tap link to view invoice and pay instantly via GPay / PhonePe / QR:*
+{public_view_url}""" if public_view_url else f"""📱 *Instant Pay via UPI:*
+{upi_payment_link}"""
+
         return f"""⚡ *{workshop_name}* ⚡
 
 Dear *{customer_name}*,
 This is a gentle reminder regarding your outstanding workshop balance of *₹{due_amount:,.2f}*.
 
-📱 *Tap below to pay instantly via Google Pay / PhonePe:*
-{upi_payment_link}
+{pay_section}
 
 📞 *Questions? Call:* {workshop_phone}
 _Thank you!_"""

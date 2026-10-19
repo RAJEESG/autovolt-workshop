@@ -26,7 +26,14 @@ from whatsapp_helper import (
 import ca_reports
 from pdf_generator import generate_invoice_pdf_bytes, generate_proforma_pdf_bytes
 from excel_importer import generate_inventory_import_template, parse_inventory_file
-from auth_helper import hash_password, verify_password, verify_master_pin, generate_reset_token
+from auth_helper import (
+    hash_password,
+    verify_password,
+    verify_master_pin,
+    generate_reset_token,
+    create_signed_session_cookie,
+    verify_signed_session_cookie
+)
 import otp_helper
 
 app = FastAPI(title="AutoVolt Pro — Auto Electrical Workshop Management", version="2.0.0")
@@ -68,11 +75,29 @@ app.add_middleware(
 )
 
 # Helper: Get current active workshop profile
-def get_current_workshop() -> Dict[str, Any]:
+def get_current_workshop(request: Optional[Request] = None) -> Dict[str, Any]:
     conn = db.get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM workshop_profile WHERE id = 'default'")
-    row = cursor.fetchone()
+    tenant_id = None
+    if request:
+        user = get_session_user(request)
+        if user and user.get("tenant_id"):
+            tenant_id = user["tenant_id"]
+
+    row = None
+    if tenant_id and tenant_id not in ("default", "tenant_1", "default-workshop"):
+        cursor.execute("SELECT * FROM workshop_profile WHERE tenant_id = ? OR id = ?", (tenant_id, tenant_id))
+        row = cursor.fetchone()
+        if not row:
+            cursor.execute("SELECT * FROM tenants WHERE id = ?", (tenant_id,))
+            t_row = cursor.fetchone()
+            if t_row:
+                row = t_row
+
+    if not row:
+        cursor.execute("SELECT * FROM workshop_profile WHERE id = 'default'")
+        row = cursor.fetchone()
+
     conn.close()
     if row:
         return dict(row)
@@ -97,13 +122,26 @@ def get_current_workshop() -> Dict[str, Any]:
     }
 
 # Helper: Check current SaaS subscription status
-def check_saas_subscription() -> Dict[str, Any]:
+def check_saas_subscription(request: Optional[Request] = None) -> Dict[str, Any]:
     conn = db.get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM tenants WHERE id = 'tenant_1' OR id = 'default-workshop' LIMIT 1")
-    t_row = cursor.fetchone()
-    cursor.execute("SELECT * FROM subscriptions WHERE is_active = 1 ORDER BY end_date DESC LIMIT 1")
-    s_row = cursor.fetchone()
+    tenant_id = None
+    if request:
+        user = get_session_user(request)
+        if user and user.get("tenant_id"):
+            tenant_id = user["tenant_id"]
+
+    if tenant_id and tenant_id not in ("default", "tenant_1"):
+        cursor.execute("SELECT * FROM tenants WHERE id = ? LIMIT 1", (tenant_id,))
+        t_row = cursor.fetchone()
+        cursor.execute("SELECT * FROM subscriptions WHERE tenant_id = ? AND is_active = 1 ORDER BY end_date DESC LIMIT 1", (tenant_id,))
+        s_row = cursor.fetchone()
+    else:
+        cursor.execute("SELECT * FROM tenants WHERE id = 'tenant_1' OR id = 'default-workshop' LIMIT 1")
+        t_row = cursor.fetchone()
+        cursor.execute("SELECT * FROM subscriptions WHERE is_active = 1 ORDER BY end_date DESC LIMIT 1")
+        s_row = cursor.fetchone()
+
     conn.close()
 
     tenant = dict(t_row) if t_row else None
@@ -133,7 +171,8 @@ async def auth_and_subscription_middleware(request: Request, call_next):
     ]
     
     is_exempt = any(path.startswith(prefix) for prefix in exempt_prefixes)
-    session_user = request.cookies.get("session_user")
+    raw_cookie = request.cookies.get("session_user")
+    session_user = verify_signed_session_cookie(raw_cookie)
     last_active_str = request.cookies.get("session_last_active")
     
     now_ts = datetime.now().timestamp()
@@ -173,7 +212,7 @@ async def auth_and_subscription_middleware(request: Request, call_next):
     
     # SaaS Expiration Check for authenticated users
     if not is_exempt and request.method == "GET":
-        sub_info = check_saas_subscription()
+        sub_info = check_saas_subscription(request)
         if sub_info["is_expired"]:
             return RedirectResponse(url="/subscription-expired", status_code=303)
             
@@ -187,12 +226,13 @@ async def auth_and_subscription_middleware(request: Request, call_next):
 
 # Helper to get current logged in user dict
 def get_session_user(request: Request) -> Optional[dict]:
-    username = request.cookies.get("session_user")
+    raw_user = request.cookies.get("session_user")
+    username = verify_signed_session_cookie(raw_user)
     if not username:
         return None
     conn = db.get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, username, role, full_name, email, phone, whatsapp_mobile, permissions FROM users WHERE username = ? AND status = 'ACTIVE'", (username,))
+    cursor.execute("SELECT id, username, role, full_name, email, phone, whatsapp_mobile, permissions, tenant_id FROM users WHERE username = ? AND status = 'ACTIVE'", (username,))
     row = cursor.fetchone()
     conn.close()
     return dict(row) if row else None
@@ -260,8 +300,9 @@ async def handle_login(
     
     response = RedirectResponse(url="/", status_code=303)
     now_ts_str = str(int(datetime.now().timestamp()))
-    response.set_cookie(key="session_user", value=user["username"], max_age=86400 * 7, httponly=True)
-    response.set_cookie(key="session_last_active", value=now_ts_str, max_age=86400 * 7, httponly=True)
+    signed_session = create_signed_session_cookie(user["username"], expires_in=86400 * 7)
+    response.set_cookie(key="session_user", value=signed_session, max_age=86400 * 7, httponly=True, samesite="lax")
+    response.set_cookie(key="session_last_active", value=now_ts_str, max_age=86400 * 7, httponly=True, samesite="lax")
     return response
 
 @app.get("/logout")
@@ -310,6 +351,7 @@ async def verify_otp_page(request: Request, username: str = Query(...), error: O
     otp_code = user_dict.get("otp_code", "")
     whatsapp_link = otp_helper.build_whatsapp_otp_url(mobile, otp_code, username, user_dict.get("full_name", ""))
 
+    show_dev_otp = os.getenv("DEBUG_MODE", "").lower() in ("true", "1")
     return templates.TemplateResponse(
         request=request,
         name="verify_otp.html",
@@ -317,7 +359,8 @@ async def verify_otp_page(request: Request, username: str = Query(...), error: O
             "username": username,
             "whatsapp_mobile": mobile,
             "whatsapp_link": whatsapp_link,
-            "otp_preview": otp_code,
+            "otp_preview": otp_code if show_dev_otp else None,
+            "show_otp_preview": show_dev_otp,
             "error": error
         }
     )
@@ -380,12 +423,106 @@ async def handle_verify_otp(
 
 @app.get("/subscription-expired", response_class=HTMLResponse)
 async def subscription_expired_page(request: Request):
-    workshop = get_current_workshop()
+    workshop = get_current_workshop(request)
     return templates.TemplateResponse(
         request=request,
         name="subscription_expired.html",
         context={"workshop": workshop}
     )
+
+@app.get("/reset-password", response_class=HTMLResponse)
+async def reset_password_page(request: Request, token: Optional[str] = None, error: Optional[str] = None):
+    user = None
+    if token:
+        conn = db.get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, username FROM users WHERE reset_token = ?", (token.strip(),))
+        user_row = cursor.fetchone()
+        conn.close()
+        if user_row:
+            user = dict(user_row)
+    return templates.TemplateResponse(
+        request=request,
+        name="reset_password.html",
+        context={"token": token, "user": user, "error": error}
+    )
+
+@app.post("/reset-password")
+async def handle_reset_password(
+    request: Request,
+    token: Optional[str] = Form(None),
+    new_password: str = Form(...),
+    confirm_password: str = Form(...)
+):
+    if new_password.strip() != confirm_password.strip():
+        return templates.TemplateResponse(
+            request=request,
+            name="reset_password.html",
+            context={"token": token, "error": "Passwords do not match. Please re-enter."}
+        )
+    if len(new_password.strip()) < 4:
+        return templates.TemplateResponse(
+            request=request,
+            name="reset_password.html",
+            context={"token": token, "error": "Password must be at least 4 characters long."}
+        )
+
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    if token:
+        cursor.execute("SELECT id, username FROM users WHERE reset_token = ?", (token.strip(),))
+        user = cursor.fetchone()
+        if not user:
+            conn.close()
+            return templates.TemplateResponse(
+                request=request,
+                name="reset_password.html",
+                context={"token": token, "error": "Invalid or expired reset token."}
+            )
+        pw_hash = hash_password(new_password.strip())
+        cursor.execute("UPDATE users SET password_hash = ?, reset_token = NULL, reset_token_expiry = NULL WHERE id = ?", (pw_hash, user["id"]))
+        conn.commit()
+        conn.close()
+        return RedirectResponse(url="/login?success_msg=Password+reset+successful!+Please+log+in+with+your+new+password.", status_code=303)
+    else:
+        conn.close()
+        return RedirectResponse(url="/forgot-password?error=Please+request+a+password+reset+OTP+first.", status_code=303)
+
+@app.get("/super-admin", response_class=HTMLResponse)
+async def super_admin_page(request: Request):
+    user = get_session_user(request)
+    if not user or user.get("role") not in ("SUPER_ADMIN", "ADMIN"):
+        return RedirectResponse(url="/login?error=Super+Admin+access+required.", status_code=303)
+    
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM tenants ORDER BY created_at DESC")
+    tenants = [dict(r) for r in cursor.fetchall()]
+    profile = get_current_workshop(request)
+    conn.close()
+
+    return templates.TemplateResponse(
+        request=request,
+        name="super_admin.html",
+        context={
+            "active_page": "super_admin",
+            "tenants": tenants,
+            "profile": profile
+        }
+    )
+
+@app.post("/api/admin/update-master-pin")
+async def update_master_pin(request: Request, master_pin: str = Form(...)):
+    user = get_session_user(request)
+    if not user or user.get("role") not in ("SUPER_ADMIN", "ADMIN"):
+        raise HTTPException(status_code=403, detail="Super Admin access required")
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE workshop_profile SET master_pin = ? WHERE id = 'default'", (master_pin.strip(),))
+    cursor.execute("UPDATE tenants SET master_pin = ? WHERE id = 'tenant_1'", (master_pin.strip(),))
+    conn.commit()
+    conn.close()
+    return RedirectResponse(url="/super-admin?msg=Master+PIN+updated+successfully", status_code=303)
 
 # =========================================================
 # 📊 MAIN DASHBOARD & JOB CARDS
@@ -1324,16 +1461,43 @@ async def get_invoice_detail(invoice_id: str):
 @app.post("/api/invoices")
 @app.post("/api/invoices/{invoice_id}/edit")
 @app.put("/api/invoices/{invoice_id}")
-async def save_or_update_pos_invoice(payload: Dict[str, Any], invoice_id: Optional[str] = None):
+async def save_or_update_pos_invoice(request: Request, payload: Dict[str, Any], invoice_id: Optional[str] = None):
     conn = db.get_db_connection()
     cursor = conn.cursor()
     
     editing_id = invoice_id or payload.get("editing_invoice_id")
-    workshop = get_current_workshop()
+    workshop = get_current_workshop(request)
     now_ist = get_ist_now_str()
     today_str = get_ist_today_str()
     
     items = payload.get("items", [])
+    if not items and not editing_id:
+        conn.close()
+        raise HTTPException(status_code=422, detail="Invoice must contain at least one line item.")
+
+    # Validate numeric types to prevent 500 crashes
+    try:
+        for itm in items:
+            float(itm.get("unit_price") or 0.0)
+            int(itm.get("quantity") or 1)
+            float(itm.get("tax_rate") or 0.0)
+    except (ValueError, TypeError) as e:
+        conn.close()
+        raise HTTPException(status_code=422, detail=f"Invalid numeric input in line items: {str(e)}")
+
+    # Check stock availability for physical parts
+    for itm in items:
+        if itm.get("item_type") == "PART" and itm.get("item_id") and not itm.get("already_deducted"):
+            req_qty = int(itm.get("quantity") or 1)
+            cursor.execute("SELECT part_name, stock_qty FROM inventory_items WHERE id = ?", (itm["item_id"],))
+            stk_row = cursor.fetchone()
+            if stk_row and stk_row["stock_qty"] < req_qty:
+                conn.close()
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Insufficient stock for '{stk_row['part_name']}'. In stock: {stk_row['stock_qty']}, Requested: {req_qty}"
+                )
+
     subtotal_labor = sum((float(i.get("unit_price") or 0.0)) * (int(i.get("quantity") or 1)) for i in items if i.get("item_type") == "LABOR")
     subtotal_parts = sum((float(i.get("unit_price") or 0.0)) * (int(i.get("quantity") or 1)) for i in items if i.get("item_type") == "PART")
     taxable_subtotal = subtotal_labor + subtotal_parts
@@ -1374,6 +1538,39 @@ async def save_or_update_pos_invoice(payload: Dict[str, Any], invoice_id: Option
     
     job_card_id = payload.get("job_card_id")
     job_number = payload.get("job_number")
+
+    cust_phone = (payload.get("customer_phone") or "").strip()
+    cust_name = (payload.get("customer_name") or "Walk-in").strip()
+    cust_addr = (payload.get("customer_address") or "").strip()
+    cust_gstin = (payload.get("customer_gstin") or "").strip()
+    cust_id = None
+
+    if cust_phone:
+        cursor.execute("SELECT id, khata_balance FROM customers WHERE phone = ?", (cust_phone,))
+        c_row = cursor.fetchone()
+        if c_row:
+            cust_id = c_row["id"]
+            if balance_due > 0 and not editing_id:
+                cursor.execute("UPDATE customers SET total_visits = total_visits + 1, khata_balance = khata_balance + ? WHERE id = ?", (balance_due, cust_id))
+            else:
+                cursor.execute("UPDATE customers SET total_visits = total_visits + 1 WHERE id = ?", (cust_id,))
+        else:
+            cust_id = f"cust_{uuid.uuid4().hex[:8]}"
+            cursor.execute("""
+            INSERT INTO customers (id, name, phone, address, gstin, total_visits, khata_balance, created_at)
+            VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+            """, (cust_id, cust_name, cust_phone, cust_addr, cust_gstin, balance_due, now_ist))
+
+    veh_reg = (payload.get("vehicle_reg_no") or "").strip().upper()
+    if veh_reg:
+        cursor.execute("SELECT id FROM vehicles WHERE reg_number = ?", (veh_reg,))
+        v_row = cursor.fetchone()
+        if not v_row:
+            v_id = f"veh_{uuid.uuid4().hex[:8]}"
+            cursor.execute("""
+            INSERT INTO vehicles (id, reg_number, customer_id, customer_name, customer_phone, make_model, odometer, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+            """, (v_id, veh_reg, cust_id, cust_name, cust_phone, payload.get("vehicle_make_model", "General"), now_ist))
     
     if editing_id:
         # --- UPDATE EXISTING INVOICE (Same invoice # and id preserved) ---
@@ -1413,8 +1610,8 @@ async def save_or_update_pos_invoice(payload: Dict[str, Any], invoice_id: Option
             upi_payment_link = ?, updated_at = ?
         WHERE id = ?
         """, (
-            payload.get("customer_name", "Walk-in"), payload.get("customer_phone", "9876543210"),
-            payload.get("vehicle_reg_no", ""),
+            cust_name, cust_phone,
+            veh_reg,
             subtotal_labor, subtotal_parts, taxable_subtotal,
             cgst_total, sgst_total, igst_total, total_tax,
             discount, round_off, grand_total, amount_paid, balance_due,
@@ -1425,8 +1622,8 @@ async def save_or_update_pos_invoice(payload: Dict[str, Any], invoice_id: Option
         # 4. Adjust customer khata balance if balance changed
         old_bal = float(old_inv["balance_due"] or 0.0)
         bal_diff = balance_due - old_bal
-        if bal_diff != 0 and payload.get("customer_phone"):
-            cursor.execute("UPDATE customers SET khata_balance = MAX(0, khata_balance + ?) WHERE phone = ?", (bal_diff, payload.get("customer_phone").strip()))
+        if bal_diff != 0 and cust_phone:
+            cursor.execute("UPDATE customers SET khata_balance = MAX(0, khata_balance + ?) WHERE phone = ?", (bal_diff, cust_phone))
             
         db.log_audit("EDIT_INVOICE", "invoices", editing_id, f"Updated bill #{inv_number} (New Total: ₹{grand_total:.2f}, Status: {payment_status})", cursor=cursor)
     else:
@@ -1449,25 +1646,29 @@ async def save_or_update_pos_invoice(payload: Dict[str, Any], invoice_id: Option
         """, (
             inv_id, inv_number, today_str, payload.get("invoice_type", "JOB_SERVICE" if job_card_id else "COUNTER_SALE"),
             job_card_id, job_number,
-            payload.get("customer_name", "Walk-in"), payload.get("customer_phone", "9876543210"),
-            payload.get("vehicle_reg_no", ""),
+            cust_name, cust_phone,
+            veh_reg,
             subtotal_labor, subtotal_parts, taxable_subtotal,
             cgst_total, sgst_total, igst_total, total_tax, discount,
             round_off, grand_total, amount_paid, balance_due, payment_status,
             payload.get("payment_mode", "UPI"), is_interstate, upi_link, now_ist
         ))
-        
-        # Update customer khata if unpaid/partial
-        if balance_due > 0 and payload.get("customer_phone"):
-            cursor.execute("UPDATE customers SET khata_balance = khata_balance + ? WHERE phone = ?", (balance_due, payload.get("customer_phone").strip()))
 
         # Record payment if amount_paid > 0
         if amount_paid > 0:
             pay_id = f"pay_{uuid.uuid4().hex[:8]}"
             cursor.execute("""
-            INSERT INTO payments (id, invoice_id, amount, payment_mode, payment_date, notes, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (pay_id, inv_id, amount_paid, payload.get("payment_mode", "UPI"), today_str, f"Payment for {inv_number}", now_ist))
+            INSERT INTO payments (id, invoice_id, customer_id, amount, payment_mode, payment_date, notes, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (pay_id, inv_id, cust_id, amount_paid, payload.get("payment_mode", "UPI"), today_str, f"Initial payment for {inv_number}", now_ist))
+
+            # Update bank account / cash register balance
+            cursor.execute("SELECT id FROM bank_accounts WHERE is_primary = 1 LIMIT 1")
+            p_acc = cursor.fetchone()
+            if p_acc:
+                cursor.execute("UPDATE bank_accounts SET current_balance = current_balance + ? WHERE id = ?", (amount_paid, p_acc["id"]))
+            elif payload.get("payment_mode") == "CASH":
+                cursor.execute("UPDATE bank_accounts SET current_balance = current_balance + ? WHERE account_type = 'CASH' LIMIT 1", (amount_paid,))
 
         db.log_audit("CREATE_INVOICE", "invoices", inv_id, f"Created bill #{inv_number} (₹{grand_total:.2f}, Status: {payment_status})", cursor=cursor)
 
@@ -1505,7 +1706,8 @@ async def save_or_update_pos_invoice(payload: Dict[str, Any], invoice_id: Option
             unit_str, part_no, c_rate, s_rate, i_rate, c_amt, s_amt, i_amt
         ))
         
-        if i.get("item_id") and not i.get("already_deducted"):
+        # Only deduct inventory for physical PART items!
+        if i.get("item_type") == "PART" and i.get("item_id") and not i.get("already_deducted"):
             cursor.execute("UPDATE inventory_items SET stock_qty = MAX(0, stock_qty - ?) WHERE id = ?", (u_qty, i["item_id"]))
             log_id = f"stk_{uuid.uuid4().hex[:8]}"
             cursor.execute("""
@@ -1541,6 +1743,7 @@ async def cancel_invoice_with_pin(invoice_id: str, payload: Dict[str, Any]):
         return {"success": True, "message": "Invoice is already cancelled"}
 
     now_ist = get_ist_now_str()
+    today_date = get_ist_today_str()
     invoice_number = inv["invoice_number"]
 
     # 1. Restore inventory stock for all parts in the invoice (Sales Return)
@@ -1557,7 +1760,7 @@ async def cancel_invoice_with_pin(invoice_id: str, payload: Dict[str, Any]):
             """, (log_id, itm["item_id"], itm["name"], itm["barcode"], int(itm["quantity"]), itm["item_id"], invoice_number, f"Sales Return / Bill {invoice_number} Cancelled", now_ist))
             restored_parts_count += 1
 
-    # 2. Record Sales Return entry
+    # 2. Record Sales Return entry with proper columns matching schema
     sr_id = f"sr_{uuid.uuid4().hex[:8]}"
     cursor.execute("SELECT COUNT(*) FROM sales_returns")
     cnt = cursor.fetchone()[0] + 1
@@ -1565,30 +1768,41 @@ async def cancel_invoice_with_pin(invoice_id: str, payload: Dict[str, Any]):
     try:
         cursor.execute("""
         INSERT INTO sales_returns (
-            id, return_number, invoice_id, customer_name, customer_phone,
-            item_id, item_name, quantity, refund_amount, return_reason, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            id, return_number, invoice_id, customer_name, item_id, name,
+            quantity, unit_price, refund_amount, return_date, refund_mode, reason, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            sr_id, return_num, invoice_id, inv["customer_name"], inv["customer_phone"],
+            sr_id, return_num, invoice_id, inv["customer_name"] or "Customer",
             "ALL", f"Sales Return for Bill #{invoice_number}", len(items),
-            inv["grand_total"], "Invoice Cancelled & Stock Restored", now_ist
+            inv["grand_total"], inv["amount_paid"] or 0.0, today_date,
+            inv["payment_mode"] or "CASH", "Invoice Cancelled & Stock Restored", now_ist
         ))
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[Sales Return Insert Error on Cancel] {e}")
 
     # 3. If there was an unpaid balance on customer khata, deduct it
     bal = float(inv["balance_due"] or 0.0)
     if bal > 0 and inv["customer_phone"]:
         cursor.execute("UPDATE customers SET khata_balance = MAX(0, khata_balance - ?) WHERE phone = ?", (bal, inv["customer_phone"].strip()))
 
-    # 4. Mark invoice status as CANCELLED
+    # 4. If customer had paid, deduct refund from bank/cash account
+    paid_amt = float(inv["amount_paid"] or 0.0)
+    if paid_amt > 0:
+        cursor.execute("SELECT id FROM bank_accounts WHERE is_primary = 1 LIMIT 1")
+        p_acc = cursor.fetchone()
+        if p_acc:
+            cursor.execute("UPDATE bank_accounts SET current_balance = MAX(0.0, current_balance - ?) WHERE id = ?", (paid_amt, p_acc["id"]))
+        elif inv["payment_mode"] == "CASH":
+            cursor.execute("UPDATE bank_accounts SET current_balance = MAX(0.0, current_balance - ?) WHERE account_type = 'CASH' LIMIT 1", (paid_amt,))
+
+    # 5. Mark invoice status as CANCELLED
     cursor.execute("""
     UPDATE invoices SET payment_status = 'CANCELLED', status = 'CANCELLED',
     notes = COALESCE(notes, '') || ' [CANCELLED on ' || ? || ' - Sales Return Restocked]'
     WHERE id = ?
     """, (now_ist, invoice_id))
 
-    # 5. If linked to job card, update job card status
+    # 6. If linked to job card, update job card status
     if inv["job_card_id"]:
         cursor.execute("UPDATE job_cards SET status = 'IN_PROGRESS' WHERE id = ?", (inv["job_card_id"],))
 
@@ -1596,7 +1810,6 @@ async def cancel_invoice_with_pin(invoice_id: str, payload: Dict[str, Any]):
     conn.commit()
     conn.close()
     return {"success": True, "message": f"Invoice #{invoice_number} cancelled and parts restored to inventory."}
-
 
 @app.post("/api/invoices/{invoice_id}/record-payment")
 async def record_invoice_payment(invoice_id: str, payload: Dict[str, Any]):
@@ -1620,10 +1833,32 @@ async def record_invoice_payment(invoice_id: str, payload: Dict[str, Any]):
     grand_total = inv["grand_total"]
     new_balance = max(0.0, grand_total - new_paid)
     new_status = "PAID" if new_balance <= 0 else "PARTIAL"
+    now_ist = get_ist_now_str()
+    today_date = get_ist_today_str()
 
+    # 1. Update invoice
     cursor.execute("""
     UPDATE invoices SET amount_paid = ?, balance_due = ?, payment_status = ?, payment_mode = ? WHERE id = ?
     """, (new_paid, new_balance, new_status, mode, invoice_id))
+
+    # 2. Insert into payments table
+    pay_id = f"pay_{uuid.uuid4().hex[:8]}"
+    cursor.execute("""
+    INSERT INTO payments (id, invoice_id, amount, payment_mode, payment_date, notes, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (pay_id, invoice_id, amount, mode, today_date, notes or f"Installment payment for {inv['invoice_number']}", now_ist))
+
+    # 3. Update customer khata balance
+    if inv["customer_phone"]:
+        cursor.execute("UPDATE customers SET khata_balance = MAX(0.0, khata_balance - ?) WHERE phone = ?", (amount, inv["customer_phone"].strip()))
+
+    # 4. Update bank account / cash register balance
+    cursor.execute("SELECT id FROM bank_accounts WHERE is_primary = 1 LIMIT 1")
+    p_acc = cursor.fetchone()
+    if p_acc:
+        cursor.execute("UPDATE bank_accounts SET current_balance = current_balance + ? WHERE id = ?", (amount, p_acc["id"]))
+    elif mode == "CASH":
+        cursor.execute("UPDATE bank_accounts SET current_balance = current_balance + ? WHERE account_type = 'CASH' LIMIT 1", (amount,))
 
     db.log_audit("RECORD_PAYMENT", "invoices", invoice_id, f"Recorded ₹{amount:.2f} via {mode}. New status: {new_status}", cursor=cursor)
     conn.commit()
@@ -1752,7 +1987,7 @@ async def get_job_whatsapp_link(request: Request, job_id: str):
     return {"whatsapp_url": wa_url, "message": msg}
 
 @app.get("/api/invoices/{invoice_id}/khata-reminder-link")
-async def get_khata_reminder_link(invoice_id: str):
+async def get_khata_reminder_link(request: Request, invoice_id: str):
     conn = db.get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,))
@@ -1762,18 +1997,22 @@ async def get_khata_reminder_link(invoice_id: str):
         raise HTTPException(status_code=404, detail="Invoice not found")
     inv = dict(inv_row)
     conn.close()
-    
+
     workshop = get_current_workshop()
     lang = workshop.get("language", "en")
+    base_url = str(request.base_url).rstrip('/')
+    public_view_url = f"{base_url}/view/invoice/{inv['id']}"
+
     msg = format_khata_due_reminder_whatsapp_message(
         workshop_name=workshop["name"],
         customer_name=inv["customer_name"],
         due_amount=inv["balance_due"],
         upi_payment_link=inv.get("upi_payment_link", ""),
         workshop_phone=workshop["phone"],
-        lang=lang
+        lang=lang,
+        public_view_url=public_view_url
     )
-    
+
     wa_url = generate_wa_me_url(inv["customer_phone"], msg)
     return {"whatsapp_url": wa_url, "message": msg}
 
@@ -2108,6 +2347,15 @@ async def record_technician_advance(
 
     cursor.execute("UPDATE technicians SET current_advance_balance = current_advance_balance + ? WHERE id = ?", (amount, technician_id))
 
+    # Deduct advance disbursed from bank/cash account
+    if amount > 0:
+        cursor.execute("SELECT id FROM bank_accounts WHERE is_primary = 1 LIMIT 1")
+        p_acc = cursor.fetchone()
+        if p_acc:
+            cursor.execute("UPDATE bank_accounts SET current_balance = MAX(0.0, current_balance - ?) WHERE id = ?", (amount, p_acc["id"]))
+        elif payment_mode == "CASH":
+            cursor.execute("UPDATE bank_accounts SET current_balance = MAX(0.0, current_balance - ?) WHERE account_type = 'CASH' LIMIT 1", (amount,))
+
     db.log_audit("STAFF_ADVANCE", "technicians", technician_id, f"Disbursed advance ₹{amount:.2f} to {tech['name']}", cursor=cursor)
     conn.commit()
     conn.close()
@@ -2147,6 +2395,21 @@ async def record_technician_wages(
 
     if advance_deducted > 0:
         cursor.execute("UPDATE technicians SET current_advance_balance = MAX(0.0, current_advance_balance - ?) WHERE id = ?", (advance_deducted, technician_id))
+
+    # Record wage payment into expenses table and adjust bank balance
+    if net_paid > 0:
+        exp_id = f"exp_{uuid.uuid4().hex[:8]}"
+        cursor.execute("""
+        INSERT INTO expenses (id, title, category, amount, payment_mode, expense_date, paid_to, reference_no, created_at)
+        VALUES (?, ?, 'Staff Wages & Salary', ?, ?, ?, ?, ?, datetime('now'))
+        """, (exp_id, f"Wages for {tech['name']}", net_paid, payment_mode, today_str, tech["name"], wage_id))
+
+        cursor.execute("SELECT id FROM bank_accounts WHERE is_primary = 1 LIMIT 1")
+        p_acc = cursor.fetchone()
+        if p_acc:
+            cursor.execute("UPDATE bank_accounts SET current_balance = MAX(0.0, current_balance - ?) WHERE id = ?", (net_paid, p_acc["id"]))
+        elif payment_mode == "CASH":
+            cursor.execute("UPDATE bank_accounts SET current_balance = MAX(0.0, current_balance - ?) WHERE account_type = 'CASH' LIMIT 1", (net_paid,))
 
     db.log_audit("PAY_WAGES", "technicians", technician_id, f"Paid weekly wages ₹{net_paid:.2f} to {tech['name']}", cursor=cursor)
     conn.commit()
@@ -2330,17 +2593,29 @@ async def record_purchase_bill(
 
                 # If CONFIRMED, update inventory stock and write stock movement log!
                 if status == "CONFIRMED" and part_id:
+                    cursor.execute("SELECT stock_qty, cost_price FROM inventory_items WHERE id = ?", (part_id,))
+                    c_item = cursor.fetchone()
+                    if c_item:
+                        old_qty = max(0, c_item["stock_qty"] or 0)
+                        old_cost = float(c_item["cost_price"] or 0.0)
+                        if old_qty > 0 and old_cost > 0:
+                            effective_cost = round(((old_qty * old_cost) + (qty * unit_cost)) / (old_qty + qty), 2)
+                        else:
+                            effective_cost = unit_cost
+                    else:
+                        effective_cost = unit_cost
+
                     cursor.execute("""
                     UPDATE inventory_items 
                     SET stock_qty = stock_qty + ?, cost_price = ? 
                     WHERE id = ?
-                    """, (qty, unit_cost, part_id))
+                    """, (qty, effective_cost, part_id))
 
                     stk_id = f"stk_{uuid.uuid4().hex[:8]}"
                     cursor.execute("""
                     INSERT INTO stock_logs (id, item_id, part_name, barcode, change_qty, new_stock_qty, action_type, unit_cost, reference_id, notes, created_at)
                     VALUES (?, ?, ?, ?, ?, (SELECT stock_qty FROM inventory_items WHERE id = ?), 'PURCHASE_IN', ?, ?, ?, ?)
-                    """, (stk_id, part_id, part_name, barcode, qty, part_id, unit_cost, bill_number, f"Supplier Bill #{bill_number} from {clean_sup_name}", now_ist))
+                    """, (stk_id, part_id, part_name, barcode, qty, part_id, effective_cost, bill_number, f"Supplier Bill #{bill_number} from {clean_sup_name}", now_ist))
         except Exception as e:
             print(f"[Purchase Items Error] {e}")
 
@@ -2370,12 +2645,24 @@ async def confirm_purchase_bill(pur_id: str):
         qty = itm.get("quantity", 1)
         unit_cost = itm.get("unit_cost", 0.0)
         if part_id:
-            cursor.execute("UPDATE inventory_items SET stock_qty = stock_qty + ?, cost_price = ? WHERE id = ?", (qty, unit_cost, part_id))
+            cursor.execute("SELECT stock_qty, cost_price FROM inventory_items WHERE id = ?", (part_id,))
+            c_item = cursor.fetchone()
+            if c_item:
+                old_qty = max(0, c_item["stock_qty"] or 0)
+                old_cost = float(c_item["cost_price"] or 0.0)
+                if old_qty > 0 and old_cost > 0:
+                    effective_cost = round(((old_qty * old_cost) + (qty * unit_cost)) / (old_qty + qty), 2)
+                else:
+                    effective_cost = unit_cost
+            else:
+                effective_cost = unit_cost
+
+            cursor.execute("UPDATE inventory_items SET stock_qty = stock_qty + ?, cost_price = ? WHERE id = ?", (qty, effective_cost, part_id))
             stk_id = f"stk_{uuid.uuid4().hex[:8]}"
             cursor.execute("""
             INSERT INTO stock_logs (id, item_id, part_name, barcode, change_qty, new_stock_qty, action_type, unit_cost, reference_id, notes, created_at)
             VALUES (?, ?, ?, ?, ?, (SELECT stock_qty FROM inventory_items WHERE id = ?), 'PURCHASE_IN', ?, ?, ?, ?)
-            """, (stk_id, part_id, itm.get("part_name"), itm.get("barcode"), qty, part_id, unit_cost, pur["bill_number"], f"Confirmed Supplier Bill #{pur['bill_number']}", now_ist))
+            """, (stk_id, part_id, itm.get("part_name"), itm.get("barcode"), qty, part_id, effective_cost, pur["bill_number"], f"Confirmed Supplier Bill #{pur['bill_number']}", now_ist))
 
     cursor.execute("UPDATE purchase_bills SET status = 'CONFIRMED' WHERE id = ?", (pur_id,))
     db.log_audit("CONFIRM_PURCHASE", "purchase_bills", pur_id, f"Confirmed Purchase Bill #{pur['bill_number']}", cursor=cursor)
@@ -2728,7 +3015,7 @@ async def record_sales_return(
 ):
     conn = db.get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT part_name, selling_price FROM inventory_items WHERE id = ?", (item_id,))
+    cursor.execute("SELECT part_name, barcode, selling_price FROM inventory_items WHERE id = ?", (item_id,))
     item = cursor.fetchone()
     if not item:
         conn.close()
@@ -2746,6 +3033,21 @@ async def record_sales_return(
     """, (sr_id, return_number, invoice_id, customer_name, item_id, item["part_name"], quantity, item["selling_price"], refund_amount, today_str, refund_mode, reason))
 
     cursor.execute("UPDATE inventory_items SET stock_qty = stock_qty + ? WHERE id = ?", (quantity, item_id))
+
+    stk_id = f"stk_{uuid.uuid4().hex[:8]}"
+    cursor.execute("""
+    INSERT INTO stock_logs (id, item_id, part_name, barcode, change_qty, new_stock_qty, action_type, reference_id, notes, created_at)
+    VALUES (?, ?, ?, ?, ?, (SELECT stock_qty FROM inventory_items WHERE id = ?), 'SALES_RETURN', ?, ?, datetime('now'))
+    """, (stk_id, item_id, item["part_name"], item["barcode"] or "", quantity, item_id, return_number, f"Sales Return #{return_number}: {reason}"))
+
+    # Deduct refund from bank account or cash drawer
+    if refund_amount > 0:
+        cursor.execute("SELECT id FROM bank_accounts WHERE is_primary = 1 LIMIT 1")
+        p_acc = cursor.fetchone()
+        if p_acc:
+            cursor.execute("UPDATE bank_accounts SET current_balance = MAX(0.0, current_balance - ?) WHERE id = ?", (refund_amount, p_acc["id"]))
+        elif refund_mode == "CASH":
+            cursor.execute("UPDATE bank_accounts SET current_balance = MAX(0.0, current_balance - ?) WHERE account_type = 'CASH' LIMIT 1", (refund_amount,))
 
     db.log_audit("SALES_RETURN", "sales_returns", sr_id, f"Credit note #{return_number} for {customer_name}: {quantity}x {item['part_name']}", cursor=cursor)
     conn.commit()
@@ -3147,9 +3449,44 @@ async def public_job_view(request: Request, job_id: str):
         }
     )
 
-@app.get("/invoice/{invoice_id}/print")
-async def print_invoice_page(request: Request, invoice_id: str):
-    return RedirectResponse(url=f"/api/invoices/{invoice_id}/pdf", status_code=303)
+@app.get("/invoice/{invoice_id}/print", response_class=HTMLResponse)
+async def print_invoice_page(request: Request, invoice_id: str, format: Optional[str] = "a4"):
+    if format == "pdf":
+        return RedirectResponse(url=f"/api/invoices/{invoice_id}/pdf", status_code=303)
+
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,))
+    inv_row = cursor.fetchone()
+    if not inv_row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    invoice = dict(inv_row)
+    cursor.execute("SELECT * FROM invoice_items WHERE invoice_id = ?", (invoice_id,))
+    items = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+
+    workshop = get_current_workshop()
+    vpa = workshop.get("upi_id", "sparkautoworkshop@okaxis")
+    grand_total = float(invoice.get("grand_total", 0.0))
+    balance_due = float(invoice.get("balance_due", 0.0))
+    pay_amount = balance_due if balance_due > 0 else grand_total
+    upi_link = invoice.get("upi_payment_link") or generate_upi_link(vpa, workshop.get("name", "Auto Workshop"), pay_amount, f"Inv_{invoice.get('invoice_number')}")
+    upi_qr_url = generate_upi_qr_data_url(upi_link)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="print_invoice.html",
+        context={
+            "invoice": invoice,
+            "items": items,
+            "workshop": workshop,
+            "upi_qr_url": upi_qr_url,
+            "print_format": format or "a4"
+        }
+    )
+
 
 if __name__ == "__main__":
     import uvicorn

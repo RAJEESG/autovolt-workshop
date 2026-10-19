@@ -40,9 +40,9 @@
                 <i data-lucide="send" class="w-3.5 h-3.5"></i>
                 <span>Open WhatsApp to Receive OTP</span>
             </a>
-            {% if otp_preview %}
+            {% if show_otp_preview and otp_preview %}
             <div class="text-center pt-1">
-                <span class="text-[10px] text-slate-400">Generated OTP Code: <b class="text-amber-400 font-mono text-sm tracking-widest">{{ otp_preview }}</b></span>
+                <span class="text-[10px] text-slate-400">Development Debug OTP: <b class="text-amber-400 font-mono text-sm tracking-widest">{{ otp_preview }}</b></span>
             </div>
             {% endif %}
         </div>

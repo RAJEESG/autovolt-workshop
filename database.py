@@ -29,11 +29,12 @@ if SUPABASE_URL and SUPABASE_KEY:
 DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "workshop.db")
 
 def get_db_connection():
-    """Get SQLite connection with row factory, WAL mode, and busy timeout"""
+    """Get SQLite connection with row factory, WAL mode, busy timeout, and foreign keys enabled"""
     conn = sqlite3.connect(DB_FILE, timeout=10.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA busy_timeout=5000;")
+    conn.execute("PRAGMA foreign_keys=ON;")
     return conn
 
 
@@ -664,6 +665,18 @@ def run_schema_migrations(cursor, conn):
         ("purchase_bills", "supplier_id", "TEXT DEFAULT ''"),
         ("purchase_items", "tax_rate", "REAL DEFAULT 18.0"),
         ("inventory_items", "position_bin", "TEXT DEFAULT ''"),
+        ("job_cards", "tenant_id", "TEXT DEFAULT 'tenant_1'"),
+        ("invoices", "tenant_id", "TEXT DEFAULT 'tenant_1'"),
+        ("inventory_items", "tenant_id", "TEXT DEFAULT 'tenant_1'"),
+        ("customers", "tenant_id", "TEXT DEFAULT 'tenant_1'"),
+        ("vehicles", "tenant_id", "TEXT DEFAULT 'tenant_1'"),
+        ("bank_accounts", "tenant_id", "TEXT DEFAULT 'tenant_1'"),
+        ("expenses", "tenant_id", "TEXT DEFAULT 'tenant_1'"),
+        ("technicians", "tenant_id", "TEXT DEFAULT 'tenant_1'"),
+        ("suppliers", "tenant_id", "TEXT DEFAULT 'tenant_1'"),
+        ("purchase_bills", "tenant_id", "TEXT DEFAULT 'tenant_1'"),
+        ("sales_returns", "tenant_id", "TEXT DEFAULT 'tenant_1'"),
+        ("workshop_profile", "tenant_id", "TEXT DEFAULT 'tenant_1'"),
     ]
 
     for table, col, col_type in migrations:
@@ -676,6 +689,14 @@ def run_schema_migrations(cursor, conn):
     try:
         cursor.execute("UPDATE users SET whatsapp_mobile = '+919876500000' WHERE username = 'admin' AND (whatsapp_mobile IS NULL OR whatsapp_mobile = '')")
         cursor.execute("UPDATE users SET whatsapp_mobile = '+919876511111' WHERE username = 'staff' AND (whatsapp_mobile IS NULL OR whatsapp_mobile = '')")
+        # Backfill payments table for invoices with payments
+        cursor.execute("""
+        INSERT INTO payments (id, invoice_id, amount, payment_mode, payment_date, notes, created_at)
+        SELECT 
+            'pay_legacy_' || id, id, amount_paid, COALESCE(payment_mode, 'UPI'), invoice_date, 'Initial bill payment', created_at
+        FROM invoices
+        WHERE amount_paid > 0 AND id NOT IN (SELECT DISTINCT invoice_id FROM payments WHERE invoice_id IS NOT NULL)
+        """)
     except Exception:
         pass
 

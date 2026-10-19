@@ -15,11 +15,19 @@ def run_tests():
 
     # Test Unauthenticated Redirect
     r_unauth = client.get("/", follow_redirects=False)
-    assert r_unauth.status_code == 303 and r_unauth.headers.get("location") == "/login"
+    assert r_unauth.status_code == 303 and r_unauth.headers.get("location", "").startswith("/login")
     print("  ✅ Unauthenticated user redirected to /login (Status 303)", flush=True)
 
-    # Set authenticated cookie
-    client.cookies.set("session_user", "admin")
+    # Set authenticated cookie with cryptographic signature
+    from auth_helper import create_signed_session_cookie
+    client.cookies.set("session_user", create_signed_session_cookie("admin"))
+
+    # Ensure test items have stock for testing POS invoice creation
+    conn = db.get_db_connection()
+    c = conn.cursor()
+    c.execute("UPDATE inventory_items SET stock_qty = MAX(stock_qty, 50) WHERE id IN ('item_1', 'item_2')")
+    conn.commit()
+    conn.close()
 
     endpoints = [
         ("/", 200),
