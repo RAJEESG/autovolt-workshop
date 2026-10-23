@@ -226,7 +226,13 @@ async def auth_and_subscription_middleware(request: Request, call_next):
         if not is_session_expired:
             conn = db.get_db_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT id, username FROM users WHERE username = ? AND status = 'ACTIVE'", (session_user,))
+            if ":" in session_user:
+                tid, uname = session_user.split(":", 1)
+                cursor.execute("SELECT id, username FROM users WHERE username = ? AND tenant_id = ? AND status = 'ACTIVE'", (uname, tid))
+            elif session_user.startswith("user_"):
+                cursor.execute("SELECT id, username FROM users WHERE id = ? AND status = 'ACTIVE'", (session_user,))
+            else:
+                cursor.execute("SELECT id, username FROM users WHERE username = ? AND status = 'ACTIVE'", (session_user,))
             valid_db_user = cursor.fetchone()
             conn.close()
             if not valid_db_user:
@@ -261,12 +267,18 @@ async def auth_and_subscription_middleware(request: Request, call_next):
 # Helper to get current logged in user dict
 def get_session_user(request: Request) -> Optional[dict]:
     raw_user = request.cookies.get("session_user")
-    username = verify_signed_session_cookie(raw_user)
-    if not username:
+    session_user = verify_signed_session_cookie(raw_user)
+    if not session_user:
         return None
     conn = db.get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, username, role, full_name, email, phone, whatsapp_mobile, permissions, tenant_id FROM users WHERE username = ? AND status = 'ACTIVE'", (username,))
+    if ":" in session_user:
+        tid, uname = session_user.split(":", 1)
+        cursor.execute("SELECT id, username, role, full_name, email, phone, whatsapp_mobile, permissions, tenant_id FROM users WHERE username = ? AND tenant_id = ? AND status = 'ACTIVE'", (uname, tid))
+    elif session_user.startswith("user_"):
+        cursor.execute("SELECT id, username, role, full_name, email, phone, whatsapp_mobile, permissions, tenant_id FROM users WHERE id = ? AND status = 'ACTIVE'", (session_user,))
+    else:
+        cursor.execute("SELECT id, username, role, full_name, email, phone, whatsapp_mobile, permissions, tenant_id FROM users WHERE username = ? AND status = 'ACTIVE'", (session_user,))
     row = cursor.fetchone()
     conn.close()
     return dict(row) if row else None
@@ -313,29 +325,75 @@ async def login_page(request: Request, error: Optional[str] = None, success_msg:
 async def handle_login(
     request: Request,
     username: str = Form(...),
-    password: str = Form(...)
+    password: str = Form(...),
+    workshop_code: Optional[str] = Form(None)
 ):
     conn = db.get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM users WHERE username = ? AND status = 'ACTIVE'", (username.strip(),))
-    user_row = cursor.fetchone()
 
-    if not user_row or not verify_password(password.strip(), user_row["password_hash"]):
+    clean_username = username.strip()
+    clean_code = (workshop_code or "").strip().upper()
+
+    target_tenant_id = None
+    if clean_code:
+        cursor.execute("SELECT id, name FROM tenants WHERE UPPER(client_code) = ? OR UPPER(id) = ?", (clean_code, clean_code))
+        t_row = cursor.fetchone()
+        if not t_row:
+            cursor.execute("SELECT id, tenant_id, name FROM workshop_profile WHERE UPPER(client_code) = ? OR UPPER(id) = ?", (clean_code, clean_code))
+            p_row = cursor.fetchone()
+            if p_row:
+                target_tenant_id = p_row["tenant_id"] or p_row["id"]
+        else:
+            target_tenant_id = t_row["id"]
+
+        if not target_tenant_id:
+            conn.close()
+            return templates.TemplateResponse(
+                request=request,
+                name="login.html",
+                context={"error": f"Workshop ID '{clean_code}' not found. Please verify with your workshop owner."}
+            )
+
+    if target_tenant_id:
+        cursor.execute("SELECT * FROM users WHERE LOWER(username) = LOWER(?) AND tenant_id = ? AND status = 'ACTIVE'", (clean_username, target_tenant_id))
+        user_rows = cursor.fetchall()
+    else:
+        cursor.execute("SELECT * FROM users WHERE LOWER(username) = LOWER(?) AND status = 'ACTIVE'", (clean_username,))
+        user_rows = cursor.fetchall()
+
+    if not user_rows:
         conn.close()
         return templates.TemplateResponse(
             request=request,
             name="login.html",
-            context={"error": "Invalid username or password. Please try again."}
+            context={"error": "Invalid credentials. Please verify username and Workshop ID."}
+        )
+
+    if len(user_rows) > 1 and not target_tenant_id:
+        conn.close()
+        return templates.TemplateResponse(
+            request=request,
+            name="login.html",
+            context={"error": "Multiple workshops use this username. Please enter your Workshop ID (e.g. SPARK or KOCHI)."}
+        )
+
+    user_row = user_rows[0]
+    if not verify_password(password.strip(), user_row["password_hash"]):
+        conn.close()
+        return templates.TemplateResponse(
+            request=request,
+            name="login.html",
+            context={"error": "Invalid password. Please try again."}
         )
 
     user = dict(user_row)
-    db.log_audit("USER_LOGIN", "users", user["id"], f"User {user['username']} logged in", cursor=cursor)
+    db.log_audit("USER_LOGIN", "users", user["id"], f"User {user['username']} logged into {user.get('tenant_id')}", cursor=cursor)
     conn.commit()
     conn.close()
     
     response = RedirectResponse(url="/", status_code=303)
     now_ts_str = str(int(datetime.now().timestamp()))
-    signed_session = create_signed_session_cookie(user["username"], expires_in=86400 * 7)
+    signed_session = create_signed_session_cookie(f"{user['tenant_id']}:{user['username']}", expires_in=86400 * 7)
     response.set_cookie(key="session_user", value=signed_session, max_age=86400 * 7, httponly=True, samesite="lax")
     response.set_cookie(key="session_last_active", value=now_ts_str, max_age=86400 * 7, httponly=True, samesite="lax")
     return response

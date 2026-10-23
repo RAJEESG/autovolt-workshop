@@ -58,22 +58,21 @@ def create_signed_session_cookie(username: str, expires_in: int = 86400 * 7) -> 
 def verify_signed_session_cookie(cookie_val: Optional[str]) -> Optional[str]:
     """
     Verify the cryptographic signature and expiration of a session cookie.
-    Returns username if valid, otherwise None.
-    Also allows plain username during transition if it matches an active DB check in caller.
+    Returns user_identifier (e.g. 'tenant_id:username' or 'username') if valid, otherwise None.
     """
     if not cookie_val:
         return None
     try:
-        parts = cookie_val.split(":")
+        parts = cookie_val.rsplit(":", 2)
         if len(parts) == 3:
-            username, expiry_str, signature = parts
+            user_identifier, expiry_str, signature = parts
             expiry_ts = int(expiry_str)
             if time.time() > expiry_ts:
                 return None  # Expired
-            data_to_sign = f"{username}:{expiry_str}"
+            data_to_sign = f"{user_identifier}:{expiry_str}"
             expected_sig = hmac.new(SECRET_KEY.encode("utf-8"), data_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
             if hmac.compare_digest(signature, expected_sig):
-                return username
+                return user_identifier
         # Reject any unsigned cookie to prevent impersonation
         return None
     except Exception:

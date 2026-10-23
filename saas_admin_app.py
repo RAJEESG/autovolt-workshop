@@ -250,6 +250,7 @@ async def create_client_workshop(
     address: str = Form(...),
     gstin: Optional[str] = Form(None),
     logo_url: Optional[str] = Form(None),
+    client_code: Optional[str] = Form(None),
     upi_id: str = Form(...),
     upi_payee_name: Optional[str] = Form(None),
     bank_name: Optional[str] = Form(None),
@@ -277,15 +278,19 @@ async def create_client_workshop(
 
     gst_slabs_json = json.dumps(gst_slabs)
 
+    clean_code = (client_code or "").strip().upper()
+    if not clean_code:
+        clean_code = re.sub(r'[^A-Z0-9]', '', name.upper())[:8] or f"WS{uuid.uuid4().hex[:4].upper()}"
+
     # Insert Tenant
     cursor.execute("""
     INSERT INTO tenants (
-        id, name, owner_name, phone, whatsapp_mobile, email, address, gstin, logo_url,
+        id, client_code, name, owner_name, phone, whatsapp_mobile, email, address, gstin, logo_url,
         upi_id, upi_payee_name, bank_name, bank_account_no, bank_ifsc, bank_branch,
         gst_slabs, language, master_pin, status, subscription_plan, subscription_start_date, subscription_end_date, price_paid, created_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Main', ?, ?, ?, 'ACTIVE', ?, ?, ?, ?, datetime('now'))
     """, (
-        tenant_id, name.strip(), owner_name.strip(), whatsapp_mobile.strip(), whatsapp_mobile.strip(),
+        tenant_id, clean_code, name.strip(), owner_name.strip(), whatsapp_mobile.strip(), whatsapp_mobile.strip(),
         email.strip() if email else "", address.strip(), gstin.strip() if gstin else "", logo_url.strip() if logo_url else "",
         upi_id.strip(), upi_payee_name.strip() if upi_payee_name else name.strip(),
         bank_name.strip() if bank_name else "", bank_account_no.strip() if bank_account_no else "",
@@ -303,27 +308,27 @@ async def create_client_workshop(
     # Insert Workshop Profile Record for new Tenant
     cursor.execute("""
     INSERT INTO workshop_profile (
-        id, tenant_id, name, subtitle, owner_name, phone, email, address, gstin, logo_url,
+        id, tenant_id, client_code, name, subtitle, owner_name, phone, email, address, gstin, logo_url,
         upi_id, upi_payee_name, bank_name, bank_account_no, bank_ifsc, bank_branch,
         gst_slabs, language, currency, master_pin, terms, default_state, default_gst_type, tax_regime, round_off_enabled, created_at, updated_at
     ) VALUES (
-        ?, ?, ?, 'Automotive Electrical & Electronic Service Center', ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, 'Automotive Electrical & Electronic Service Center', ?, ?, ?, ?, ?, ?,
         ?, ?, ?, ?, ?, 'Main',
         ?, ?, '₹', ?, '1. Electrical parts warranty as per manufacturer policy.\n2. Goods once fitted cannot be returned.\n3. Payment due upon completion.', 'Kerala (32)', 'INTRA_STATE', 'REGULAR_GST', 1, datetime('now'), datetime('now')
     )
     """, (
-        tenant_id, tenant_id, name.strip(), owner_name.strip(), whatsapp_mobile.strip(), email.strip() if email else "",
+        tenant_id, tenant_id, clean_code, name.strip(), owner_name.strip(), whatsapp_mobile.strip(), email.strip() if email else "",
         address.strip(), gstin.strip() if gstin else "", logo_url.strip() if logo_url else "",
         upi_id.strip(), upi_payee_name.strip() if upi_payee_name else name.strip(),
         bank_name.strip() if bank_name else "", bank_account_no.strip() if bank_account_no else "",
         bank_ifsc.strip() if bank_ifsc else "", gst_slabs_json, language, master_pin.strip()
     ))
 
-    # Create Initial Admin User for this Garage if username not taken
-    cursor.execute("SELECT id FROM users WHERE username = ?", (initial_username.strip(),))
+    # Create Initial Admin User for this Garage (isolated to this tenant_id)
+    cursor.execute("SELECT id FROM users WHERE tenant_id = ? AND username = ?", (tenant_id, initial_username.strip()))
     existing_user = cursor.fetchone()
+    pw_hash = hash_password(initial_password.strip())
     if not existing_user:
-        pw_hash = hash_password(initial_password.strip())
         user_id = f"user_{uuid.uuid4().hex[:8]}"
         cursor.execute("""
         INSERT INTO users (id, username, password_hash, full_name, role, email, phone, whatsapp_mobile, tenant_id, status, created_at)
@@ -333,7 +338,7 @@ async def create_client_workshop(
             email.strip() if email else "", whatsapp_mobile.strip(), whatsapp_mobile.strip(), tenant_id
         ))
     else:
-        cursor.execute("UPDATE users SET tenant_id = ? WHERE id = ?", (tenant_id, existing_user["id"]))
+        cursor.execute("UPDATE users SET password_hash = ? WHERE id = ?", (pw_hash, existing_user["id"]))
 
     # Auto-generate SaaS Vendor Invoice for the user's company books
     inv_id = f"sinv_{uuid.uuid4().hex[:8]}"
@@ -373,6 +378,7 @@ async def update_client_workshop(
     address: str = Form(...),
     gstin: Optional[str] = Form(None),
     logo_url: Optional[str] = Form(None),
+    client_code: Optional[str] = Form(None),
     upi_id: str = Form(...),
     upi_payee_name: Optional[str] = Form(None),
     bank_name: Optional[str] = Form(None),
@@ -386,15 +392,18 @@ async def update_client_workshop(
     cursor = conn.cursor()
 
     gst_slabs_json = json.dumps(gst_slabs)
+    clean_code = (client_code or "").strip().upper()
 
     cursor.execute("""
     UPDATE tenants SET
+        client_code = COALESCE(NULLIF(?, ''), client_code),
         name = ?, owner_name = ?, phone = ?, whatsapp_mobile = ?, email = ?,
         address = ?, gstin = ?, logo_url = ?, upi_id = ?, upi_payee_name = ?,
         bank_name = ?, bank_account_no = ?, bank_ifsc = ?,
         gst_slabs = ?, language = ?, master_pin = ?
     WHERE id = ?
     """, (
+        clean_code,
         name.strip(), owner_name.strip(), whatsapp_mobile.strip(), whatsapp_mobile.strip(), email.strip() if email else "",
         address.strip(), gstin.strip() if gstin else "", logo_url.strip() if logo_url else "",
         upi_id.strip(), upi_payee_name.strip() if upi_payee_name else name.strip(),
@@ -405,11 +414,13 @@ async def update_client_workshop(
     # Also update workshop_profile for this tenant
     cursor.execute("""
     UPDATE workshop_profile SET
+        client_code = COALESCE(NULLIF(?, ''), client_code),
         name = ?, owner_name = ?, phone = ?, email = ?, address = ?, gstin = ?,
         logo_url = ?, upi_id = ?, upi_payee_name = ?, bank_name = ?, bank_account_no = ?, bank_ifsc = ?,
         gst_slabs = ?, language = ?, master_pin = ?, updated_at = datetime('now')
     WHERE tenant_id = ? OR id = ?
     """, (
+        clean_code,
         name.strip(), owner_name.strip(), whatsapp_mobile.strip(), email.strip() if email else "",
         address.strip(), gstin.strip() if gstin else "", logo_url.strip() if logo_url else "",
         upi_id.strip(), upi_payee_name.strip() if upi_payee_name else name.strip(),

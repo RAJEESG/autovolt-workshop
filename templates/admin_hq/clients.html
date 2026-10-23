@@ -44,7 +44,12 @@
                         </div>
                         <div>
                             <h3 class="font-bold text-white text-base leading-snug">{{ t.name }}</h3>
-                            <span class="text-xs text-hq-400 font-semibold">{{ t.owner_name or 'Owner' }}</span>
+                            <div class="flex items-center gap-2 mt-0.5">
+                                <span class="text-xs text-hq-400 font-semibold">{{ t.owner_name or 'Owner' }}</span>
+                                <span class="px-2 py-0.5 rounded bg-indigo-950/80 text-indigo-300 border border-indigo-700/60 font-mono text-[10px] font-bold">
+                                    🔑 Code: <strong>{{ t.client_code or t.id }}</strong>
+                                </span>
+                            </div>
                         </div>
                     </div>
                     {% if t.is_active %}
@@ -122,7 +127,7 @@
                     <a href="/api/admin/clients/{{ t.id }}/export-json" title="Download Full Raw JSON Dump (.json)" class="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-[11px] rounded-xl border border-slate-700 transition">
                         <span class="text-[10px] font-mono">JSON</span>
                     </a>
-                    <button onclick="openEditModal('{{ t.id }}', '{{ t.name }}', '{{ t.owner_name }}', '{{ t.phone }}', '{{ t.whatsapp_mobile }}', '{{ t.email }}', '{{ t.address | replace('\n', ' ') }}', '{{ t.gstin }}', '{{ t.logo_url }}', '{{ t.upi_id }}', '{{ t.upi_payee_name }}', '{{ t.bank_name }}', '{{ t.bank_account_no }}', '{{ t.bank_ifsc }}', '{{ t.language }}', '{{ t.master_pin }}')" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-[11px] rounded-xl border border-slate-700 transition">
+                    <button onclick="openEditModal('{{ t.id }}', '{{ t.name }}', '{{ t.owner_name }}', '{{ t.phone }}', '{{ t.whatsapp_mobile }}', '{{ t.email }}', '{{ t.address | replace('\n', ' ') }}', '{{ t.gstin }}', '{{ t.logo_url }}', '{{ t.client_code or '' }}', '{{ t.upi_id }}', '{{ t.upi_payee_name }}', '{{ t.bank_name }}', '{{ t.bank_account_no }}', '{{ t.bank_ifsc }}', '{{ t.language }}', '{{ t.master_pin }}')" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-[11px] rounded-xl border border-slate-700 transition">
                         ✏️ Edit
                     </button>
                     <a href="/subscriptions?tenant_id={{ t.id }}" class="px-2.5 py-1.5 bg-hq-600 hover:bg-hq-500 text-white font-bold text-[11px] rounded-xl shadow transition">
@@ -158,18 +163,22 @@
             <!-- Basic Shop Info -->
             <div class="space-y-3">
                 <h3 class="text-xs font-bold text-hq-300 uppercase tracking-wider">1. Workshop & Owner Information</h3>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div class="md:col-span-2">
                         <label class="block text-slate-300 font-bold mb-1">Workshop / Business Name *</label>
                         <input type="text" name="name" required placeholder="e.g. Apex Auto Electricals" class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium focus:ring-2 focus:ring-hq-500">
                     </div>
                     <div>
-                        <label class="block text-slate-300 font-bold mb-1">Owner / Contact Person *</label>
-                        <input type="text" name="owner_name" required placeholder="e.g. Ramesh Kumar" class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium focus:ring-2 focus:ring-hq-500">
+                        <label class="block text-slate-300 font-bold mb-1">Client ID / Code *</label>
+                        <input type="text" name="client_code" placeholder="e.g. APEX (auto if blank)" class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-mono uppercase font-bold focus:ring-2 focus:ring-hq-500">
                     </div>
                 </div>
 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div>
+                        <label class="block text-slate-300 font-bold mb-1">Owner / Contact Person *</label>
+                        <input type="text" name="owner_name" required placeholder="e.g. Ramesh Kumar" class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium focus:ring-2 focus:ring-hq-500">
+                    </div>
                     <div>
                         <label class="block text-slate-300 font-bold mb-1">WhatsApp Mobile Number *</label>
                         <input type="text" name="whatsapp_mobile" required placeholder="+91 98470 12345" class="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium focus:ring-2 focus:ring-hq-500">
@@ -328,15 +337,20 @@
         <form action="/api/admin/clients/update" method="POST" class="space-y-4 text-xs">
             <input type="hidden" id="edit_tenant_id" name="tenant_id">
 
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div class="md:col-span-2">
                     <label class="block text-slate-300 font-bold mb-1">Workshop Name *</label>
                     <input type="text" id="edit_name" name="name" required class="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
                 </div>
                 <div>
-                    <label class="block text-slate-300 font-bold mb-1">Owner Name *</label>
-                    <input type="text" id="edit_owner_name" name="owner_name" required class="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
+                    <label class="block text-slate-300 font-bold mb-1">Client ID / Code *</label>
+                    <input type="text" id="edit_client_code" name="client_code" required class="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white font-mono uppercase font-bold">
                 </div>
+            </div>
+
+            <div>
+                <label class="block text-slate-300 font-bold mb-1">Owner Name *</label>
+                <input type="text" id="edit_owner_name" name="owner_name" required class="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white font-medium">
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -447,9 +461,10 @@
 </div>
 
 <script>
-function openEditModal(id, name, owner, phone, wa, email, addr, gstin, logo, upi, upiName, bank, acc, ifsc, lang, pin) {
+function openEditModal(id, name, owner, phone, wa, email, addr, gstin, logo, clientCode, upi, upiName, bank, acc, ifsc, lang, pin) {
     document.getElementById('edit_tenant_id').value = id;
     document.getElementById('edit_name').value = name;
+    document.getElementById('edit_client_code').value = clientCode || '';
     document.getElementById('edit_owner_name').value = owner;
     document.getElementById('edit_whatsapp_mobile').value = wa || phone;
     document.getElementById('edit_email').value = email || '';
