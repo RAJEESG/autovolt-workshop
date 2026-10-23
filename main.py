@@ -74,35 +74,68 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Helper: Get current active workshop profile
-def get_current_workshop(request: Optional[Request] = None) -> Dict[str, Any]:
-    conn = db.get_db_connection()
-    cursor = conn.cursor()
-    tenant_id = None
+# Helper to get current active tenant_id from request user session
+def get_current_tenant_id(request: Optional[Request] = None, fallback: str = "tenant_1") -> str:
     if request:
         user = get_session_user(request)
         if user and user.get("tenant_id"):
-            tenant_id = user["tenant_id"]
+            return user["tenant_id"]
+    return fallback
+
+# Helper: Get current active workshop profile for specific tenant or logged-in session user
+def get_current_workshop(request: Optional[Request] = None, tenant_id: Optional[str] = None) -> Dict[str, Any]:
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    
+    tid = tenant_id
+    if not tid and request:
+        user = get_session_user(request)
+        if user and user.get("tenant_id"):
+            tid = user["tenant_id"]
+
+    if not tid:
+        tid = "tenant_1"
 
     row = None
-    if tenant_id and tenant_id not in ("default", "tenant_1", "default-workshop"):
-        cursor.execute("SELECT * FROM workshop_profile WHERE tenant_id = ? OR id = ?", (tenant_id, tenant_id))
-        row = cursor.fetchone()
-        if not row:
-            cursor.execute("SELECT * FROM tenants WHERE id = ?", (tenant_id,))
-            t_row = cursor.fetchone()
-            if t_row:
-                row = t_row
-
+    # 1. Look up workshop_profile by tenant_id or id
+    cursor.execute("SELECT * FROM workshop_profile WHERE tenant_id = ? OR id = ? LIMIT 1", (tid, tid))
+    row = cursor.fetchone()
+    
+    # 2. If not found in workshop_profile, check tenants table and auto-create profile
     if not row:
-        cursor.execute("SELECT * FROM workshop_profile WHERE id = 'default'")
+        cursor.execute("SELECT * FROM tenants WHERE id = ? LIMIT 1", (tid,))
+        t_row = cursor.fetchone()
+        if t_row:
+            t = dict(t_row)
+            cursor.execute("""
+            INSERT OR REPLACE INTO workshop_profile (
+                id, tenant_id, name, subtitle, owner_name, phone, email, address, gstin, logo_url,
+                upi_id, upi_payee_name, bank_name, bank_account_no, bank_ifsc, bank_branch,
+                gst_slabs, language, currency, master_pin, terms, default_state, default_gst_type, tax_regime, round_off_enabled, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Main', ?, ?, '₹', ?, ?, 'Kerala (32)', 'INTRA_STATE', 'REGULAR_GST', 1, datetime('now'), datetime('now'))
+            """, (
+                t["id"], t["id"], t["name"], "Automotive Electrical & Electronic Service Center",
+                t.get("owner_name", ""), t.get("phone", ""), t.get("email", ""), t.get("address", ""),
+                t.get("gstin", ""), t.get("logo_url", ""), t.get("upi_id", ""), t.get("upi_payee_name", t["name"]),
+                t.get("bank_name", ""), t.get("bank_account_no", ""), t.get("bank_ifsc", ""),
+                t.get("gst_slabs", '["0", "5", "12", "18", "28"]'), t.get("language", "en"), t.get("master_pin", "1234"),
+                "1. Electrical parts warranty as per manufacturer policy.\n2. Goods once fitted cannot be returned."
+            ))
+            conn.commit()
+            cursor.execute("SELECT * FROM workshop_profile WHERE tenant_id = ? LIMIT 1", (tid,))
+            row = cursor.fetchone()
+
+    # 3. Fallback to default
+    if not row:
+        cursor.execute("SELECT * FROM workshop_profile WHERE id = 'default' LIMIT 1")
         row = cursor.fetchone()
 
     conn.close()
     if row:
         return dict(row)
     return {
-        "id": "default",
+        "id": tid,
+        "tenant_id": tid,
         "name": "SPARK AUTO ELECTRICALS",
         "subtitle": "Auto Electrical & Electronic Service Center",
         "owner_name": "Suresh Kumar",
@@ -122,25 +155,26 @@ def get_current_workshop(request: Optional[Request] = None) -> Dict[str, Any]:
     }
 
 # Helper: Check current SaaS subscription status
-def check_saas_subscription(request: Optional[Request] = None) -> Dict[str, Any]:
+def check_saas_subscription(request: Optional[Request] = None, tenant_id: Optional[str] = None) -> Dict[str, Any]:
     conn = db.get_db_connection()
     cursor = conn.cursor()
-    tenant_id = None
-    if request:
+    tid = tenant_id
+    if not tid and request:
         user = get_session_user(request)
         if user and user.get("tenant_id"):
-            tenant_id = user["tenant_id"]
+            tid = user["tenant_id"]
 
-    if tenant_id and tenant_id not in ("default", "tenant_1"):
-        cursor.execute("SELECT * FROM tenants WHERE id = ? LIMIT 1", (tenant_id,))
+    if not tid:
+        tid = "tenant_1"
+
+    cursor.execute("SELECT * FROM tenants WHERE id = ? LIMIT 1", (tid,))
+    t_row = cursor.fetchone()
+    cursor.execute("SELECT * FROM subscriptions WHERE tenant_id = ? AND is_active = 1 ORDER BY end_date DESC LIMIT 1", (tid,))
+    s_row = cursor.fetchone()
+
+    if not t_row:
+        cursor.execute("SELECT * FROM tenants LIMIT 1")
         t_row = cursor.fetchone()
-        cursor.execute("SELECT * FROM subscriptions WHERE tenant_id = ? AND is_active = 1 ORDER BY end_date DESC LIMIT 1", (tenant_id,))
-        s_row = cursor.fetchone()
-    else:
-        cursor.execute("SELECT * FROM tenants WHERE id = 'tenant_1' OR id = 'default-workshop' LIMIT 1")
-        t_row = cursor.fetchone()
-        cursor.execute("SELECT * FROM subscriptions WHERE is_active = 1 ORDER BY end_date DESC LIMIT 1")
-        s_row = cursor.fetchone()
 
     conn.close()
 
@@ -238,6 +272,7 @@ def get_session_user(request: Request) -> Optional[dict]:
     return dict(row) if row else None
 
 templates.env.globals["get_session_user"] = get_session_user
+templates.env.globals["get_current_workshop"] = get_current_workshop
 
 # Dynamic Base URL resolver for public share links & WhatsApp downloads
 def get_base_url(request: Optional[Request] = None) -> str:
@@ -532,31 +567,33 @@ async def update_master_pin(request: Request, master_pin: str = Form(...)):
 async def dashboard_page(request: Request):
     conn = db.get_db_connection()
     cursor = conn.cursor()
+    tenant_id = get_current_tenant_id(request)
     
-    cursor.execute("SELECT COUNT(*) FROM job_cards WHERE status NOT IN ('DELIVERED', 'CANCELLED')")
+    cursor.execute("SELECT COUNT(*) FROM job_cards WHERE tenant_id = ? AND status NOT IN ('DELIVERED', 'CANCELLED')", (tenant_id,))
     active_jobs_count = cursor.fetchone()[0]
     
     today_str = datetime.now().strftime("%Y-%m-%d")
-    cursor.execute("SELECT COALESCE(SUM(amount_paid), 0), COUNT(*) FROM invoices WHERE date(invoice_date) = date(?)", (today_str,))
+    cursor.execute("SELECT COALESCE(SUM(amount_paid), 0), COUNT(*) FROM invoices WHERE tenant_id = ? AND date(invoice_date) = date(?)", (tenant_id, today_str))
     rev_row = cursor.fetchone()
     today_revenue = rev_row[0]
     today_invoices_count = rev_row[1]
     
-    cursor.execute("SELECT COALESCE(SUM(balance_due), 0) FROM invoices WHERE balance_due > 0")
+    cursor.execute("SELECT COALESCE(SUM(balance_due), 0) FROM invoices WHERE tenant_id = ? AND balance_due > 0", (tenant_id,))
     total_khata_dues = cursor.fetchone()[0]
     
-    cursor.execute("SELECT COUNT(*) FROM inventory_items WHERE stock_qty <= min_stock_alert")
+    cursor.execute("SELECT COUNT(*) FROM inventory_items WHERE tenant_id = ? AND stock_qty <= min_stock_alert", (tenant_id,))
     low_stock_count = cursor.fetchone()[0]
     
-    cursor.execute("SELECT * FROM job_cards WHERE status NOT IN ('DELIVERED', 'CANCELLED') ORDER BY created_at DESC LIMIT 6")
+    cursor.execute("SELECT * FROM job_cards WHERE tenant_id = ? AND status NOT IN ('DELIVERED', 'CANCELLED') ORDER BY created_at DESC LIMIT 6", (tenant_id,))
     active_jobs = [dict(row) for row in cursor.fetchall()]
     
-    cursor.execute("SELECT * FROM technicians ORDER BY total_jobs DESC")
+    cursor.execute("SELECT * FROM technicians WHERE tenant_id = ? ORDER BY total_jobs DESC", (tenant_id,))
     technicians = [dict(row) for row in cursor.fetchall()]
     
-    cursor.execute("SELECT * FROM invoices ORDER BY created_at DESC LIMIT 8")
+    cursor.execute("SELECT * FROM invoices WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 8", (tenant_id,))
     recent_invoices = [dict(row) for row in cursor.fetchall()]
     
+    workshop = get_current_workshop(request)
     conn.close()
     
     return templates.TemplateResponse(
@@ -572,6 +609,7 @@ async def dashboard_page(request: Request):
             "active_jobs": active_jobs,
             "technicians": technicians,
             "recent_invoices": recent_invoices,
+            "workshop": workshop
         }
     )
 
@@ -579,8 +617,9 @@ async def dashboard_page(request: Request):
 async def job_cards_page(request: Request, filter: Optional[str] = None, status: Optional[str] = None):
     conn = db.get_db_connection()
     cursor = conn.cursor()
+    tenant_id = get_current_tenant_id(request)
     
-    cursor.execute("SELECT * FROM job_cards ORDER BY created_at DESC")
+    cursor.execute("SELECT * FROM job_cards WHERE tenant_id = ? ORDER BY created_at DESC", (tenant_id,))
     all_jobs_raw = [dict(row) for row in cursor.fetchall()]
     
     all_jobs = []
@@ -600,7 +639,7 @@ async def job_cards_page(request: Request, filter: Optional[str] = None, status:
     elif status:
         filtered_jobs = [j for j in all_jobs if j.get("status") == status]
         
-    cursor.execute("SELECT * FROM technicians ORDER BY name ASC")
+    cursor.execute("SELECT * FROM technicians WHERE tenant_id = ? ORDER BY name ASC", (tenant_id,))
     technicians = [dict(row) for row in cursor.fetchall()]
 
     # Fetch registered customers & vehicles for quick auto-fill in modal
@@ -609,8 +648,9 @@ async def job_cards_page(request: Request, filter: Optional[str] = None, status:
            v.reg_number as vehicle_reg_no, v.make_model as vehicle_make_model, v.odometer
     FROM customers c
     LEFT JOIN vehicles v ON c.id = v.customer_id
+    WHERE c.tenant_id = ?
     ORDER BY c.name ASC
-    """)
+    """, (tenant_id,))
     registered_customers = [dict(row) for row in cursor.fetchall()]
 
     conn.close()
@@ -746,10 +786,15 @@ async def create_job_card(
         comp_list = []
     conn = db.get_db_connection()
     cursor = conn.cursor()
+    tenant_id = get_current_tenant_id(request)
     
     cursor.execute("SELECT COUNT(*) FROM job_cards")
     cnt = cursor.fetchone()[0] + 1
     job_number = f"JOB-2026-{cnt:03d}"
+    cursor.execute("SELECT id FROM job_cards WHERE job_number = ?", (job_number,))
+    while cursor.fetchone():
+        cnt += 1
+        job_number = f"JOB-2026-{cnt:03d}"
     job_id = f"job_{uuid.uuid4().hex[:8]}"
     
     tech_name = None
@@ -767,7 +812,7 @@ async def create_job_card(
         cursor.execute("UPDATE customers SET total_visits = total_visits + 1 WHERE id = ?", (customer_id,))
     else:
         customer_id = f"cust_{uuid.uuid4().hex[:8]}"
-        cursor.execute("INSERT INTO customers (id, name, phone, created_at) VALUES (?, ?, ?, ?)", (customer_id, customer_name, customer_phone, now_ist))
+        cursor.execute("INSERT INTO customers (id, tenant_id, name, phone, created_at) VALUES (?, ?, ?, ?, ?)", (customer_id, tenant_id, customer_name, customer_phone, now_ist))
         
     cursor.execute("SELECT id FROM vehicles WHERE reg_number = ?", (vehicle_reg_no.strip().upper(),))
     v_row = cursor.fetchone()
@@ -777,19 +822,19 @@ async def create_job_card(
     else:
         vehicle_id = f"veh_{uuid.uuid4().hex[:8]}"
         cursor.execute("""
-        INSERT INTO vehicles (id, reg_number, customer_id, customer_name, customer_phone, make_model, odometer, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (vehicle_id, vehicle_reg_no.strip().upper(), customer_id, customer_name, customer_phone, vehicle_make_model, odometer, now_ist))
+        INSERT INTO vehicles (id, tenant_id, reg_number, customer_id, customer_name, customer_phone, make_model, odometer, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (vehicle_id, tenant_id, vehicle_reg_no.strip().upper(), customer_id, customer_name, customer_phone, vehicle_make_model, odometer, now_ist))
         
     complaints_json = json.dumps(comp_list)
     cursor.execute("""
     INSERT INTO job_cards (
-        id, job_number, customer_id, customer_name, customer_phone, vehicle_id, vehicle_reg_no,
+        id, tenant_id, job_number, customer_id, customer_name, customer_phone, vehicle_id, vehicle_reg_no,
         vehicle_make_model, odometer, assigned_technician_id, assigned_technician_name,
         status, complaints, custom_complaint_notes, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RECEIVED', ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RECEIVED', ?, ?, ?)
     """, (
-        job_id, job_number, customer_id, customer_name, customer_phone, vehicle_id,
+        job_id, tenant_id, job_number, customer_id, customer_name, customer_phone, vehicle_id,
         vehicle_reg_no.strip().upper(), vehicle_make_model, odometer, assigned_technician_id,
         tech_name, complaints_json, custom_complaint_notes, now_ist
     ))
@@ -1361,6 +1406,7 @@ async def convert_job_card_to_invoice(job_id: str):
 async def billing_page(request: Request, from_job: Optional[str] = Query(None), edit_invoice: Optional[str] = Query(None)):
     conn = db.get_db_connection()
     cursor = conn.cursor()
+    tenant_id = get_current_tenant_id(request)
     
     prefill_job = None
     editing_invoice = None
@@ -1368,7 +1414,7 @@ async def billing_page(request: Request, from_job: Optional[str] = Query(None), 
     prefill_items_json = "[]"
     
     if edit_invoice:
-        cursor.execute("SELECT * FROM invoices WHERE id = ?", (edit_invoice,))
+        cursor.execute("SELECT * FROM invoices WHERE id = ? AND tenant_id = ?", (edit_invoice, tenant_id))
         inv_r = cursor.fetchone()
         if inv_r:
             cursor.execute("SELECT * FROM invoice_items WHERE invoice_id = ?", (edit_invoice,))
@@ -1377,10 +1423,10 @@ async def billing_page(request: Request, from_job: Optional[str] = Query(None), 
             editing_invoice["items"] = inv_items
             prefill_items_json = json.dumps(inv_items, default=str)
     elif from_job:
-        cursor.execute("SELECT * FROM job_cards WHERE id = ?", (from_job,))
+        cursor.execute("SELECT * FROM job_cards WHERE id = ? AND tenant_id = ?", (from_job, tenant_id))
         job_row = cursor.fetchone()
         if job_row:
-            cursor.execute("SELECT * FROM invoices WHERE job_card_id = ? AND payment_status != 'CANCELLED' ORDER BY created_at DESC LIMIT 1", (from_job,))
+            cursor.execute("SELECT * FROM invoices WHERE job_card_id = ? AND payment_status != 'CANCELLED' AND tenant_id = ? ORDER BY created_at DESC LIMIT 1", (from_job, tenant_id))
             eli = cursor.fetchone()
             if eli:
                 existing_linked_invoice = dict(eli)
@@ -1393,21 +1439,22 @@ async def billing_page(request: Request, from_job: Optional[str] = Query(None), 
             }
             prefill_items_json = json.dumps(job_items, default=str)
 
-    cursor.execute("SELECT * FROM inventory_items ORDER BY part_name")
+    cursor.execute("SELECT * FROM inventory_items WHERE tenant_id = ? ORDER BY part_name", (tenant_id,))
     inventory_items = [dict(row) for row in cursor.fetchall()]
     
-    cursor.execute("SELECT * FROM invoices ORDER BY created_at DESC LIMIT 50")
+    cursor.execute("SELECT * FROM invoices WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 50", (tenant_id,))
     invoices = [dict(row) for row in cursor.fetchall()]
 
     cursor.execute("""
     SELECT c.name, c.phone, v.reg_number as vehicle_reg_no, v.make_model as vehicle_make_model
     FROM customers c
     LEFT JOIN vehicles v ON c.id = v.customer_id
+    WHERE c.tenant_id = ?
     ORDER BY c.name ASC
-    """)
+    """, (tenant_id,))
     customers = [dict(row) for row in cursor.fetchall()]
 
-    cursor.execute("SELECT gst_slabs FROM workshop_profile WHERE id = 'default'")
+    cursor.execute("SELECT gst_slabs FROM workshop_profile WHERE tenant_id = ? OR id = ?", (tenant_id, tenant_id))
     prof_row = cursor.fetchone()
     gst_slabs_list = ["0", "5", "12", "18", "28"]
     if prof_row and prof_row["gst_slabs"]:
@@ -1545,8 +1592,10 @@ async def save_or_update_pos_invoice(request: Request, payload: Dict[str, Any], 
     cust_gstin = (payload.get("customer_gstin") or "").strip()
     cust_id = None
 
+    tenant_id = get_current_tenant_id(request)
+
     if cust_phone:
-        cursor.execute("SELECT id, khata_balance FROM customers WHERE phone = ?", (cust_phone,))
+        cursor.execute("SELECT id, khata_balance FROM customers WHERE phone = ? AND tenant_id = ?", (cust_phone, tenant_id))
         c_row = cursor.fetchone()
         if c_row:
             cust_id = c_row["id"]
@@ -1557,20 +1606,20 @@ async def save_or_update_pos_invoice(request: Request, payload: Dict[str, Any], 
         else:
             cust_id = f"cust_{uuid.uuid4().hex[:8]}"
             cursor.execute("""
-            INSERT INTO customers (id, name, phone, address, gstin, total_visits, khata_balance, created_at)
-            VALUES (?, ?, ?, ?, ?, 1, ?, ?)
-            """, (cust_id, cust_name, cust_phone, cust_addr, cust_gstin, balance_due, now_ist))
+            INSERT INTO customers (id, tenant_id, name, phone, address, gstin, total_visits, khata_balance, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+            """, (cust_id, tenant_id, cust_name, cust_phone, cust_addr, cust_gstin, balance_due, now_ist))
 
     veh_reg = (payload.get("vehicle_reg_no") or "").strip().upper()
     if veh_reg:
-        cursor.execute("SELECT id FROM vehicles WHERE reg_number = ?", (veh_reg,))
+        cursor.execute("SELECT id FROM vehicles WHERE reg_number = ? AND tenant_id = ?", (veh_reg, tenant_id))
         v_row = cursor.fetchone()
         if not v_row:
             v_id = f"veh_{uuid.uuid4().hex[:8]}"
             cursor.execute("""
-            INSERT INTO vehicles (id, reg_number, customer_id, customer_name, customer_phone, make_model, odometer, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, 0, ?)
-            """, (v_id, veh_reg, cust_id, cust_name, cust_phone, payload.get("vehicle_make_model", "General"), now_ist))
+            INSERT INTO vehicles (id, tenant_id, reg_number, customer_id, customer_name, customer_phone, make_model, odometer, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
+            """, (v_id, tenant_id, veh_reg, cust_id, cust_name, cust_phone, payload.get("vehicle_make_model", "General"), now_ist))
     
     if editing_id:
         # --- UPDATE EXISTING INVOICE (Same invoice # and id preserved) ---
@@ -1631,20 +1680,24 @@ async def save_or_update_pos_invoice(request: Request, payload: Dict[str, Any], 
         cursor.execute("SELECT COUNT(*) FROM invoices")
         cnt = cursor.fetchone()[0] + 1
         inv_number = f"INV-2026-{cnt:03d}"
+        cursor.execute("SELECT id FROM invoices WHERE invoice_number = ?", (inv_number,))
+        while cursor.fetchone():
+            cnt += 1
+            inv_number = f"INV-2026-{cnt:03d}"
         inv_id = f"inv_{uuid.uuid4().hex[:8]}"
         upi_link = generate_upi_link(vpa, workshop.get("name", "Auto Workshop"), pay_for_qr, f"Inv_{inv_number}")
 
         cursor.execute("""
         INSERT INTO invoices (
-            id, invoice_number, invoice_date, invoice_type, job_card_id, job_number,
+            id, tenant_id, invoice_number, invoice_date, invoice_type, job_card_id, job_number,
             customer_name, customer_phone, vehicle_reg_no,
             subtotal_labor, subtotal_parts, taxable_subtotal,
             cgst_total, sgst_total, igst_total, tax_total, discount_amount,
             round_off, grand_total, amount_paid, balance_due, payment_status, payment_mode,
             is_interstate, upi_payment_link, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            inv_id, inv_number, today_str, payload.get("invoice_type", "JOB_SERVICE" if job_card_id else "COUNTER_SALE"),
+            inv_id, tenant_id, inv_number, today_str, payload.get("invoice_type", "JOB_SERVICE" if job_card_id else "COUNTER_SALE"),
             job_card_id, job_number,
             cust_name, cust_phone,
             veh_reg,
@@ -2024,9 +2077,10 @@ async def get_khata_reminder_link(request: Request, invoice_id: str):
 async def inventory_page(request: Request, category: Optional[str] = None, filter: Optional[str] = None):
     conn = db.get_db_connection()
     cursor = conn.cursor()
+    tenant_id = get_current_tenant_id(request)
     
-    query = "SELECT * FROM inventory_items WHERE 1=1"
-    params = []
+    query = "SELECT * FROM inventory_items WHERE tenant_id = ?"
+    params = [tenant_id]
     
     if filter == "low":
         query += " AND stock_qty <= min_stock_alert"
@@ -2038,10 +2092,10 @@ async def inventory_page(request: Request, category: Optional[str] = None, filte
     cursor.execute(query, params)
     items = [dict(row) for row in cursor.fetchall()]
     
-    cursor.execute("SELECT COUNT(*) FROM inventory_items WHERE stock_qty <= min_stock_alert")
+    cursor.execute("SELECT COUNT(*) FROM inventory_items WHERE tenant_id = ? AND stock_qty <= min_stock_alert", (tenant_id,))
     low_stock_count = cursor.fetchone()[0]
     
-    cursor.execute("SELECT DISTINCT category FROM inventory_items WHERE category IS NOT NULL")
+    cursor.execute("SELECT DISTINCT category FROM inventory_items WHERE tenant_id = ? AND category IS NOT NULL", (tenant_id,))
     categories = [row[0] for row in cursor.fetchall()]
     
     conn.close()
@@ -2056,7 +2110,7 @@ async def inventory_page(request: Request, category: Optional[str] = None, filte
             "selected_category": category,
             "is_low_filter": filter == "low",
             "low_stock_count": low_stock_count,
-            "workshop": get_current_workshop()
+            "workshop": get_current_workshop(request)
         }
     )
 
@@ -2176,6 +2230,7 @@ async def barcode_labels_page(request: Request):
 
 @app.post("/api/inventory")
 async def add_inventory_item(
+    request: Request,
     part_name: str = Form(...),
     barcode: str = Form(...),
     part_number: Optional[str] = Form(None),
@@ -2191,17 +2246,18 @@ async def add_inventory_item(
 ):
     conn = db.get_db_connection()
     cursor = conn.cursor()
+    tenant_id = get_current_tenant_id(request)
     item_id = f"item_{uuid.uuid4().hex[:8]}"
     clean_pn = (part_number or "").strip().upper()
     clean_rack = (location_rack or "Main").strip()
     clean_bin = (position_bin or "").strip()
     cursor.execute("""
     INSERT INTO inventory_items (
-        id, part_name, part_number, sku, barcode, category, stock_qty, min_stock_alert,
+        id, tenant_id, part_name, part_number, sku, barcode, category, stock_qty, min_stock_alert,
         cost_price, selling_price, tax_rate, hsn_code, unit, warranty_months,
         location_rack, position_bin, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, 5, ?, ?, ?, ?, 'pcs', ?, ?, ?, datetime('now'), datetime('now'))
-    """, (item_id, part_name, clean_pn, barcode, barcode, category, stock_qty, cost_price, selling_price, tax_rate, hsn_code, warranty_months, clean_rack, clean_bin))
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 5, ?, ?, ?, ?, 'pcs', ?, ?, ?, datetime('now'), datetime('now'))
+    """, (item_id, tenant_id, part_name, clean_pn, barcode, barcode, category, stock_qty, cost_price, selling_price, tax_rate, hsn_code, warranty_months, clean_rack, clean_bin))
     
     db.log_audit("ADD_INVENTORY_PART", "inventory_items", item_id, f"Added part: {part_name} (PN: {clean_pn}, Barcode: {barcode}, Rack: {clean_rack}, Pos: {clean_bin})", cursor=cursor)
     conn.commit()
@@ -2251,7 +2307,8 @@ async def adjust_inventory_stock(
 async def technicians_page(request: Request):
     conn = db.get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM technicians ORDER BY total_jobs DESC")
+    tenant_id = get_current_tenant_id(request)
+    cursor.execute("SELECT * FROM technicians WHERE tenant_id = ? ORDER BY total_jobs DESC", (tenant_id,))
     technicians = [dict(row) for row in cursor.fetchall()]
     
     for t in technicians:
@@ -2278,6 +2335,7 @@ async def technicians_page(request: Request):
 
 @app.post("/api/technicians")
 async def add_technician(
+    request: Request,
     name: str = Form(...),
     phone: str = Form(...),
     role: str = Form("Senior Auto Electrician"),
@@ -2286,11 +2344,12 @@ async def add_technician(
 ):
     conn = db.get_db_connection()
     cursor = conn.cursor()
+    tenant_id = get_current_tenant_id(request)
     tech_id = f"tech_{uuid.uuid4().hex[:8]}"
     cursor.execute("""
-    INSERT INTO technicians (id, name, phone, role, commission_pct, status, is_on_leave, current_advance_balance, notes, total_jobs, created_at)
-    VALUES (?, ?, ?, ?, ?, 'Active', 0, 0.0, ?, 0, datetime('now'))
-    """, (tech_id, name, phone, role, commission_pct, notes))
+    INSERT INTO technicians (id, tenant_id, name, phone, role, commission_pct, status, is_on_leave, current_advance_balance, notes, total_jobs, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, 'Active', 0, 0.0, ?, 0, datetime('now'))
+    """, (tech_id, tenant_id, name, phone, role, commission_pct, notes))
     db.log_audit("ADD_TECHNICIAN", "technicians", tech_id, f"Added staff: {name} ({role})", cursor=cursor)
     conn.commit()
     conn.close()
@@ -2493,17 +2552,18 @@ async def get_technician_ledger(tech_id: str):
 async def purchases_page(request: Request):
     conn = db.get_db_connection()
     cursor = conn.cursor()
+    tenant_id = get_current_tenant_id(request)
     
-    cursor.execute("SELECT * FROM purchase_bills ORDER BY bill_date DESC")
+    cursor.execute("SELECT * FROM purchase_bills WHERE tenant_id = ? ORDER BY bill_date DESC", (tenant_id,))
     purchases = [dict(row) for row in cursor.fetchall()]
     
-    cursor.execute("SELECT * FROM purchase_returns ORDER BY return_date DESC")
+    cursor.execute("SELECT * FROM purchase_returns WHERE tenant_id = ? ORDER BY return_date DESC", (tenant_id,))
     purchase_returns = [dict(row) for row in cursor.fetchall()]
 
-    cursor.execute("SELECT * FROM inventory_items ORDER BY part_name")
+    cursor.execute("SELECT * FROM inventory_items WHERE tenant_id = ? ORDER BY part_name", (tenant_id,))
     inventory_items = [dict(row) for row in cursor.fetchall()]
 
-    cursor.execute("SELECT * FROM suppliers ORDER BY name")
+    cursor.execute("SELECT * FROM suppliers WHERE tenant_id = ? ORDER BY name", (tenant_id,))
     suppliers = [dict(row) for row in cursor.fetchall()]
 
     conn.close()
@@ -2540,34 +2600,35 @@ async def record_purchase_bill(
 ):
     conn = db.get_db_connection()
     cursor = conn.cursor()
+    tenant_id = get_current_tenant_id(request)
     pur_id = f"pur_{uuid.uuid4().hex[:8]}"
     now_ist = get_ist_now_str()
 
     clean_sup_name = supplier_name.strip()
     # Resolve or create supplier record to maintain complete supplier history
     if not supplier_id and clean_sup_name:
-        cursor.execute("SELECT id FROM suppliers WHERE LOWER(name) = LOWER(?)", (clean_sup_name,))
+        cursor.execute("SELECT id FROM suppliers WHERE LOWER(name) = LOWER(?) AND tenant_id = ?", (clean_sup_name, tenant_id))
         s_row = cursor.fetchone()
         if s_row:
             supplier_id = s_row["id"]
         else:
             supplier_id = f"sup_{uuid.uuid4().hex[:8]}"
             cursor.execute("""
-            INSERT INTO suppliers (id, name, phone, state, created_at)
-            VALUES (?, ?, ?, ?, datetime('now'))
-            """, (supplier_id, clean_sup_name, "", supplier_state or "Kerala (32)"))
+            INSERT INTO suppliers (id, tenant_id, name, phone, state, created_at)
+            VALUES (?, ?, ?, ?, ?, datetime('now'))
+            """, (supplier_id, tenant_id, clean_sup_name, "", supplier_state or "Kerala (32)"))
 
     if supplier_id:
         cursor.execute("UPDATE suppliers SET total_purchases = total_purchases + ? WHERE id = ?", (total_amount, supplier_id))
 
     cursor.execute("""
     INSERT INTO purchase_bills (
-        id, bill_number, supplier_id, supplier_name, bill_date, total_amount, payment_mode, 
+        id, tenant_id, bill_number, supplier_id, supplier_name, bill_date, total_amount, payment_mode, 
         status, notes, created_at, supplier_state, is_interstate, cgst_amount, sgst_amount, igst_amount
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
-        pur_id, bill_number, supplier_id, clean_sup_name, bill_date, total_amount, payment_mode, 
+        pur_id, tenant_id, bill_number, supplier_id, clean_sup_name, bill_date, total_amount, payment_mode, 
         status, notes, now_ist, supplier_state or "Kerala (32)", is_interstate or 0,
         cgst_amount or 0.0, sgst_amount or 0.0, igst_amount or 0.0
     ))
@@ -2712,16 +2773,18 @@ async def record_purchase_return(
 async def suppliers_page(request: Request):
     conn = db.get_db_connection()
     cursor = conn.cursor()
+    tenant_id = get_current_tenant_id(request)
     
     cursor.execute("""
     SELECT s.*, 
            COUNT(DISTINCT pb.id) as total_bills,
            COALESCE(SUM(pb.total_amount), 0.0) as calculated_total_purchases
     FROM suppliers s
-    LEFT JOIN purchase_bills pb ON s.id = pb.supplier_id OR LOWER(s.name) = LOWER(pb.supplier_name)
+    LEFT JOIN purchase_bills pb ON (s.id = pb.supplier_id OR LOWER(s.name) = LOWER(pb.supplier_name)) AND pb.tenant_id = ?
+    WHERE s.tenant_id = ?
     GROUP BY s.id
     ORDER BY s.name
-    """)
+    """, (tenant_id, tenant_id))
     suppliers = [dict(row) for row in cursor.fetchall()]
     conn.close()
     
@@ -2736,6 +2799,7 @@ async def suppliers_page(request: Request):
 
 @app.post("/api/suppliers")
 async def create_supplier(
+    request: Request,
     name: str = Form(...),
     contact_person: Optional[str] = Form(None),
     phone: str = Form(...),
@@ -2750,13 +2814,14 @@ async def create_supplier(
 ):
     conn = db.get_db_connection()
     cursor = conn.cursor()
+    tenant_id = get_current_tenant_id(request)
     sup_id = f"sup_{uuid.uuid4().hex[:8]}"
     
     cursor.execute("""
     INSERT INTO suppliers (
-        id, name, contact_person, phone, whatsapp, email, address, city, state, gstin, payment_terms, notes, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-    """, (sup_id, name.strip(), contact_person, phone.strip(), whatsapp or phone.strip(), email, address, city, state, gstin, payment_terms, notes))
+        id, tenant_id, name, contact_person, phone, whatsapp, email, address, city, state, gstin, payment_terms, notes, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    """, (sup_id, tenant_id, name.strip(), contact_person, phone.strip(), whatsapp or phone.strip(), email, address, city, state, gstin, payment_terms, notes))
     
     db.log_audit("CREATE_SUPPLIER", "suppliers", sup_id, f"Created supplier {name}", cursor=cursor)
     conn.commit()
@@ -3207,7 +3272,8 @@ async def add_bank_account(
 async def expenses_page(request: Request):
     conn = db.get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM expenses ORDER BY expense_date DESC, created_at DESC")
+    tenant_id = get_current_tenant_id(request)
+    cursor.execute("SELECT * FROM expenses WHERE tenant_id = ? ORDER BY expense_date DESC, created_at DESC", (tenant_id,))
     expenses = [dict(row) for row in cursor.fetchall()]
     conn.close()
     
@@ -3225,6 +3291,7 @@ async def expenses_page(request: Request):
 
 @app.post("/api/expenses")
 async def record_expense(
+    request: Request,
     title: str = Form(...),
     category: str = Form("Electricity Bill"),
     amount: float = Form(...),
@@ -3235,11 +3302,12 @@ async def record_expense(
 ):
     conn = db.get_db_connection()
     cursor = conn.cursor()
+    tenant_id = get_current_tenant_id(request)
     exp_id = f"exp_{uuid.uuid4().hex[:8]}"
     cursor.execute("""
-    INSERT INTO expenses (id, title, category, amount, payment_mode, expense_date, paid_to, reference_no, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-    """, (exp_id, title, category, amount, payment_mode, expense_date, paid_to, reference_no))
+    INSERT INTO expenses (id, tenant_id, title, category, amount, payment_mode, expense_date, paid_to, reference_no, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    """, (exp_id, tenant_id, title, category, amount, payment_mode, expense_date, paid_to, reference_no))
     conn.commit()
     conn.close()
     return RedirectResponse(url="/expenses", status_code=303)
@@ -3293,7 +3361,8 @@ async def export_ca_gstr1_excel(financial_year: Optional[str] = None):
 async def khata_page(request: Request):
     conn = db.get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM invoices WHERE balance_due > 0 ORDER BY invoice_date DESC")
+    tenant_id = get_current_tenant_id(request)
+    cursor.execute("SELECT * FROM invoices WHERE tenant_id = ? AND balance_due > 0 ORDER BY invoice_date DESC", (tenant_id,))
     unpaid_invoices = [dict(row) for row in cursor.fetchall()]
     
     total_dues = sum(inv["balance_due"] for inv in unpaid_invoices)
@@ -3332,8 +3401,8 @@ async def activity_logs_page(request: Request):
 
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request):
-    profile = get_current_workshop()
-    saas_info = check_saas_subscription()
+    profile = get_current_workshop(request)
+    saas_info = check_saas_subscription(request)
     is_supabase_connected = bool(db.supabase_client)
     
     return templates.TemplateResponse(
@@ -3350,6 +3419,7 @@ async def settings_page(request: Request):
 
 @app.post("/api/settings/profile")
 async def update_workshop_profile(
+    request: Request,
     name: str = Form(...),
     subtitle: Optional[str] = Form(None),
     phone: str = Form(...),
@@ -3370,6 +3440,8 @@ async def update_workshop_profile(
 ):
     conn = db.get_db_connection()
     cursor = conn.cursor()
+    tenant_id = get_current_tenant_id(request)
+    
     cursor.execute("""
     UPDATE workshop_profile SET
         name = ?, subtitle = ?, phone = ?, email = ?, address = ?, gstin = ?,
@@ -3377,9 +3449,18 @@ async def update_workshop_profile(
         language = ?, master_pin = ?, terms = ?,
         default_state = ?, tax_regime = ?, round_off_enabled = ?,
         updated_at = datetime('now')
-    WHERE id = 'default'
-    """, (name, subtitle, phone, email, address, gstin, upi_id, bank_name, bank_account_no, bank_ifsc, bank_branch, whatsapp_lang, master_pin, terms, default_state, tax_regime, round_off_enabled))
-    db.log_audit("UPDATE_PROFILE", "workshop_profile", "default", f"Updated garage profile ({name})", cursor=cursor)
+    WHERE tenant_id = ? OR id = ?
+    """, (name, subtitle, phone, email, address, gstin, upi_id, bank_name, bank_account_no, bank_ifsc, bank_branch, whatsapp_lang, master_pin, terms, default_state, tax_regime, round_off_enabled, tenant_id, tenant_id))
+    
+    cursor.execute("""
+    UPDATE tenants SET
+        name = ?, phone = ?, whatsapp_mobile = ?, email = ?, address = ?, gstin = ?,
+        upi_id = ?, bank_name = ?, bank_account_no = ?, bank_ifsc = ?, bank_branch = ?,
+        language = ?, master_pin = ?
+    WHERE id = ?
+    """, (name, phone, phone, email, address, gstin, upi_id, bank_name, bank_account_no, bank_ifsc, bank_branch, whatsapp_lang, master_pin, tenant_id))
+
+    db.log_audit("UPDATE_PROFILE", "workshop_profile", tenant_id, f"Updated garage profile ({name})", cursor=cursor)
     conn.commit()
     conn.close()
     return RedirectResponse(url="/settings", status_code=303)
@@ -3399,7 +3480,7 @@ async def public_invoice_view(request: Request, invoice_id: str):
     invoice["items"] = [dict(row) for row in cursor.fetchall()]
     conn.close()
     
-    workshop = get_current_workshop()
+    workshop = get_current_workshop(request=request, tenant_id=invoice.get("tenant_id"))
     
     vpa = workshop.get("upi_id", "sparkautoworkshop@okaxis")
     grand_total = float(invoice.get("grand_total", 0.0))
@@ -3437,7 +3518,7 @@ async def public_job_view(request: Request, job_id: str):
     except Exception:
         complaints_list = [job["complaints"]] if job["complaints"] else []
         
-    workshop = get_current_workshop()
+    workshop = get_current_workshop(request=request, tenant_id=job.get("tenant_id"))
     
     return templates.TemplateResponse(
         request=request,
@@ -3467,7 +3548,7 @@ async def print_invoice_page(request: Request, invoice_id: str, format: Optional
     items = [dict(r) for r in cursor.fetchall()]
     conn.close()
 
-    workshop = get_current_workshop()
+    workshop = get_current_workshop(request=request, tenant_id=invoice.get("tenant_id"))
     vpa = workshop.get("upi_id", "sparkautoworkshop@okaxis")
     grand_total = float(invoice.get("grand_total", 0.0))
     balance_due = float(invoice.get("balance_due", 0.0))

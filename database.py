@@ -675,8 +675,13 @@ def run_schema_migrations(cursor, conn):
         ("technicians", "tenant_id", "TEXT DEFAULT 'tenant_1'"),
         ("suppliers", "tenant_id", "TEXT DEFAULT 'tenant_1'"),
         ("purchase_bills", "tenant_id", "TEXT DEFAULT 'tenant_1'"),
+        ("purchase_returns", "tenant_id", "TEXT DEFAULT 'tenant_1'"),
         ("sales_returns", "tenant_id", "TEXT DEFAULT 'tenant_1'"),
         ("workshop_profile", "tenant_id", "TEXT DEFAULT 'tenant_1'"),
+        ("attendance", "tenant_id", "TEXT DEFAULT 'tenant_1'"),
+        ("employee_wages", "tenant_id", "TEXT DEFAULT 'tenant_1'"),
+        ("employee_advances", "tenant_id", "TEXT DEFAULT 'tenant_1'"),
+        ("activity_logs", "tenant_id", "TEXT DEFAULT 'tenant_1'"),
     ]
 
     for table, col, col_type in migrations:

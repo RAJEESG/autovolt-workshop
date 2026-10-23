@@ -13,6 +13,7 @@ from fastapi.templating import Jinja2Templates
 from dotenv import load_dotenv
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
 
 import database as db
 from auth_helper import hash_password, verify_password, create_signed_session_cookie, verify_signed_session_cookie
@@ -299,6 +300,25 @@ async def create_client_workshop(
     VALUES (?, ?, ?, ?, ?, 1, ?, ?, 'Initial Onboarding License', datetime('now'))
     """, (sub_id, tenant_id, f"PRO_{plan_type}", start_date, expiry_date, plan_type, total_price))
 
+    # Insert Workshop Profile Record for new Tenant
+    cursor.execute("""
+    INSERT INTO workshop_profile (
+        id, tenant_id, name, subtitle, owner_name, phone, email, address, gstin, logo_url,
+        upi_id, upi_payee_name, bank_name, bank_account_no, bank_ifsc, bank_branch,
+        gst_slabs, language, currency, master_pin, terms, default_state, default_gst_type, tax_regime, round_off_enabled, created_at, updated_at
+    ) VALUES (
+        ?, ?, ?, 'Automotive Electrical & Electronic Service Center', ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?, 'Main',
+        ?, ?, '₹', ?, '1. Electrical parts warranty as per manufacturer policy.\n2. Goods once fitted cannot be returned.\n3. Payment due upon completion.', 'Kerala (32)', 'INTRA_STATE', 'REGULAR_GST', 1, datetime('now'), datetime('now')
+    )
+    """, (
+        tenant_id, tenant_id, name.strip(), owner_name.strip(), whatsapp_mobile.strip(), email.strip() if email else "",
+        address.strip(), gstin.strip() if gstin else "", logo_url.strip() if logo_url else "",
+        upi_id.strip(), upi_payee_name.strip() if upi_payee_name else name.strip(),
+        bank_name.strip() if bank_name else "", bank_account_no.strip() if bank_account_no else "",
+        bank_ifsc.strip() if bank_ifsc else "", gst_slabs_json, language, master_pin.strip()
+    ))
+
     # Create Initial Admin User for this Garage if username not taken
     cursor.execute("SELECT id FROM users WHERE username = ?", (initial_username.strip(),))
     existing_user = cursor.fetchone()
@@ -320,6 +340,11 @@ async def create_client_workshop(
     cursor.execute("SELECT COUNT(*) FROM saas_vendor_invoices")
     inv_count = cursor.fetchone()[0] + 1
     inv_no = f"HQ-INV-2026-{inv_count:03d}"
+    cursor.execute("SELECT id FROM saas_vendor_invoices WHERE invoice_no = ?", (inv_no,))
+    while cursor.fetchone():
+        inv_count += 1
+        inv_no = f"HQ-INV-2026-{inv_count:03d}"
+        cursor.execute("SELECT id FROM saas_vendor_invoices WHERE invoice_no = ?", (inv_no,))
 
     cursor.execute("""
     INSERT INTO saas_vendor_invoices (
@@ -377,19 +402,20 @@ async def update_client_workshop(
         bank_ifsc.strip() if bank_ifsc else "", gst_slabs_json, language, master_pin.strip(), tenant_id
     ))
 
-    # Also update workshop_profile if it matches default active tenant
+    # Also update workshop_profile for this tenant
     cursor.execute("""
     UPDATE workshop_profile SET
         name = ?, owner_name = ?, phone = ?, email = ?, address = ?, gstin = ?,
         logo_url = ?, upi_id = ?, upi_payee_name = ?, bank_name = ?, bank_account_no = ?, bank_ifsc = ?,
         gst_slabs = ?, language = ?, master_pin = ?, updated_at = datetime('now')
-    WHERE id = 'default'
+    WHERE tenant_id = ? OR id = ?
     """, (
         name.strip(), owner_name.strip(), whatsapp_mobile.strip(), email.strip() if email else "",
         address.strip(), gstin.strip() if gstin else "", logo_url.strip() if logo_url else "",
         upi_id.strip(), upi_payee_name.strip() if upi_payee_name else name.strip(),
         bank_name.strip() if bank_name else "", bank_account_no.strip() if bank_account_no else "",
-        bank_ifsc.strip() if bank_ifsc else "", gst_slabs_json, language, master_pin.strip()
+        bank_ifsc.strip() if bank_ifsc else "", gst_slabs_json, language, master_pin.strip(),
+        tenant_id, tenant_id
     ))
 
     db.log_audit("UPDATE_CLIENT_WORKSHOP", "tenants", tenant_id, f"Updated configuration for {name}", cursor=cursor)
@@ -407,6 +433,519 @@ async def toggle_tenant_status(tenant_id: str = Form(...), new_status: str = For
     conn.commit()
     conn.close()
     return RedirectResponse(url="/clients?msg=Workshop+status+updated!", status_code=303)
+
+# =========================================================
+# 📥 SINGLE WORKSHOP DATA EXPORT (EXCEL & JSON)
+# =========================================================
+@app.get("/api/admin/clients/{tenant_id}/export-excel")
+async def export_client_workshop_excel(tenant_id: str):
+    """Generate and download a comprehensive multi-sheet Excel backup workbook for a single workshop."""
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+
+    # 1. Fetch Tenant & Profile
+    cursor.execute("SELECT * FROM tenants WHERE id = ?", (tenant_id,))
+    tenant_row = cursor.fetchone()
+    if not tenant_row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Client workshop tenant not found")
+    tenant = dict(tenant_row)
+
+    cursor.execute("SELECT * FROM workshop_profile WHERE tenant_id = ? OR id = ?", (tenant_id, tenant_id))
+    prof_row = cursor.fetchone()
+    profile = dict(prof_row) if prof_row else tenant
+
+    # Invoices
+    cursor.execute("SELECT * FROM invoices WHERE tenant_id = ? ORDER BY invoice_date DESC, created_at DESC", (tenant_id,))
+    invoices = [dict(r) for r in cursor.fetchall()]
+
+    # Job Cards
+    cursor.execute("SELECT * FROM job_cards WHERE tenant_id = ? ORDER BY created_at DESC", (tenant_id,))
+    jobs = [dict(r) for r in cursor.fetchall()]
+
+    # Inventory
+    cursor.execute("SELECT * FROM inventory_items WHERE tenant_id = ? ORDER BY category, part_name", (tenant_id,))
+    inventory = [dict(r) for r in cursor.fetchall()]
+
+    # Customers & Vehicles
+    cursor.execute("""
+    SELECT c.*, v.reg_number as vehicle_reg_no, v.make_model as vehicle_make_model
+    FROM customers c
+    LEFT JOIN vehicles v ON c.id = v.customer_id
+    WHERE c.tenant_id = ?
+    ORDER BY c.name ASC
+    """, (tenant_id,))
+    customers = [dict(r) for r in cursor.fetchall()]
+
+    # Expenses
+    cursor.execute("SELECT * FROM expenses WHERE tenant_id = ? ORDER BY expense_date DESC", (tenant_id,))
+    expenses = [dict(r) for r in cursor.fetchall()]
+
+    # Purchases
+    cursor.execute("SELECT * FROM purchase_bills WHERE tenant_id = ? ORDER BY bill_date DESC", (tenant_id,))
+    purchases = [dict(r) for r in cursor.fetchall()]
+
+    # Technicians
+    cursor.execute("SELECT * FROM technicians WHERE tenant_id = ? ORDER BY name ASC", (tenant_id,))
+    technicians = [dict(r) for r in cursor.fetchall()]
+
+    # Subscriptions
+    cursor.execute("SELECT * FROM subscriptions WHERE tenant_id = ? ORDER BY created_at DESC", (tenant_id,))
+    subs = [dict(r) for r in cursor.fetchall()]
+
+    db.log_audit("EXPORT_WORKSHOP_DATA_EXCEL", "tenants", tenant_id, f"Exported complete Excel backup for {tenant['name']}", cursor=cursor)
+    conn.commit()
+    conn.close()
+
+    # Build Excel Workbook
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+
+    navy_header_fill = PatternFill(start_color="1E1B4B", end_color="1E1B4B", fill_type="solid")
+    indigo_fill = PatternFill(start_color="4338CA", end_color="4338CA", fill_type="solid")
+    light_blue_fill = PatternFill(start_color="EEF2FF", end_color="EEF2FF", fill_type="solid")
+    total_fill = PatternFill(start_color="E0E7FF", end_color="E0E7FF", fill_type="solid")
+
+    font_title = Font(name="Segoe UI", size=15, bold=True, color="FFFFFF")
+    font_subtitle = Font(name="Segoe UI", size=10, color="E0E7FF")
+    font_header = Font(name="Segoe UI", size=10, bold=True, color="FFFFFF")
+    font_bold = Font(name="Segoe UI", size=10, bold=True)
+    font_normal = Font(name="Segoe UI", size=10)
+
+    thin_border = Border(
+        left=Side(style='thin', color='CBD5E1'),
+        right=Side(style='thin', color='CBD5E1'),
+        top=Side(style='thin', color='CBD5E1'),
+        bottom=Side(style='thin', color='CBD5E1')
+    )
+
+    def style_header(ws, row_idx, num_cols):
+        ws.row_dimensions[row_idx].height = 24
+        for c in range(1, num_cols + 1):
+            cell = ws.cell(row=row_idx, column=c)
+            cell.fill = navy_header_fill
+            cell.font = font_header
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    def auto_fit_columns(ws):
+        ws.views.sheetView[0].showGridLines = True
+        for col in ws.columns:
+            max_len = 0
+            col_letter = get_column_letter(col[0].column)
+            for cell in col:
+                if cell.row in (1, 2):
+                    continue
+                val = str(cell.value or '')
+                max_len = max(max_len, len(val))
+            ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
+
+    today_str = datetime.now().strftime("%Y-%m-%d")
+
+    # SHEET 1: SUMMARY
+    ws1 = wb.create_sheet(title="Workshop Summary")
+    ws1.views.sheetView[0].showGridLines = True
+    ws1.merge_cells("A1:D1")
+    ws1["A1"] = f"{profile.get('name', tenant.get('name', 'Workshop'))} — DATA BACKUP ARCHIVE"
+    ws1["A1"].font = font_title
+    ws1["A1"].fill = indigo_fill
+    ws1["A1"].alignment = Alignment(horizontal="center", vertical="center")
+    ws1.row_dimensions[1].height = 34
+
+    ws1.merge_cells("A2:D2")
+    ws1["A2"] = f"AutoVolt Cloud SaaS Vendor Platform | Tenant ID: {tenant_id} | Exported Date: {today_str}"
+    ws1["A2"].font = font_subtitle
+    ws1["A2"].fill = navy_header_fill
+    ws1["A2"].alignment = Alignment(horizontal="center", vertical="center")
+    ws1.row_dimensions[2].height = 20
+
+    ws1.append([])
+
+    meta_fields = [
+        ("Workshop Legal Name", profile.get("name", "")),
+        ("Owner / Proprietor", profile.get("owner_name", "")),
+        ("Primary Phone", profile.get("phone", "")),
+        ("WhatsApp Number", tenant.get("whatsapp_mobile", profile.get("phone", ""))),
+        ("Email Address", profile.get("email", "") or "N/A"),
+        ("Workshop Address", profile.get("address", "")),
+        ("GSTIN", profile.get("gstin", "") or "Unregistered / N/A"),
+        ("UPI VPA (Payee ID)", profile.get("upi_id", "")),
+        ("Bank Name", profile.get("bank_name", "") or "N/A"),
+        ("Bank Account Number", profile.get("bank_account_no", "") or "N/A"),
+        ("Bank IFSC Code", profile.get("bank_ifsc", "") or "N/A"),
+        ("Bank Branch", profile.get("bank_branch", "") or "N/A"),
+        ("License Status", tenant.get("status", "ACTIVE")),
+        ("Subscription Plan", tenant.get("subscription_plan", "PRO_YEARLY")),
+        ("License Valid Until", tenant.get("subscription_end_date", "N/A")),
+        ("Master Security PIN", profile.get("master_pin", "1234")),
+        ("Total Invoices Generated", len(invoices)),
+        ("Total Revenue (₹)", sum(float(i.get("amount_paid") or 0.0) for i in invoices)),
+        ("Total Khata Dues (₹)", sum(float(i.get("balance_due") or 0.0) for i in invoices)),
+        ("Total Job Cards", len(jobs)),
+        ("Total Inventory Parts", len(inventory)),
+        ("Total Registered Customers", len(customers)),
+        ("Total Staff / Technicians", len(technicians)),
+    ]
+
+    ws1.append(["Field Property", "Configured Value", "", ""])
+    ws1.row_dimensions[4].height = 22
+    for c in range(1, 3):
+        ws1.cell(row=4, column=c).font = font_header
+        ws1.cell(row=4, column=c).fill = navy_header_fill
+
+    curr_r = 5
+    for field, val in meta_fields:
+        ws1.append([field, val])
+        ws1.cell(row=curr_r, column=1).font = font_bold
+        ws1.cell(row=curr_r, column=1).border = thin_border
+        ws1.cell(row=curr_r, column=1).fill = light_blue_fill
+        
+        c2 = ws1.cell(row=curr_r, column=2)
+        c2.font = font_normal
+        c2.border = thin_border
+        if "₹" in field:
+            c2.number_format = '₹#,##0.00'
+            c2.alignment = Alignment(horizontal="right")
+        curr_r += 1
+
+    ws1.column_dimensions['A'].width = 28
+    ws1.column_dimensions['B'].width = 45
+
+    # SHEET 2: INVOICES
+    ws2 = wb.create_sheet(title="Invoices & Billing")
+    headers2 = [
+        "Sl No", "Invoice No", "Date", "Type", "Job Number", "Customer Name", "Phone",
+        "Vehicle Reg No", "Make & Model", "Labor (₹)", "Parts (₹)", "Taxable Subtotal (₹)",
+        "CGST (₹)", "SGST (₹)", "Total Tax (₹)", "Discount (₹)", "Grand Total (₹)",
+        "Amount Paid (₹)", "Balance Due (₹)", "Payment Status", "Payment Mode"
+    ]
+    ws2.append(headers2)
+    style_header(ws2, 1, len(headers2))
+
+    tot_taxable = 0.0
+    tot_grand = 0.0
+    tot_paid = 0.0
+    tot_due = 0.0
+
+    for idx, inv in enumerate(invoices, 1):
+        taxable = float(inv.get("taxable_subtotal") or 0.0)
+        grand = float(inv.get("grand_total") or 0.0)
+        paid = float(inv.get("amount_paid") or 0.0)
+        due = float(inv.get("balance_due") or 0.0)
+        tot_taxable += taxable
+        tot_grand += grand
+        tot_paid += paid
+        tot_due += due
+
+        row = [
+            idx, inv.get("invoice_number", ""), inv.get("invoice_date", ""), inv.get("invoice_type", ""),
+            inv.get("job_number", ""), inv.get("customer_name", ""), inv.get("customer_phone", ""),
+            inv.get("vehicle_reg_no", ""), inv.get("vehicle_make_model", ""),
+            float(inv.get("subtotal_labor") or 0.0), float(inv.get("subtotal_parts") or 0.0), taxable,
+            float(inv.get("cgst_total") or 0.0), float(inv.get("sgst_total") or 0.0), float(inv.get("tax_total") or 0.0),
+            float(inv.get("discount_amount") or 0.0), grand, paid, due,
+            inv.get("payment_status", "PAID"), inv.get("payment_mode", "UPI")
+        ]
+        ws2.append(row)
+        r_num = idx + 1
+        for col_idx in range(1, len(headers2) + 1):
+            cell = ws2.cell(row=r_num, column=col_idx)
+            cell.font = font_normal
+            cell.border = thin_border
+            if col_idx in range(10, 20):
+                cell.number_format = '₹#,##0.00'
+                cell.alignment = Alignment(horizontal="right")
+            elif col_idx in (1, 3, 20, 21):
+                cell.alignment = Alignment(horizontal="center")
+
+    if invoices:
+        tot_r_num = len(invoices) + 2
+        ws2.append([
+            "TOTAL", "", "", "", "", "", "", "", "",
+            "", "", tot_taxable, "", "", "", "", tot_grand, tot_paid, tot_due, "", ""
+        ])
+        for c in range(1, len(headers2) + 1):
+            cell = ws2.cell(row=tot_r_num, column=c)
+            cell.font = font_bold
+            cell.fill = total_fill
+            cell.border = thin_border
+            if c in (12, 17, 18, 19):
+                cell.number_format = '₹#,##0.00'
+                cell.alignment = Alignment(horizontal="right")
+
+    auto_fit_columns(ws2)
+
+    # SHEET 3: JOB CARDS
+    ws3 = wb.create_sheet(title="Job Cards")
+    headers3 = [
+        "Sl No", "Job Card No", "Status", "Vehicle Reg", "Make & Model",
+        "Customer Name", "Customer Phone", "Odometer (km)", "Assigned Tech",
+        "Complaints / Issues", "Labor Total (₹)", "Parts Total (₹)", "Job Total (₹)", "Created Date", "Delivered Date"
+    ]
+    ws3.append(headers3)
+    style_header(ws3, 1, len(headers3))
+
+    for idx, j in enumerate(jobs, 1):
+        comp = j.get("complaints", "")
+        try:
+            c_list = json.loads(comp) if comp else []
+            comp_str = ", ".join(c_list) if isinstance(c_list, list) else str(comp)
+        except Exception:
+            comp_str = str(comp)
+
+        ws3.append([
+            idx, j.get("job_number", ""), j.get("status", "RECEIVED"), j.get("vehicle_reg_no", ""),
+            j.get("vehicle_make_model", ""), j.get("customer_name", ""), j.get("customer_phone", ""),
+            j.get("odometer", 0), j.get("assigned_technician_name", "") or "Unassigned",
+            comp_str, float(j.get("total_labor") or 0.0), float(j.get("total_parts") or 0.0),
+            float(j.get("grand_total") or 0.0), j.get("created_at", "")[:10], j.get("delivered_at", "") or "In Progress"
+        ])
+        r_num = idx + 1
+        for col_idx in range(1, len(headers3) + 1):
+            cell = ws3.cell(row=r_num, column=col_idx)
+            cell.font = font_normal
+            cell.border = thin_border
+            if col_idx in (11, 12, 13):
+                cell.number_format = '₹#,##0.00'
+                cell.alignment = Alignment(horizontal="right")
+            elif col_idx in (1, 3, 14, 15):
+                cell.alignment = Alignment(horizontal="center")
+
+    auto_fit_columns(ws3)
+
+    # SHEET 4: INVENTORY
+    ws4 = wb.create_sheet(title="Inventory & Stock")
+    headers4 = [
+        "Sl No", "Part Name", "Part Number", "Barcode / SKU", "Category",
+        "Stock Qty", "Min Alert Qty", "Cost Price (₹)", "Selling Price (₹)", "Tax Rate (%)",
+        "HSN Code", "Location Rack", "Position Bin", "Total Stock Value (₹)"
+    ]
+    ws4.append(headers4)
+    style_header(ws4, 1, len(headers4))
+
+    for idx, item in enumerate(inventory, 1):
+        qty = int(item.get("stock_qty") or 0)
+        cp = float(item.get("cost_price") or 0.0)
+        sp = float(item.get("selling_price") or 0.0)
+        stk_val = qty * cp
+
+        ws4.append([
+            idx, item.get("part_name", ""), item.get("part_number", ""), item.get("barcode", ""),
+            item.get("category", ""), qty, item.get("min_stock_alert", 5),
+            cp, sp, f"{item.get('tax_rate', 18.0)}%",
+            item.get("hsn_code", "8536"), item.get("location_rack", "Main"), item.get("position_bin", ""), stk_val
+        ])
+        r_num = idx + 1
+        for col_idx in range(1, len(headers4) + 1):
+            cell = ws4.cell(row=r_num, column=col_idx)
+            cell.font = font_normal
+            cell.border = thin_border
+            if col_idx in (8, 9, 14):
+                cell.number_format = '₹#,##0.00'
+                cell.alignment = Alignment(horizontal="right")
+            elif col_idx in (1, 6, 7, 10, 11):
+                cell.alignment = Alignment(horizontal="center")
+
+    auto_fit_columns(ws4)
+
+    # SHEET 5: CUSTOMERS & KHATA
+    ws5 = wb.create_sheet(title="Customers & Khata")
+    headers5 = [
+        "Sl No", "Customer Name", "Phone", "Vehicle Reg", "Make & Model",
+        "Total Visits", "Khata Dues (₹)", "Address", "GSTIN"
+    ]
+    ws5.append(headers5)
+    style_header(ws5, 1, len(headers5))
+
+    for idx, c in enumerate(customers, 1):
+        dues = float(c.get("khata_balance") or 0.0)
+        ws5.append([
+            idx, c.get("name", ""), c.get("phone", ""), c.get("vehicle_reg_no", "") or "N/A",
+            c.get("vehicle_make_model", "") or "General", c.get("total_visits", 1),
+            dues, c.get("address", "") or "N/A", c.get("gstin", "") or "Unregistered"
+        ])
+        r_num = idx + 1
+        for col_idx in range(1, len(headers5) + 1):
+            cell = ws5.cell(row=r_num, column=col_idx)
+            cell.font = font_normal
+            cell.border = thin_border
+            if col_idx == 7:
+                cell.number_format = '₹#,##0.00'
+                cell.alignment = Alignment(horizontal="right")
+            elif col_idx in (1, 6):
+                cell.alignment = Alignment(horizontal="center")
+
+    auto_fit_columns(ws5)
+
+    # SHEET 6: PURCHASES
+    ws6 = wb.create_sheet(title="Purchases")
+    headers6 = [
+        "Sl No", "Bill Number", "Bill Date", "Supplier Name", "Total Amount (₹)",
+        "CGST (₹)", "SGST (₹)", "IGST (₹)", "Payment Mode", "Status", "Notes"
+    ]
+    ws6.append(headers6)
+    style_header(ws6, 1, len(headers6))
+
+    for idx, p in enumerate(purchases, 1):
+        ws6.append([
+            idx, p.get("bill_number", ""), p.get("bill_date", ""), p.get("supplier_name", ""),
+            float(p.get("total_amount") or 0.0), float(p.get("cgst_amount") or 0.0),
+            float(p.get("sgst_amount") or 0.0), float(p.get("igst_amount") or 0.0),
+            p.get("payment_mode", "BANK"), p.get("status", "CONFIRMED"), p.get("notes", "") or ""
+        ])
+        r_num = idx + 1
+        for col_idx in range(1, len(headers6) + 1):
+            cell = ws6.cell(row=r_num, column=col_idx)
+            cell.font = font_normal
+            cell.border = thin_border
+            if col_idx in (5, 6, 7, 8):
+                cell.number_format = '₹#,##0.00'
+                cell.alignment = Alignment(horizontal="right")
+            elif col_idx in (1, 3, 9, 10):
+                cell.alignment = Alignment(horizontal="center")
+
+    auto_fit_columns(ws6)
+
+    # SHEET 7: EXPENSES
+    ws7 = wb.create_sheet(title="Expenses")
+    headers7 = [
+        "Sl No", "Date", "Expense Title", "Category", "Amount (₹)",
+        "Payment Mode", "Paid To", "Reference No"
+    ]
+    ws7.append(headers7)
+    style_header(ws7, 1, len(headers7))
+
+    for idx, exp in enumerate(expenses, 1):
+        ws7.append([
+            idx, exp.get("expense_date", ""), exp.get("title", ""), exp.get("category", ""),
+            float(exp.get("amount") or 0.0), exp.get("payment_mode", "CASH"),
+            exp.get("paid_to", "") or "", exp.get("reference_no", "") or ""
+        ])
+        r_num = idx + 1
+        for col_idx in range(1, len(headers7) + 1):
+            cell = ws7.cell(row=r_num, column=col_idx)
+            cell.font = font_normal
+            cell.border = thin_border
+            if col_idx == 5:
+                cell.number_format = '₹#,##0.00'
+                cell.alignment = Alignment(horizontal="right")
+            elif col_idx in (1, 2, 6):
+                cell.alignment = Alignment(horizontal="center")
+
+    auto_fit_columns(ws7)
+
+    # SHEET 8: TECHNICIANS
+    ws8 = wb.create_sheet(title="Staff & Technicians")
+    headers8 = [
+        "Sl No", "Name", "Phone", "Role", "Commission (%)",
+        "Daily Wage (₹)", "Advance Balance (₹)", "Total Jobs Handled", "Status"
+    ]
+    ws8.append(headers8)
+    style_header(ws8, 1, len(headers8))
+
+    for idx, tech in enumerate(technicians, 1):
+        ws8.append([
+            idx, tech.get("name", ""), tech.get("phone", ""), tech.get("role", ""),
+            float(tech.get("commission_pct") or 0.0), float(tech.get("daily_wage") or 0.0),
+            float(tech.get("current_advance_balance") or 0.0), tech.get("total_jobs", 0),
+            tech.get("status", "Active")
+        ])
+        r_num = idx + 1
+        for col_idx in range(1, len(headers8) + 1):
+            cell = ws8.cell(row=r_num, column=col_idx)
+            cell.font = font_normal
+            cell.border = thin_border
+            if col_idx in (6, 7):
+                cell.number_format = '₹#,##0.00'
+                cell.alignment = Alignment(horizontal="right")
+            elif col_idx in (1, 5, 8, 9):
+                cell.alignment = Alignment(horizontal="center")
+
+    auto_fit_columns(ws8)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    clean_name = "".join(c for c in tenant.get("name", "Workshop") if c.isalnum() or c in (" ", "_", "-")).strip().replace(" ", "_")
+    filename = f"{clean_name}_Backup_{today_str}.xlsx"
+
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
+
+@app.get("/api/admin/clients/{tenant_id}/export-json")
+async def export_client_workshop_json(tenant_id: str):
+    """Download full JSON dump of a single workshop's data for system backup or migration."""
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM tenants WHERE id = ?", (tenant_id,))
+    tenant_row = cursor.fetchone()
+    if not tenant_row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Client workshop tenant not found")
+    tenant = dict(tenant_row)
+
+    cursor.execute("SELECT * FROM workshop_profile WHERE tenant_id = ? OR id = ?", (tenant_id, tenant_id))
+    prof_row = cursor.fetchone()
+    profile = dict(prof_row) if prof_row else tenant
+
+    cursor.execute("SELECT * FROM invoices WHERE tenant_id = ? ORDER BY invoice_date DESC", (tenant_id,))
+    invoices = [dict(r) for r in cursor.fetchall()]
+
+    cursor.execute("SELECT * FROM job_cards WHERE tenant_id = ? ORDER BY created_at DESC", (tenant_id,))
+    jobs = [dict(r) for r in cursor.fetchall()]
+
+    cursor.execute("SELECT * FROM inventory_items WHERE tenant_id = ?", (tenant_id,))
+    inventory = [dict(r) for r in cursor.fetchall()]
+
+    cursor.execute("SELECT * FROM customers WHERE tenant_id = ?", (tenant_id,))
+    customers = [dict(r) for r in cursor.fetchall()]
+
+    cursor.execute("SELECT * FROM vehicles WHERE tenant_id = ?", (tenant_id,))
+    vehicles = [dict(r) for r in cursor.fetchall()]
+
+    cursor.execute("SELECT * FROM expenses WHERE tenant_id = ?", (tenant_id,))
+    expenses = [dict(r) for r in cursor.fetchall()]
+
+    cursor.execute("SELECT * FROM purchase_bills WHERE tenant_id = ?", (tenant_id,))
+    purchases = [dict(r) for r in cursor.fetchall()]
+
+    cursor.execute("SELECT * FROM technicians WHERE tenant_id = ?", (tenant_id,))
+    technicians = [dict(r) for r in cursor.fetchall()]
+
+    cursor.execute("SELECT * FROM subscriptions WHERE tenant_id = ?", (tenant_id,))
+    subs = [dict(r) for r in cursor.fetchall()]
+
+    db.log_audit("EXPORT_WORKSHOP_DATA_JSON", "tenants", tenant_id, f"Exported complete JSON backup for {tenant['name']}", cursor=cursor)
+    conn.commit()
+    conn.close()
+
+    payload = {
+        "export_date": datetime.now().isoformat(),
+        "tenant": tenant,
+        "workshop_profile": profile,
+        "subscriptions": subs,
+        "invoices": invoices,
+        "job_cards": jobs,
+        "inventory": inventory,
+        "customers": customers,
+        "vehicles": vehicles,
+        "expenses": expenses,
+        "purchases": purchases,
+        "technicians": technicians
+    }
+
+    clean_name = "".join(c for c in tenant.get("name", "Workshop") if c.isalnum() or c in (" ", "_", "-")).strip().replace(" ", "_")
+    filename = f"{clean_name}_Backup_{datetime.now().strftime('%Y-%m-%d')}.json"
+
+    return Response(
+        content=json.dumps(payload, indent=2, default=str),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
 
 # =========================================================
 # 👥 WORKSHOP USERS & OTP MANAGEMENT
@@ -608,6 +1147,11 @@ async def renew_subscription(
     cursor.execute("SELECT COUNT(*) FROM saas_vendor_invoices")
     inv_count = cursor.fetchone()[0] + 1
     inv_no = f"HQ-INV-2026-{inv_count:03d}"
+    cursor.execute("SELECT id FROM saas_vendor_invoices WHERE invoice_no = ?", (inv_no,))
+    while cursor.fetchone():
+        inv_count += 1
+        inv_no = f"HQ-INV-2026-{inv_count:03d}"
+        cursor.execute("SELECT id FROM saas_vendor_invoices WHERE invoice_no = ?", (inv_no,))
 
     cursor.execute("""
     INSERT INTO saas_vendor_invoices (
