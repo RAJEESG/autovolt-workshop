@@ -3,6 +3,7 @@ import sys
 import json
 import uuid
 import io
+import re
 from datetime import datetime, date, timedelta
 from typing import Optional, List, Dict, Any
 
@@ -288,7 +289,7 @@ async def create_client_workshop(
         id, client_code, name, owner_name, phone, whatsapp_mobile, email, address, gstin, logo_url,
         upi_id, upi_payee_name, bank_name, bank_account_no, bank_ifsc, bank_branch,
         gst_slabs, language, master_pin, status, subscription_plan, subscription_start_date, subscription_end_date, price_paid, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Main', ?, ?, ?, 'ACTIVE', ?, ?, ?, ?, datetime('now'))
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Main', ?, ?, ?, 'ACTIVE', ?, ?, ?, ?, datetime('now'))
     """, (
         tenant_id, clean_code, name.strip(), owner_name.strip(), whatsapp_mobile.strip(), whatsapp_mobile.strip(),
         email.strip() if email else "", address.strip(), gstin.strip() if gstin else "", logo_url.strip() if logo_url else "",

@@ -9,7 +9,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- 1. Users & Authentication Table
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY DEFAULT ('user_' || substr(md5(random()::text), 1, 8)),
-    username TEXT NOT NULL UNIQUE,
+    username TEXT NOT NULL,
     password_hash TEXT NOT NULL,
     full_name TEXT NOT NULL,
     role TEXT DEFAULT 'STAFF', -- SUPER_ADMIN, ADMIN, STAFF
@@ -22,12 +22,14 @@ CREATE TABLE IF NOT EXISTS users (
     reset_token_expiry TIMESTAMP WITH TIME ZONE,
     otp_code TEXT,
     otp_expiry TIMESTAMP WITH TIME ZONE,
+    permissions TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- 2. Multi-Tenant SaaS Workshop Clients Table
 CREATE TABLE IF NOT EXISTS tenants (
     id TEXT PRIMARY KEY DEFAULT ('tenant_' || substr(md5(random()::text), 1, 8)),
+    client_code TEXT DEFAULT '',
     name TEXT NOT NULL,
     owner_name TEXT,
     phone TEXT NOT NULL,
@@ -113,6 +115,8 @@ CREATE TABLE IF NOT EXISTS saas_vendor_profile (
 -- 6. Workshop Profile Table (Active Client Garage Details)
 CREATE TABLE IF NOT EXISTS workshop_profile (
     id TEXT PRIMARY KEY DEFAULT 'default',
+    tenant_id TEXT DEFAULT 'tenant_1',
+    client_code TEXT DEFAULT '',
     name TEXT NOT NULL DEFAULT 'SPARK AUTO ELECTRICALS',
     subtitle TEXT DEFAULT 'Auto Electrical & Electronic Service Center',
     owner_name TEXT DEFAULT 'Shafi V.',
@@ -455,23 +459,108 @@ CREATE TABLE IF NOT EXISTS activity_logs (
 );
 
 -- =========================================================
--- SEED INITIAL ENTERPRISE DATA
+-- 🔄 SAFE IDEMPOTENT MIGRATION FOR RUNNING SUPABASE DATABASES
+-- Safely checks, alters, and upgrades existing databases without
+-- altering or deleting ANY existing user data, records, or tables!
+-- =========================================================
+
+-- 1. Tenants Table Upgrades
+ALTER TABLE IF EXISTS tenants ADD COLUMN IF NOT EXISTS client_code TEXT DEFAULT '';
+ALTER TABLE IF EXISTS tenants ADD COLUMN IF NOT EXISTS whatsapp_mobile TEXT;
+ALTER TABLE IF EXISTS tenants ADD COLUMN IF NOT EXISTS logo_url TEXT;
+ALTER TABLE IF EXISTS tenants ADD COLUMN IF NOT EXISTS upi_payee_name TEXT;
+ALTER TABLE IF EXISTS tenants ADD COLUMN IF NOT EXISTS gst_slabs TEXT DEFAULT '["0", "5", "12", "18", "28"]';
+ALTER TABLE IF EXISTS tenants ADD COLUMN IF NOT EXISTS language TEXT DEFAULT 'en';
+ALTER TABLE IF EXISTS tenants ADD COLUMN IF NOT EXISTS master_pin TEXT DEFAULT '1234';
+ALTER TABLE IF EXISTS tenants ADD COLUMN IF NOT EXISTS subscription_plan TEXT DEFAULT 'PRO_ANNUAL';
+ALTER TABLE IF EXISTS tenants ADD COLUMN IF NOT EXISTS subscription_start_date DATE DEFAULT CURRENT_DATE;
+ALTER TABLE IF EXISTS tenants ADD COLUMN IF NOT EXISTS subscription_end_date DATE DEFAULT (CURRENT_DATE + INTERVAL '1 year');
+ALTER TABLE IF EXISTS tenants ADD COLUMN IF NOT EXISTS price_paid NUMERIC(12, 2) DEFAULT 0.0;
+
+-- 2. Workshop Profile Table Upgrades
+ALTER TABLE IF EXISTS workshop_profile ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'tenant_1';
+ALTER TABLE IF EXISTS workshop_profile ADD COLUMN IF NOT EXISTS client_code TEXT DEFAULT '';
+ALTER TABLE IF EXISTS workshop_profile ADD COLUMN IF NOT EXISTS logo_url TEXT;
+ALTER TABLE IF EXISTS workshop_profile ADD COLUMN IF NOT EXISTS upi_payee_name TEXT;
+ALTER TABLE IF EXISTS workshop_profile ADD COLUMN IF NOT EXISTS gst_slabs TEXT DEFAULT '["0", "5", "12", "18", "28"]';
+ALTER TABLE IF EXISTS workshop_profile ADD COLUMN IF NOT EXISTS default_state TEXT DEFAULT 'Kerala (32)';
+ALTER TABLE IF EXISTS workshop_profile ADD COLUMN IF NOT EXISTS default_gst_type TEXT DEFAULT 'INTRA_STATE';
+ALTER TABLE IF EXISTS workshop_profile ADD COLUMN IF NOT EXISTS tax_regime TEXT DEFAULT 'REGULAR_GST';
+ALTER TABLE IF EXISTS workshop_profile ADD COLUMN IF NOT EXISTS round_off_enabled INTEGER DEFAULT 1;
+
+-- 3. Users Table (Multi-Tenant Username Isolation)
+ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'tenant_1';
+ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS permissions TEXT;
+ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS whatsapp_mobile TEXT;
+ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS otp_code TEXT;
+ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS otp_expiry TIMESTAMP WITH TIME ZONE;
+
+-- Safely drop old global unique constraint on username if it exists
+DO $$ 
+BEGIN 
+    IF EXISTS (
+        SELECT 1 FROM information_schema.table_constraints 
+        WHERE constraint_name = 'users_username_key' AND table_name = 'users'
+    ) THEN 
+        ALTER TABLE users DROP CONSTRAINT users_username_key; 
+    END IF; 
+END $$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_tenant_username ON users (tenant_id, username);
+
+-- 4. Multi-Tenant column check across operational tables
+ALTER TABLE IF EXISTS technicians ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'tenant_1';
+ALTER TABLE IF EXISTS technician_wages ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'tenant_1';
+ALTER TABLE IF EXISTS technician_advances ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'tenant_1';
+ALTER TABLE IF EXISTS customers ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'tenant_1';
+ALTER TABLE IF EXISTS vehicles ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'tenant_1';
+ALTER TABLE IF EXISTS inventory_items ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'tenant_1';
+ALTER TABLE IF EXISTS stock_logs ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'tenant_1';
+ALTER TABLE IF EXISTS job_cards ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'tenant_1';
+ALTER TABLE IF EXISTS invoices ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'tenant_1';
+ALTER TABLE IF EXISTS invoice_payments ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'tenant_1';
+ALTER TABLE IF EXISTS purchase_bills ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'tenant_1';
+ALTER TABLE IF EXISTS debit_notes ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'tenant_1';
+ALTER TABLE IF EXISTS sales_returns ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'tenant_1';
+ALTER TABLE IF EXISTS expenses ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'tenant_1';
+ALTER TABLE IF EXISTS bank_accounts ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'tenant_1';
+ALTER TABLE IF EXISTS activity_logs ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'tenant_1';
+
+-- 5. Safe Unique Indexes per-tenant (replaces old global collision keys)
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name = 'job_cards_job_number_key' AND table_name = 'job_cards') THEN
+        ALTER TABLE job_cards DROP CONSTRAINT job_cards_job_number_key;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name = 'invoices_invoice_number_key' AND table_name = 'invoices') THEN
+        ALTER TABLE invoices DROP CONSTRAINT invoices_invoice_number_key;
+    END IF;
+END $$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_job_cards_tenant_job ON job_cards (tenant_id, job_number);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_tenant_inv ON invoices (tenant_id, invoice_number);
+
+-- =========================================================
+-- SEED INITIAL ENTERPRISE DATA (SAFE & IDEMPOTENT)
 -- =========================================================
 
 -- Insert Default Super Admin and Staff (Password: admin123, staff123)
--- SHA-256 with static seed for instant login
-INSERT INTO users (id, username, password_hash, full_name, role, email, phone, whatsapp_mobile, status)
+INSERT INTO users (id, username, password_hash, full_name, role, email, phone, whatsapp_mobile, tenant_id, status)
 VALUES 
-('user_admin', 'admin', 'e6378c2e6f49463996766d3a2468bfb85b6abf881eb5d45d94bc725f190bc1f0$b4c73bb859a68c66e2c39fa42194383177651a248cf6c4d7b7e289f666f28b21', 'Super Administrator', 'SUPER_ADMIN', 'admin@autovolt.com', '+91 98765 00000', '+919876500000', 'ACTIVE'),
-('user_staff', 'staff', 'e6378c2e6f49463996766d3a2468bfb85b6abf881eb5d45d94bc725f190bc1f0$b4c73bb859a68c66e2c39fa42194383177651a248cf6c4d7b7e289f666f28b21', 'Workshop Service Desk', 'STAFF', 'service@sparkauto.com', '+91 98765 11111', '+919876511111', 'ACTIVE')
-ON CONFLICT (username) DO NOTHING;
+('user_admin', 'admin', 'e6378c2e6f49463996766d3a2468bfb85b6abf881eb5d45d94bc725f190bc1f0$b4c73bb859a68c66e2c39fa42194383177651a248cf6c4d7b7e289f666f28b21', 'Super Administrator', 'SUPER_ADMIN', 'admin@autovolt.com', '+91 98765 00000', '+919876500000', 'tenant_1', 'ACTIVE'),
+('user_staff', 'staff', 'e6378c2e6f49463996766d3a2468bfb85b6abf881eb5d45d94bc725f190bc1f0$b4c73bb859a68c66e2c39fa42194383177651a248cf6c4d7b7e289f666f28b21', 'Workshop Service Desk', 'STAFF', 'service@sparkauto.com', '+91 98765 11111', '+919876511111', 'tenant_1', 'ACTIVE')
+ON CONFLICT (id) DO NOTHING;
 
 -- Insert SaaS Vendor Company Profile
 INSERT INTO saas_vendor_profile (id, company_name, tagline, gstin, email, phone, whatsapp_phone, address, upi_id, upi_payee_name, bank_name, bank_account_no, bank_ifsc)
 VALUES ('vendor_main', 'AutoVolt Technologies Pvt Ltd', 'Enterprise Automotive Workshop SaaS Platform', '32AABCA9876C1Z5', 'billing@autovoltcloud.com', '+91 98470 12345', '+919847012345', 'CyberPark, Kozhikode / Infopark, Kochi, Kerala - 682042', 'autovoltcloud@icici', 'AutoVolt Technologies', 'HDFC Bank Ltd', '50200088991122', 'HDFC0001234')
 ON CONFLICT (id) DO NOTHING;
 
--- Insert Active Workshop Profile
-INSERT INTO workshop_profile (id, name, subtitle, owner_name, phone, email, address, gstin, upi_id, upi_payee_name, bank_name, bank_account_no, bank_ifsc, bank_branch, gst_slabs, language, master_pin)
-VALUES ('default', 'SPARK AUTO ELECTRICALS', 'Automotive Electrical & Electronic Service Center', 'Shafi V.', '+91 98765 43210', 'sparkautocare@gmail.com', 'Near Highway Junction, Ernakulam, Kerala - 682001', '32AABCS1429B1Z8', 'sparkautoworkshop@okaxis', 'SPARK AUTO ELECTRICALS', 'State Bank of India', '39876543210', 'SBIN0001234', 'Ernakulam Main', '["0", "5", "12", "18", "28"]', 'en', '1234')
+-- Insert Default Workshop Tenant & Profile
+INSERT INTO tenants (id, client_code, name, owner_name, phone, whatsapp_mobile, address, upi_id, status)
+VALUES ('tenant_1', 'SPARK', 'SPARK AUTO ELECTRICALS', 'Shafi V.', '+91 98765 43210', '+919876543210', 'Near Highway Junction, Ernakulam, Kerala - 682001', 'sparkautoworkshop@okaxis', 'ACTIVE')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO workshop_profile (id, tenant_id, client_code, name, subtitle, owner_name, phone, email, address, gstin, upi_id, upi_payee_name, bank_name, bank_account_no, bank_ifsc, bank_branch, gst_slabs, language, master_pin)
+VALUES ('default', 'tenant_1', 'SPARK', 'SPARK AUTO ELECTRICALS', 'Automotive Electrical & Electronic Service Center', 'Shafi V.', '+91 98765 43210', 'sparkautocare@gmail.com', 'Near Highway Junction, Ernakulam, Kerala - 682001', '32AABCS1429B1Z8', 'sparkautoworkshop@okaxis', 'SPARK AUTO ELECTRICALS', 'State Bank of India', '39876543210', 'SBIN0001234', 'Ernakulam Main', '["0", "5", "12", "18", "28"]', 'en', '1234')
 ON CONFLICT (id) DO NOTHING;
