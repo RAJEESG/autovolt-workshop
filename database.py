@@ -314,6 +314,7 @@ def init_db():
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS stock_logs (
         id TEXT PRIMARY KEY,
+        tenant_id TEXT DEFAULT 'tenant_1',
         item_id TEXT NOT NULL,
         part_name TEXT,
         barcode TEXT,
@@ -419,6 +420,7 @@ def init_db():
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS bank_accounts (
         id TEXT PRIMARY KEY,
+        tenant_id TEXT DEFAULT 'tenant_1',
         account_name TEXT NOT NULL,
         bank_name TEXT,
         account_number TEXT,
@@ -567,6 +569,7 @@ def init_db():
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS payments (
         id TEXT PRIMARY KEY,
+        tenant_id TEXT DEFAULT 'tenant_1',
         invoice_id TEXT,
         customer_id TEXT,
         amount REAL NOT NULL,
@@ -712,6 +715,8 @@ def run_schema_migrations(cursor, conn):
         ("employee_wages", "tenant_id", "TEXT DEFAULT 'tenant_1'"),
         ("employee_advances", "tenant_id", "TEXT DEFAULT 'tenant_1'"),
         ("activity_logs", "tenant_id", "TEXT DEFAULT 'tenant_1'"),
+        ("payments", "tenant_id", "TEXT DEFAULT 'tenant_1'"),
+        ("stock_logs", "tenant_id", "TEXT DEFAULT 'tenant_1'"),
     ]
 
     for table, col, col_type in migrations:

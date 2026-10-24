@@ -977,14 +977,15 @@ async def job_detail_page(request: Request, job_id: str):
     """, (total_labor, total_parts, grand_total, job_id))
     conn.commit()
     
-    cursor.execute("SELECT * FROM technicians WHERE status = 'Active'")
+    tenant_id = get_current_tenant_id(request)
+    cursor.execute("SELECT * FROM technicians WHERE tenant_id = ? AND status = 'Active'", (tenant_id,))
     technicians = [dict(row) for row in cursor.fetchall()]
     
-    cursor.execute("SELECT * FROM inventory_items WHERE stock_qty > 0 ORDER BY part_name")
+    cursor.execute("SELECT * FROM inventory_items WHERE tenant_id = ? AND stock_qty > 0 ORDER BY part_name", (tenant_id,))
     inventory_items = [dict(row) for row in cursor.fetchall()]
 
     # Check for linked invoice
-    cursor.execute("SELECT * FROM invoices WHERE job_card_id = ? ORDER BY created_at DESC LIMIT 1", (job_id,))
+    cursor.execute("SELECT * FROM invoices WHERE job_card_id = ? AND tenant_id = ? ORDER BY created_at DESC LIMIT 1", (job_id, tenant_id))
     inv_row = cursor.fetchone()
     linked_invoice = dict(inv_row) if inv_row else None
 
@@ -1042,10 +1043,10 @@ async def create_job_card(
     cursor = conn.cursor()
     tenant_id = get_current_tenant_id(request)
     
-    cursor.execute("SELECT COUNT(*) FROM job_cards")
+    cursor.execute("SELECT COUNT(*) FROM job_cards WHERE tenant_id = ?", (tenant_id,))
     cnt = cursor.fetchone()[0] + 1
     job_number = f"JOB-2026-{cnt:03d}"
-    cursor.execute("SELECT id FROM job_cards WHERE job_number = ?", (job_number,))
+    cursor.execute("SELECT id FROM job_cards WHERE job_number = ? AND tenant_id = ?", (job_number, tenant_id))
     while cursor.fetchone():
         cnt += 1
         job_number = f"JOB-2026-{cnt:03d}"
@@ -1054,7 +1055,7 @@ async def create_job_card(
     clean_tech_id = assigned_technician_id.strip() if (assigned_technician_id and assigned_technician_id.strip()) else None
     tech_name = None
     if clean_tech_id:
-        cursor.execute("SELECT name FROM technicians WHERE id = ?", (clean_tech_id,))
+        cursor.execute("SELECT name FROM technicians WHERE id = ? AND tenant_id = ?", (clean_tech_id, tenant_id))
         t_row = cursor.fetchone()
         if t_row:
             tech_name = t_row["name"]
@@ -1430,10 +1431,11 @@ async def regenerate_job_invoice(job_id: str):
 
 
 @app.post("/api/job-cards/{job_id}/generate-proforma")
-async def generate_job_proforma(job_id: str):
+async def generate_job_proforma(request: Request, job_id: str):
     """Generate or update Proforma Service Estimate (Pre-Bill) for a job card"""
     conn = db.get_db_connection()
     cursor = conn.cursor()
+    tenant_id = get_current_tenant_id(request)
     
     cursor.execute("SELECT * FROM job_cards WHERE id = ?", (job_id,))
     j_row = cursor.fetchone()
@@ -1441,16 +1443,18 @@ async def generate_job_proforma(job_id: str):
         conn.close()
         raise HTTPException(status_code=404, detail="Job Card not found")
     job = dict(j_row)
+    if job.get("tenant_id"):
+        tenant_id = job["tenant_id"]
     
     cursor.execute("SELECT * FROM job_items WHERE job_card_id = ?", (job_id,))
     job_items = [dict(r) for r in cursor.fetchall()]
     
-    workshop = get_current_workshop()
+    workshop = get_current_workshop(request=request, tenant_id=tenant_id)
     vpa = workshop.get("upi_id", "sparkautoworkshop@okaxis")
     now_ist = get_ist_now_str()
     today_str = datetime.now().strftime("%Y-%m-%d")
     
-    cursor.execute("SELECT * FROM invoices WHERE job_card_id = ? AND invoice_type = 'PROFORMA' LIMIT 1", (job_id,))
+    cursor.execute("SELECT * FROM invoices WHERE job_card_id = ? AND invoice_type = 'PROFORMA' AND tenant_id = ? LIMIT 1", (job_id, tenant_id))
     existing_prof = cursor.fetchone()
     
     subtotal_labor = sum(float(ji["unit_price"] or 0) * int(ji["quantity"] or 1) for ji in job_items if ji.get("item_type") == "LABOR")
@@ -1473,7 +1477,7 @@ async def generate_job_proforma(job_id: str):
         WHERE id = ?
         """, (subtotal_labor, subtotal_parts, taxable_subtotal, tax_total, grand_total, grand_total, upi_link, now_ist, prof_id))
     else:
-        cursor.execute("SELECT COUNT(*) FROM invoices WHERE invoice_type = 'PROFORMA'")
+        cursor.execute("SELECT COUNT(*) FROM invoices WHERE invoice_type = 'PROFORMA' AND tenant_id = ?", (tenant_id,))
         cnt = cursor.fetchone()[0] + 1
         prof_number = f"EST-2026-{cnt:03d}"
         prof_id = f"prof_{uuid.uuid4().hex[:8]}"
@@ -1481,13 +1485,13 @@ async def generate_job_proforma(job_id: str):
         
         cursor.execute("""
         INSERT INTO invoices (
-            id, invoice_number, invoice_date, invoice_type, job_card_id, job_number,
+            id, tenant_id, invoice_number, invoice_date, invoice_type, job_card_id, job_number,
             customer_name, customer_phone, vehicle_reg_no, vehicle_make_model, odometer,
             subtotal_labor, subtotal_parts, taxable_subtotal, tax_total, grand_total,
             amount_paid, balance_due, payment_status, payment_mode, upi_payment_link, created_at
-        ) VALUES (?, ?, ?, 'PROFORMA', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.0, ?, 'UNPAID', 'UPI', ?, ?)
+        ) VALUES (?, ?, ?, ?, 'PROFORMA', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.0, ?, 'UNPAID', 'UPI', ?, ?)
         """, (
-            prof_id, prof_number, today_str, job_id, job["job_number"],
+            prof_id, tenant_id, prof_number, today_str, job_id, job["job_number"],
             job["customer_name"], job["customer_phone"], job["vehicle_reg_no"], job["vehicle_make_model"], job.get("odometer", 0),
             subtotal_labor, subtotal_parts, taxable_subtotal, tax_total, grand_total, grand_total, upi_link, now_ist
         ))
@@ -1595,10 +1599,11 @@ async def get_job_proforma_whatsapp_link(request: Request, job_id: str):
 
 
 @app.post("/api/job-cards/{job_id}/convert-proforma-to-invoice")
-async def convert_proforma_to_final_tax_invoice(job_id: str, payment_mode: str = Form("UPI"), amount_paid: Optional[float] = Form(None)):
+async def convert_proforma_to_final_tax_invoice(request: Request, job_id: str, payment_mode: str = Form("UPI"), amount_paid: Optional[float] = Form(None)):
     """Convert Proforma Estimate to official Tax Invoice (INV-2026-XXX) and mark as PAID"""
     conn = db.get_db_connection()
     cursor = conn.cursor()
+    tenant_id = get_current_tenant_id(request)
     
     cursor.execute("SELECT * FROM invoices WHERE job_card_id = ? ORDER BY created_at DESC LIMIT 1", (job_id,))
     prof_row = cursor.fetchone()
@@ -1607,13 +1612,15 @@ async def convert_proforma_to_final_tax_invoice(job_id: str, payment_mode: str =
         raise HTTPException(status_code=404, detail="No Proforma Estimate or linked bill found to convert.")
         
     prof = dict(prof_row)
+    if prof.get("tenant_id"):
+        tenant_id = prof["tenant_id"]
     now_ist = get_ist_now_str()
     today_str = datetime.now().strftime("%Y-%m-%d")
     
     if prof["invoice_type"] != "PROFORMA":
         new_tax_inv_no = prof["invoice_number"]
     else:
-        cursor.execute("SELECT COUNT(*) FROM invoices WHERE invoice_type != 'PROFORMA'")
+        cursor.execute("SELECT COUNT(*) FROM invoices WHERE invoice_type != 'PROFORMA' AND tenant_id = ?", (tenant_id,))
         cnt = cursor.fetchone()[0] + 1
         new_tax_inv_no = f"INV-2026-{cnt:03d}"
     
@@ -1634,9 +1641,17 @@ async def convert_proforma_to_final_tax_invoice(job_id: str, payment_mode: str =
     if paid > 0:
         pay_id = f"pay_{uuid.uuid4().hex[:8]}"
         cursor.execute("""
-        INSERT INTO payments (id, invoice_id, amount, payment_mode, payment_date, notes, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (pay_id, prof["id"], paid, payment_mode, today_str, f"Payment for Tax Inv {new_tax_inv_no}", now_ist))
+        INSERT INTO payments (id, tenant_id, invoice_id, amount, payment_mode, payment_date, notes, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (pay_id, tenant_id, prof["id"], paid, payment_mode, today_str, f"Payment for Tax Inv {new_tax_inv_no}", now_ist))
+
+        # Update bank account / cash drawer
+        cursor.execute("SELECT id FROM bank_accounts WHERE is_primary = 1 AND tenant_id = ? LIMIT 1", (tenant_id,))
+        p_acc = cursor.fetchone()
+        if p_acc:
+            cursor.execute("UPDATE bank_accounts SET current_balance = current_balance + ? WHERE id = ?", (paid, p_acc["id"]))
+        elif payment_mode == "CASH":
+            cursor.execute("UPDATE bank_accounts SET current_balance = current_balance + ? WHERE account_type = 'CASH' AND tenant_id = ? LIMIT 1", (paid, tenant_id))
         
     db.log_audit("CONVERT_PROFORMA_TO_TAX_INVOICE", "invoices", prof["id"], f"Converted Proforma to Tax Invoice #{new_tax_inv_no} (Paid: ₹{paid:.2f})", cursor=cursor)
     conn.commit()
@@ -1971,9 +1986,9 @@ async def save_or_update_pos_invoice(request: Request, payload: Dict[str, Any], 
             if amount_paid > 0:
                 pay_id = f"pay_{uuid.uuid4().hex[:8]}"
                 cursor.execute("""
-                INSERT INTO payments (id, invoice_id, customer_id, amount, payment_mode, payment_date, notes, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (pay_id, inv_id, cust_id, amount_paid, payload.get("payment_mode", "UPI"), today_str, f"Initial payment for {inv_number}", now_ist))
+                INSERT INTO payments (id, tenant_id, invoice_id, customer_id, amount, payment_mode, payment_date, notes, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (pay_id, tenant_id, inv_id, cust_id, amount_paid, payload.get("payment_mode", "UPI"), today_str, f"Initial payment for {inv_number}", now_ist))
 
                 # Update bank account / cash register balance
                 cursor.execute("SELECT id FROM bank_accounts WHERE is_primary = 1 AND tenant_id = ? LIMIT 1", (tenant_id,))
@@ -2048,9 +2063,10 @@ async def save_or_update_pos_invoice(request: Request, payload: Dict[str, Any], 
         raise HTTPException(status_code=500, detail=f"Bill generation error: {str(e)}")
 
 @app.post("/api/invoices/{invoice_id}/cancel")
-async def cancel_invoice_with_pin(invoice_id: str, payload: Dict[str, Any]):
+async def cancel_invoice_with_pin(request: Request, invoice_id: str, payload: Dict[str, Any]):
     pin = payload.get("pin", "")
-    workshop = get_current_workshop()
+    tenant_id = get_current_tenant_id(request)
+    workshop = get_current_workshop(request=request, tenant_id=tenant_id)
     if not verify_master_pin(pin, workshop.get("master_pin", "1234")):
         raise HTTPException(status_code=403, detail="Invalid Master Security PIN")
 
@@ -2061,6 +2077,9 @@ async def cancel_invoice_with_pin(invoice_id: str, payload: Dict[str, Any]):
     if not inv:
         conn.close()
         raise HTTPException(status_code=404, detail="Invoice not found")
+    
+    if inv.get("tenant_id"):
+        tenant_id = inv["tenant_id"]
     
     if inv["payment_status"] == "CANCELLED":
         conn.close()
@@ -2076,27 +2095,27 @@ async def cancel_invoice_with_pin(invoice_id: str, payload: Dict[str, Any]):
     restored_parts_count = 0
     for itm in items:
         if itm["item_type"] == "PART" and itm["item_id"]:
-            cursor.execute("UPDATE inventory_items SET stock_qty = stock_qty + ? WHERE id = ?", (itm["quantity"], itm["item_id"]))
+            cursor.execute("UPDATE inventory_items SET stock_qty = stock_qty + ? WHERE id = ? AND tenant_id = ?", (itm["quantity"], itm["item_id"], tenant_id))
             log_id = f"stk_{uuid.uuid4().hex[:8]}"
             cursor.execute("""
-            INSERT INTO stock_logs (id, item_id, part_name, barcode, change_qty, new_stock_qty, action_type, reference_id, notes, created_at)
-            VALUES (?, ?, ?, ?, ?, (SELECT stock_qty FROM inventory_items WHERE id = ?), 'SALES_RETURN', ?, ?, ?)
-            """, (log_id, itm["item_id"], itm["name"], itm["barcode"], int(itm["quantity"]), itm["item_id"], invoice_number, f"Sales Return / Bill {invoice_number} Cancelled", now_ist))
+            INSERT INTO stock_logs (id, tenant_id, item_id, part_name, barcode, change_qty, new_stock_qty, action_type, reference_id, notes, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, (SELECT stock_qty FROM inventory_items WHERE id = ?), 'SALES_RETURN', ?, ?, ?)
+            """, (log_id, tenant_id, itm["item_id"], itm["name"], itm["barcode"], int(itm["quantity"]), itm["item_id"], invoice_number, f"Sales Return / Bill {invoice_number} Cancelled", now_ist))
             restored_parts_count += 1
 
     # 2. Record Sales Return entry with proper columns matching schema
     sr_id = f"sr_{uuid.uuid4().hex[:8]}"
-    cursor.execute("SELECT COUNT(*) FROM sales_returns")
+    cursor.execute("SELECT COUNT(*) FROM sales_returns WHERE tenant_id = ?", (tenant_id,))
     cnt = cursor.fetchone()[0] + 1
     return_num = f"CN-2026-{cnt:03d}"
     try:
         cursor.execute("""
         INSERT INTO sales_returns (
-            id, return_number, invoice_id, customer_name, item_id, name,
+            id, tenant_id, return_number, invoice_id, customer_name, item_id, name,
             quantity, unit_price, refund_amount, return_date, refund_mode, reason, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            sr_id, return_num, invoice_id, inv["customer_name"] or "Customer",
+            sr_id, tenant_id, return_num, invoice_id, inv["customer_name"] or "Customer",
             "ALL", f"Sales Return for Bill #{invoice_number}", len(items),
             inv["grand_total"], inv["amount_paid"] or 0.0, today_date,
             inv["payment_mode"] or "CASH", "Invoice Cancelled & Stock Restored", now_ist
@@ -2107,17 +2126,17 @@ async def cancel_invoice_with_pin(invoice_id: str, payload: Dict[str, Any]):
     # 3. If there was an unpaid balance on customer khata, deduct it
     bal = float(inv["balance_due"] or 0.0)
     if bal > 0 and inv["customer_phone"]:
-        cursor.execute("UPDATE customers SET khata_balance = MAX(0, khata_balance - ?) WHERE phone = ?", (bal, inv["customer_phone"].strip()))
+        cursor.execute("UPDATE customers SET khata_balance = MAX(0, khata_balance - ?) WHERE phone = ? AND tenant_id = ?", (bal, inv["customer_phone"].strip(), tenant_id))
 
     # 4. If customer had paid, deduct refund from bank/cash account
     paid_amt = float(inv["amount_paid"] or 0.0)
     if paid_amt > 0:
-        cursor.execute("SELECT id FROM bank_accounts WHERE is_primary = 1 LIMIT 1")
+        cursor.execute("SELECT id FROM bank_accounts WHERE is_primary = 1 AND tenant_id = ? LIMIT 1", (tenant_id,))
         p_acc = cursor.fetchone()
         if p_acc:
             cursor.execute("UPDATE bank_accounts SET current_balance = MAX(0.0, current_balance - ?) WHERE id = ?", (paid_amt, p_acc["id"]))
         elif inv["payment_mode"] == "CASH":
-            cursor.execute("UPDATE bank_accounts SET current_balance = MAX(0.0, current_balance - ?) WHERE account_type = 'CASH' LIMIT 1", (paid_amt,))
+            cursor.execute("UPDATE bank_accounts SET current_balance = MAX(0.0, current_balance - ?) WHERE account_type = 'CASH' AND tenant_id = ? LIMIT 1", (paid_amt, tenant_id))
 
     # 5. Mark invoice status as CANCELLED
     cursor.execute("""
@@ -2136,7 +2155,7 @@ async def cancel_invoice_with_pin(invoice_id: str, payload: Dict[str, Any]):
     return {"success": True, "message": f"Invoice #{invoice_number} cancelled and parts restored to inventory."}
 
 @app.post("/api/invoices/{invoice_id}/record-payment")
-async def record_invoice_payment(invoice_id: str, payload: Dict[str, Any]):
+async def record_invoice_payment(request: Request, invoice_id: str, payload: Dict[str, Any]):
     amount = float(payload.get("amount", 0.0))
     mode = payload.get("payment_mode", "UPI")
     notes = payload.get("notes", "")
@@ -2144,6 +2163,7 @@ async def record_invoice_payment(invoice_id: str, payload: Dict[str, Any]):
     if amount <= 0:
         raise HTTPException(status_code=400, detail="Payment amount must be greater than zero")
 
+    tenant_id = get_current_tenant_id(request)
     conn = db.get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,))
@@ -2151,6 +2171,9 @@ async def record_invoice_payment(invoice_id: str, payload: Dict[str, Any]):
     if not inv:
         conn.close()
         raise HTTPException(status_code=404, detail="Invoice not found")
+
+    if inv.get("tenant_id"):
+        tenant_id = inv["tenant_id"]
 
     old_paid = inv["amount_paid"] or 0.0
     new_paid = old_paid + amount
@@ -2168,21 +2191,21 @@ async def record_invoice_payment(invoice_id: str, payload: Dict[str, Any]):
     # 2. Insert into payments table
     pay_id = f"pay_{uuid.uuid4().hex[:8]}"
     cursor.execute("""
-    INSERT INTO payments (id, invoice_id, amount, payment_mode, payment_date, notes, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (pay_id, invoice_id, amount, mode, today_date, notes or f"Installment payment for {inv['invoice_number']}", now_ist))
+    INSERT INTO payments (id, tenant_id, invoice_id, amount, payment_mode, payment_date, notes, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (pay_id, tenant_id, invoice_id, amount, mode, today_date, notes or f"Installment payment for {inv['invoice_number']}", now_ist))
 
     # 3. Update customer khata balance
     if inv["customer_phone"]:
-        cursor.execute("UPDATE customers SET khata_balance = MAX(0.0, khata_balance - ?) WHERE phone = ?", (amount, inv["customer_phone"].strip()))
+        cursor.execute("UPDATE customers SET khata_balance = MAX(0.0, khata_balance - ?) WHERE phone = ? AND tenant_id = ?", (amount, inv["customer_phone"].strip(), tenant_id))
 
     # 4. Update bank account / cash register balance
-    cursor.execute("SELECT id FROM bank_accounts WHERE is_primary = 1 LIMIT 1")
+    cursor.execute("SELECT id FROM bank_accounts WHERE is_primary = 1 AND tenant_id = ? LIMIT 1", (tenant_id,))
     p_acc = cursor.fetchone()
     if p_acc:
         cursor.execute("UPDATE bank_accounts SET current_balance = current_balance + ? WHERE id = ?", (amount, p_acc["id"]))
     elif mode == "CASH":
-        cursor.execute("UPDATE bank_accounts SET current_balance = current_balance + ? WHERE account_type = 'CASH' LIMIT 1", (amount,))
+        cursor.execute("UPDATE bank_accounts SET current_balance = current_balance + ? WHERE account_type = 'CASH' AND tenant_id = ? LIMIT 1", (amount, tenant_id))
 
     db.log_audit("RECORD_PAYMENT", "invoices", invoice_id, f"Recorded ₹{amount:.2f} via {mode}. New status: {new_status}", cursor=cursor)
     conn.commit()
@@ -2389,7 +2412,8 @@ async def inventory_page(request: Request, category: Optional[str] = None, filte
 async def stock_audit_sheet_page(request: Request):
     conn = db.get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM inventory_items ORDER BY category, location_rack, part_name")
+    tenant_id = get_current_tenant_id(request)
+    cursor.execute("SELECT * FROM inventory_items WHERE tenant_id = ? ORDER BY category, location_rack, part_name", (tenant_id,))
     items = [dict(row) for row in cursor.fetchall()]
     conn.close()
     
@@ -2398,7 +2422,7 @@ async def stock_audit_sheet_page(request: Request):
         name="stock_audit_sheet.html",
         context={
             "items": items,
-            "workshop": get_current_workshop(),
+            "workshop": get_current_workshop(request),
             "today_date": datetime.now().strftime("%d %b %Y")
         }
     )
@@ -2413,7 +2437,7 @@ async def download_inventory_excel_template():
     )
 
 @app.post("/api/inventory/import/excel")
-async def import_inventory_excel(file: UploadFile = File(...)):
+async def import_inventory_excel(request: Request, file: UploadFile = File(...)):
     file_bytes = await file.read()
     items, errors = parse_inventory_file(file_bytes, file.filename)
     
@@ -2423,10 +2447,11 @@ async def import_inventory_excel(file: UploadFile = File(...)):
 
     conn = db.get_db_connection()
     cursor = conn.cursor()
+    tenant_id = get_current_tenant_id(request)
     
     imported_count = 0
     for itm in items:
-        cursor.execute("SELECT id FROM inventory_items WHERE barcode = ?", (itm["barcode"],))
+        cursor.execute("SELECT id FROM inventory_items WHERE barcode = ? AND tenant_id = ?", (itm["barcode"], tenant_id))
         existing = cursor.fetchone()
         if existing:
             cursor.execute("""
@@ -2434,22 +2459,22 @@ async def import_inventory_excel(file: UploadFile = File(...)):
                 part_name = ?, part_number = COALESCE(NULLIF(?, ''), part_number), category = ?, stock_qty = stock_qty + ?,
                 cost_price = ?, selling_price = ?, tax_rate = ?, hsn_code = ?,
                 unit = ?, warranty_months = ?, location_rack = ?, position_bin = COALESCE(NULLIF(?, ''), position_bin), updated_at = datetime('now')
-            WHERE id = ?
+            WHERE id = ? AND tenant_id = ?
             """, (
                 itm["part_name"], itm.get("part_number", ""), itm["category"], itm["stock_qty"],
                 itm["cost_price"], itm["selling_price"], itm["tax_rate"], itm["hsn_code"],
-                itm["unit"], itm["warranty_months"], itm["location_rack"], itm.get("position_bin", ""), existing["id"]
+                itm["unit"], itm["warranty_months"], itm["location_rack"], itm.get("position_bin", ""), existing["id"], tenant_id
             ))
         else:
             item_id = f"item_{uuid.uuid4().hex[:8]}"
             cursor.execute("""
             INSERT INTO inventory_items (
-                id, part_name, part_number, sku, barcode, category, stock_qty, min_stock_alert,
+                id, tenant_id, part_name, part_number, sku, barcode, category, stock_qty, min_stock_alert,
                 cost_price, selling_price, tax_rate, hsn_code, unit, warranty_months,
                 location_rack, position_bin, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 5, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 5, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
             """, (
-                item_id, itm["part_name"], itm.get("part_number", ""), itm["barcode"], itm["barcode"], itm["category"],
+                item_id, tenant_id, itm["part_name"], itm.get("part_number", ""), itm["barcode"], itm["barcode"], itm["category"],
                 itm["stock_qty"], itm["cost_price"], itm["selling_price"], itm["tax_rate"],
                 itm["hsn_code"], itm["unit"], itm["warranty_months"], itm["location_rack"], itm.get("position_bin", "")
             ))
@@ -2483,7 +2508,8 @@ async def get_barcode_svg_endpoint(barcode: str):
 async def barcode_labels_page(request: Request):
     conn = db.get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM inventory_items ORDER BY part_name")
+    tenant_id = get_current_tenant_id(request)
+    cursor.execute("SELECT * FROM inventory_items WHERE tenant_id = ? ORDER BY part_name", (tenant_id,))
     inventory_items = [dict(row) for row in cursor.fetchall()]
     conn.close()
     
@@ -2629,25 +2655,29 @@ async def add_technician(
     return RedirectResponse(url="/technicians", status_code=303)
 
 @app.post("/api/technicians/{tech_id}/toggle-leave")
-async def toggle_technician_leave(tech_id: str):
+async def toggle_technician_leave(request: Request, tech_id: str):
     conn = db.get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT is_on_leave, name FROM technicians WHERE id = ?", (tech_id,))
+    tenant_id = get_current_tenant_id(request)
+    cursor.execute("SELECT is_on_leave, name, tenant_id FROM technicians WHERE id = ?", (tech_id,))
     row = cursor.fetchone()
     if not row:
         conn.close()
         raise HTTPException(status_code=404, detail="Technician not found")
 
+    if row["tenant_id"]:
+        tenant_id = row["tenant_id"]
+
     new_leave_state = 0 if row["is_on_leave"] == 1 else 1
-    cursor.execute("UPDATE technicians SET is_on_leave = ? WHERE id = ?", (new_leave_state, tech_id))
+    cursor.execute("UPDATE technicians SET is_on_leave = ? WHERE id = ? AND tenant_id = ?", (new_leave_state, tech_id, tenant_id))
     
     att_id = f"att_{uuid.uuid4().hex[:8]}"
     today_str = datetime.now().strftime("%Y-%m-%d")
     att_status = "ON_LEAVE" if new_leave_state == 1 else "PRESENT"
     cursor.execute("""
-    INSERT INTO attendance (id, technician_id, date, status, created_at)
-    VALUES (?, ?, ?, ?, datetime('now'))
-    """, (att_id, tech_id, today_str, att_status))
+    INSERT INTO attendance (id, tenant_id, technician_id, date, status, created_at)
+    VALUES (?, ?, ?, ?, ?, datetime('now'))
+    """, (att_id, tenant_id, tech_id, today_str, att_status))
 
     db.log_audit("TOGGLE_LEAVE", "technicians", tech_id, f"{row['name']} marked as {att_status}", cursor=cursor)
     conn.commit()
@@ -2656,6 +2686,7 @@ async def toggle_technician_leave(tech_id: str):
 
 @app.post("/api/technicians/advances")
 async def record_technician_advance(
+    request: Request,
     technician_id: str = Form(...),
     amount: float = Form(...),
     payment_mode: str = Form("CASH"),
@@ -2663,30 +2694,34 @@ async def record_technician_advance(
 ):
     conn = db.get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT name FROM technicians WHERE id = ?", (technician_id,))
+    tenant_id = get_current_tenant_id(request)
+    cursor.execute("SELECT name, tenant_id FROM technicians WHERE id = ?", (technician_id,))
     tech = cursor.fetchone()
     if not tech:
         conn.close()
         raise HTTPException(status_code=404, detail="Technician not found")
 
+    if tech["tenant_id"]:
+        tenant_id = tech["tenant_id"]
+
     adv_id = f"adv_{uuid.uuid4().hex[:8]}"
     today_str = datetime.now().strftime("%Y-%m-%d")
 
     cursor.execute("""
-    INSERT INTO employee_advances (id, technician_id, technician_name, amount, advance_date, status, payment_mode, notes, created_at)
-    VALUES (?, ?, ?, ?, ?, 'OUTSTANDING', ?, ?, datetime('now'))
-    """, (adv_id, technician_id, tech["name"], amount, today_str, payment_mode, notes))
+    INSERT INTO employee_advances (id, tenant_id, technician_id, technician_name, amount, advance_date, status, payment_mode, notes, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, 'OUTSTANDING', ?, ?, datetime('now'))
+    """, (adv_id, tenant_id, technician_id, tech["name"], amount, today_str, payment_mode, notes))
 
-    cursor.execute("UPDATE technicians SET current_advance_balance = current_advance_balance + ? WHERE id = ?", (amount, technician_id))
+    cursor.execute("UPDATE technicians SET current_advance_balance = current_advance_balance + ? WHERE id = ? AND tenant_id = ?", (amount, technician_id, tenant_id))
 
     # Deduct advance disbursed from bank/cash account
     if amount > 0:
-        cursor.execute("SELECT id FROM bank_accounts WHERE is_primary = 1 LIMIT 1")
+        cursor.execute("SELECT id FROM bank_accounts WHERE is_primary = 1 AND tenant_id = ? LIMIT 1", (tenant_id,))
         p_acc = cursor.fetchone()
         if p_acc:
             cursor.execute("UPDATE bank_accounts SET current_balance = MAX(0.0, current_balance - ?) WHERE id = ?", (amount, p_acc["id"]))
         elif payment_mode == "CASH":
-            cursor.execute("UPDATE bank_accounts SET current_balance = MAX(0.0, current_balance - ?) WHERE account_type = 'CASH' LIMIT 1", (amount,))
+            cursor.execute("UPDATE bank_accounts SET current_balance = MAX(0.0, current_balance - ?) WHERE account_type = 'CASH' AND tenant_id = ? LIMIT 1", (amount, tenant_id))
 
     db.log_audit("STAFF_ADVANCE", "technicians", technician_id, f"Disbursed advance ₹{amount:.2f} to {tech['name']}", cursor=cursor)
     conn.commit()
@@ -2695,6 +2730,7 @@ async def record_technician_advance(
 
 @app.post("/api/technicians/wages")
 async def record_technician_wages(
+    request: Request,
     technician_id: str = Form(...),
     base_wages: float = Form(4000.0),
     commission_amount: float = Form(0.0),
@@ -2703,11 +2739,15 @@ async def record_technician_wages(
 ):
     conn = db.get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT name, current_advance_balance FROM technicians WHERE id = ?", (technician_id,))
+    tenant_id = get_current_tenant_id(request)
+    cursor.execute("SELECT name, current_advance_balance, tenant_id FROM technicians WHERE id = ?", (technician_id,))
     tech = cursor.fetchone()
     if not tech:
         conn.close()
         raise HTTPException(status_code=404, detail="Technician not found")
+
+    if tech["tenant_id"]:
+        tenant_id = tech["tenant_id"]
 
     gross = base_wages + commission_amount
     net_paid = max(0.0, gross - advance_deducted)
@@ -2717,31 +2757,31 @@ async def record_technician_wages(
 
     cursor.execute("""
     INSERT INTO employee_wages (
-        id, technician_id, technician_name, period_start, period_end,
+        id, tenant_id, technician_id, technician_name, period_start, period_end,
         gross_amount, advance_deducted, net_paid, payment_date, payment_mode, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
     """, (
-        wage_id, technician_id, tech["name"], start_str, today_str,
+        wage_id, tenant_id, technician_id, tech["name"], start_str, today_str,
         gross, advance_deducted, net_paid, today_str, payment_mode
     ))
 
     if advance_deducted > 0:
-        cursor.execute("UPDATE technicians SET current_advance_balance = MAX(0.0, current_advance_balance - ?) WHERE id = ?", (advance_deducted, technician_id))
+        cursor.execute("UPDATE technicians SET current_advance_balance = MAX(0.0, current_advance_balance - ?) WHERE id = ? AND tenant_id = ?", (advance_deducted, technician_id, tenant_id))
 
     # Record wage payment into expenses table and adjust bank balance
     if net_paid > 0:
         exp_id = f"exp_{uuid.uuid4().hex[:8]}"
         cursor.execute("""
-        INSERT INTO expenses (id, title, category, amount, payment_mode, expense_date, paid_to, reference_no, created_at)
-        VALUES (?, ?, 'Staff Wages & Salary', ?, ?, ?, ?, ?, datetime('now'))
-        """, (exp_id, f"Wages for {tech['name']}", net_paid, payment_mode, today_str, tech["name"], wage_id))
+        INSERT INTO expenses (id, tenant_id, title, category, amount, payment_mode, expense_date, paid_to, reference_no, created_at)
+        VALUES (?, ?, ?, 'Staff Wages & Salary', ?, ?, ?, ?, ?, datetime('now'))
+        """, (exp_id, tenant_id, f"Wages for {tech['name']}", net_paid, payment_mode, today_str, tech["name"], wage_id))
 
-        cursor.execute("SELECT id FROM bank_accounts WHERE is_primary = 1 LIMIT 1")
+        cursor.execute("SELECT id FROM bank_accounts WHERE is_primary = 1 AND tenant_id = ? LIMIT 1", (tenant_id,))
         p_acc = cursor.fetchone()
         if p_acc:
             cursor.execute("UPDATE bank_accounts SET current_balance = MAX(0.0, current_balance - ?) WHERE id = ?", (net_paid, p_acc["id"]))
         elif payment_mode == "CASH":
-            cursor.execute("UPDATE bank_accounts SET current_balance = MAX(0.0, current_balance - ?) WHERE account_type = 'CASH' LIMIT 1", (net_paid,))
+            cursor.execute("UPDATE bank_accounts SET current_balance = MAX(0.0, current_balance - ?) WHERE account_type = 'CASH' AND tenant_id = ? LIMIT 1", (net_paid, tenant_id))
 
     db.log_audit("PAY_WAGES", "technicians", technician_id, f"Paid weekly wages ₹{net_paid:.2f} to {tech['name']}", cursor=cursor)
     conn.commit()
@@ -2749,9 +2789,10 @@ async def record_technician_wages(
     return RedirectResponse(url="/technicians", status_code=303)
 
 @app.get("/api/technicians/{tech_id}/ledger")
-async def get_technician_ledger(tech_id: str):
+async def get_technician_ledger(request: Request, tech_id: str):
     conn = db.get_db_connection()
     cursor = conn.cursor()
+    tenant_id = get_current_tenant_id(request)
     cursor.execute("SELECT * FROM technicians WHERE id = ?", (tech_id,))
     tech = cursor.fetchone()
     if not tech:
@@ -2759,22 +2800,24 @@ async def get_technician_ledger(tech_id: str):
         raise HTTPException(status_code=404, detail="Technician not found")
     
     tech_data = dict(tech)
+    if tech_data.get("tenant_id"):
+        tenant_id = tech_data["tenant_id"]
     commission_pct = float(tech_data.get("commission_pct") or 0.0)
 
     # 1. Fetch Advances
     cursor.execute("""
         SELECT * FROM employee_advances 
-        WHERE technician_id = ? 
+        WHERE technician_id = ? AND tenant_id = ?
         ORDER BY advance_date DESC, created_at DESC
-    """, (tech_id,))
+    """, (tech_id, tenant_id))
     advances = [dict(r) for r in cursor.fetchall()]
 
     # 2. Fetch Wages
     cursor.execute("""
         SELECT * FROM employee_wages 
-        WHERE technician_id = ? 
+        WHERE technician_id = ? AND tenant_id = ?
         ORDER BY payment_date DESC, created_at DESC
-    """, (tech_id,))
+    """, (tech_id, tenant_id))
     wages = [dict(r) for r in cursor.fetchall()]
 
     # 3. Fetch Assigned Job Cards
@@ -2782,9 +2825,9 @@ async def get_technician_ledger(tech_id: str):
         SELECT id, job_number, customer_name, customer_phone, vehicle_reg_no, vehicle_make_model,
                status, total_labor, total_parts, grand_total, created_at, completed_at, delivered_at
         FROM job_cards 
-        WHERE assigned_technician_id = ? OR assigned_technician_name = ?
+        WHERE (assigned_technician_id = ? OR assigned_technician_name = ?) AND tenant_id = ?
         ORDER BY created_at DESC
-    """, (tech_id, tech_data["name"]))
+    """, (tech_id, tech_data["name"], tenant_id))
     jobs = []
     total_labor = 0.0
     for r in cursor.fetchall():
@@ -3006,6 +3049,7 @@ async def confirm_purchase_bill(pur_id: str):
 
 @app.post("/api/purchases/returns")
 async def record_purchase_return(
+    request: Request,
     supplier_name: str = Form(...),
     item_id: str = Form(...),
     quantity: int = Form(1),
@@ -3014,24 +3058,25 @@ async def record_purchase_return(
 ):
     conn = db.get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT part_name, cost_price FROM inventory_items WHERE id = ?", (item_id,))
+    tenant_id = get_current_tenant_id(request)
+    cursor.execute("SELECT part_name, cost_price FROM inventory_items WHERE id = ? AND tenant_id = ?", (item_id, tenant_id))
     item = cursor.fetchone()
     if not item:
         conn.close()
         raise HTTPException(status_code=404, detail="Item not found")
 
     ret_id = f"pr_{uuid.uuid4().hex[:8]}"
-    cursor.execute("SELECT COUNT(*) FROM purchase_returns")
+    cursor.execute("SELECT COUNT(*) FROM purchase_returns WHERE tenant_id = ?", (tenant_id,))
     cnt = cursor.fetchone()[0] + 1
     return_number = f"DN-2026-{cnt:03d}"
     today_str = datetime.now().strftime("%Y-%m-%d")
 
     cursor.execute("""
-    INSERT INTO purchase_returns (id, return_number, supplier_name, item_id, part_name, quantity, unit_cost, return_amount, return_date, reason, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-    """, (ret_id, return_number, supplier_name, item_id, item["part_name"], quantity, item["cost_price"], return_amount, today_str, reason))
+    INSERT INTO purchase_returns (id, tenant_id, return_number, supplier_name, item_id, part_name, quantity, unit_cost, return_amount, return_date, reason, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    """, (ret_id, tenant_id, return_number, supplier_name, item_id, item["part_name"], quantity, item["cost_price"], return_amount, today_str, reason))
 
-    cursor.execute("UPDATE inventory_items SET stock_qty = MAX(0, stock_qty - ?) WHERE id = ?", (quantity, item_id))
+    cursor.execute("UPDATE inventory_items SET stock_qty = MAX(0, stock_qty - ?) WHERE id = ? AND tenant_id = ?", (quantity, item_id, tenant_id))
 
     db.log_audit("PURCHASE_RETURN", "purchase_returns", ret_id, f"Debit note #{return_number} for {quantity}x {item['part_name']}", cursor=cursor)
     conn.commit()
@@ -3101,7 +3146,8 @@ async def create_supplier(
     return RedirectResponse(url="/suppliers", status_code=303)
 
 @app.post("/api/suppliers/quick-create")
-async def quick_create_supplier(payload: Dict[str, Any]):
+async def quick_create_supplier(request: Request, payload: Dict[str, Any]):
+    tenant_id = get_current_tenant_id(request)
     name = (payload.get("name") or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="Supplier name is required")
@@ -3117,9 +3163,9 @@ async def quick_create_supplier(payload: Dict[str, Any]):
 
     cursor.execute("""
     INSERT INTO suppliers (
-        id, name, contact_person, phone, whatsapp, email, address, city, state, gstin, payment_terms, notes, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-    """, (sup_id, name, contact_person, phone, phone, None, None, city, state, gstin, None, None))
+        id, tenant_id, name, contact_person, phone, whatsapp, email, address, city, state, gstin, payment_terms, notes, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    """, (sup_id, tenant_id, name, contact_person, phone, phone, None, None, city, state, gstin, None, None))
 
     db.log_audit("CREATE_SUPPLIER_QUICK", "suppliers", sup_id, f"Quick created supplier {name}", cursor=cursor)
     conn.commit()
@@ -3138,10 +3184,11 @@ async def quick_create_supplier(payload: Dict[str, Any]):
     }
 
 @app.get("/api/suppliers/{supplier_id}")
-async def get_supplier_details(supplier_id: str):
+async def get_supplier_details(request: Request, supplier_id: str):
     conn = db.get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM suppliers WHERE id = ?", (supplier_id,))
+    tenant_id = get_current_tenant_id(request)
+    cursor.execute("SELECT * FROM suppliers WHERE id = ? AND tenant_id = ?", (supplier_id, tenant_id))
     sup_row = cursor.fetchone()
     if not sup_row:
         conn.close()
@@ -3149,7 +3196,7 @@ async def get_supplier_details(supplier_id: str):
     supplier = dict(sup_row)
     
     # Get purchase bills
-    cursor.execute("SELECT * FROM purchase_bills WHERE supplier_id = ? OR LOWER(supplier_name) = LOWER(?) ORDER BY bill_date DESC", (supplier_id, supplier["name"]))
+    cursor.execute("SELECT * FROM purchase_bills WHERE (supplier_id = ? OR LOWER(supplier_name) = LOWER(?)) AND tenant_id = ? ORDER BY bill_date DESC", (supplier_id, supplier["name"], tenant_id))
     bills = [dict(r) for r in cursor.fetchall()]
     
     # Get all distinct products supplied
@@ -3157,9 +3204,9 @@ async def get_supplier_details(supplier_id: str):
     SELECT pi.part_name, pi.barcode, pi.unit_cost, pi.quantity, pi.total_cost, pb.bill_number, pb.bill_date
     FROM purchase_items pi
     JOIN purchase_bills pb ON pi.purchase_id = pb.id
-    WHERE pb.supplier_id = ? OR LOWER(pb.supplier_name) = LOWER(?)
+    WHERE (pb.supplier_id = ? OR LOWER(pb.supplier_name) = LOWER(?)) AND pb.tenant_id = ?
     ORDER BY pb.bill_date DESC
-    """, (supplier_id, supplier["name"]))
+    """, (supplier_id, supplier["name"], tenant_id))
     products = [dict(r) for r in cursor.fetchall()]
     
     conn.close()
@@ -3265,7 +3312,8 @@ async def get_inventory_item_history(item_id: str):
     }
 
 @app.post("/api/inventory/quick-create")
-async def quick_create_inventory_item(payload: Dict[str, Any]):
+async def quick_create_inventory_item(request: Request, payload: Dict[str, Any]):
+    tenant_id = get_current_tenant_id(request)
     part_name = payload.get("part_name", "").strip()
     if not part_name:
         raise HTTPException(status_code=400, detail="Part name is required")
@@ -3289,12 +3337,12 @@ async def quick_create_inventory_item(payload: Dict[str, Any]):
     
     cursor.execute("""
     INSERT INTO inventory_items (
-        id, part_name, part_number, sku, barcode, category, stock_qty, min_stock_alert,
+        id, tenant_id, part_name, part_number, sku, barcode, category, stock_qty, min_stock_alert,
         cost_price, selling_price, tax_rate, hsn_code, unit, warranty_months,
         location_rack, position_bin,
         created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, 0, 5, ?, ?, ?, ?, 'pcs', 6, ?, ?, datetime('now'), datetime('now'))
-    """, (item_id, part_name, part_number, barcode, barcode, category, cost_price, selling_price, tax_rate, hsn_code, location_rack, position_bin))
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 5, ?, ?, ?, ?, 'pcs', 6, ?, ?, datetime('now'), datetime('now'))
+    """, (item_id, tenant_id, part_name, part_number, barcode, barcode, category, cost_price, selling_price, tax_rate, hsn_code, location_rack, position_bin))
     
     db.log_audit("QUICK_CREATE_PART", "inventory_items", item_id, f"Quick created part: {part_name} (PN: {part_number}, Rack: {location_rack}, Bin: {position_bin})", cursor=cursor)
     conn.commit()
@@ -3324,10 +3372,11 @@ async def quick_create_inventory_item(payload: Dict[str, Any]):
 async def sales_returns_page(request: Request):
     conn = db.get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM sales_returns ORDER BY return_date DESC")
+    tenant_id = get_current_tenant_id(request)
+    cursor.execute("SELECT * FROM sales_returns WHERE tenant_id = ? ORDER BY return_date DESC", (tenant_id,))
     returns = [dict(row) for row in cursor.fetchall()]
 
-    cursor.execute("SELECT * FROM inventory_items ORDER BY part_name")
+    cursor.execute("SELECT * FROM inventory_items WHERE tenant_id = ? ORDER BY part_name", (tenant_id,))
     inventory_items = [dict(row) for row in cursor.fetchall()]
     conn.close()
 
@@ -3343,6 +3392,7 @@ async def sales_returns_page(request: Request):
 
 @app.post("/api/sales-returns")
 async def record_sales_return(
+    request: Request,
     invoice_id: str = Form(...),
     customer_name: str = Form(...),
     item_id: str = Form(...),
@@ -3353,39 +3403,40 @@ async def record_sales_return(
 ):
     conn = db.get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT part_name, barcode, selling_price FROM inventory_items WHERE id = ?", (item_id,))
+    tenant_id = get_current_tenant_id(request)
+    cursor.execute("SELECT part_name, barcode, selling_price FROM inventory_items WHERE id = ? AND tenant_id = ?", (item_id, tenant_id))
     item = cursor.fetchone()
     if not item:
         conn.close()
         raise HTTPException(status_code=404, detail="Item not found")
 
     sr_id = f"sr_{uuid.uuid4().hex[:8]}"
-    cursor.execute("SELECT COUNT(*) FROM sales_returns")
+    cursor.execute("SELECT COUNT(*) FROM sales_returns WHERE tenant_id = ?", (tenant_id,))
     cnt = cursor.fetchone()[0] + 1
     return_number = f"CN-2026-{cnt:03d}"
     today_str = datetime.now().strftime("%Y-%m-%d")
 
     cursor.execute("""
-    INSERT INTO sales_returns (id, return_number, invoice_id, customer_name, item_id, name, quantity, unit_price, refund_amount, return_date, refund_mode, reason, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-    """, (sr_id, return_number, invoice_id, customer_name, item_id, item["part_name"], quantity, item["selling_price"], refund_amount, today_str, refund_mode, reason))
+    INSERT INTO sales_returns (id, tenant_id, return_number, invoice_id, customer_name, item_id, name, quantity, unit_price, refund_amount, return_date, refund_mode, reason, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    """, (sr_id, tenant_id, return_number, invoice_id, customer_name, item_id, item["part_name"], quantity, item["selling_price"], refund_amount, today_str, refund_mode, reason))
 
-    cursor.execute("UPDATE inventory_items SET stock_qty = stock_qty + ? WHERE id = ?", (quantity, item_id))
+    cursor.execute("UPDATE inventory_items SET stock_qty = stock_qty + ? WHERE id = ? AND tenant_id = ?", (quantity, item_id, tenant_id))
 
     stk_id = f"stk_{uuid.uuid4().hex[:8]}"
     cursor.execute("""
-    INSERT INTO stock_logs (id, item_id, part_name, barcode, change_qty, new_stock_qty, action_type, reference_id, notes, created_at)
-    VALUES (?, ?, ?, ?, ?, (SELECT stock_qty FROM inventory_items WHERE id = ?), 'SALES_RETURN', ?, ?, datetime('now'))
-    """, (stk_id, item_id, item["part_name"], item["barcode"] or "", quantity, item_id, return_number, f"Sales Return #{return_number}: {reason}"))
+    INSERT INTO stock_logs (id, tenant_id, item_id, part_name, barcode, change_qty, new_stock_qty, action_type, reference_id, notes, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, (SELECT stock_qty FROM inventory_items WHERE id = ?), 'SALES_RETURN', ?, ?, datetime('now'))
+    """, (stk_id, tenant_id, item_id, item["part_name"], item["barcode"] or "", quantity, item_id, return_number, f"Sales Return #{return_number}: {reason}"))
 
     # Deduct refund from bank account or cash drawer
     if refund_amount > 0:
-        cursor.execute("SELECT id FROM bank_accounts WHERE is_primary = 1 LIMIT 1")
+        cursor.execute("SELECT id FROM bank_accounts WHERE is_primary = 1 AND tenant_id = ? LIMIT 1", (tenant_id,))
         p_acc = cursor.fetchone()
         if p_acc:
             cursor.execute("UPDATE bank_accounts SET current_balance = MAX(0.0, current_balance - ?) WHERE id = ?", (refund_amount, p_acc["id"]))
         elif refund_mode == "CASH":
-            cursor.execute("UPDATE bank_accounts SET current_balance = MAX(0.0, current_balance - ?) WHERE account_type = 'CASH' LIMIT 1", (refund_amount,))
+            cursor.execute("UPDATE bank_accounts SET current_balance = MAX(0.0, current_balance - ?) WHERE account_type = 'CASH' AND tenant_id = ? LIMIT 1", (refund_amount, tenant_id))
 
     db.log_audit("SALES_RETURN", "sales_returns", sr_id, f"Credit note #{return_number} for {customer_name}: {quantity}x {item['part_name']}", cursor=cursor)
     conn.commit()
@@ -3400,12 +3451,14 @@ async def record_sales_return(
 async def customers_page(request: Request):
     conn = db.get_db_connection()
     cursor = conn.cursor()
+    tenant_id = get_current_tenant_id(request)
     cursor.execute("""
     SELECT v.*, c.khata_balance, c.total_visits, c.id as cust_id
     FROM vehicles v
-    LEFT JOIN customers c ON v.customer_id = c.id OR v.customer_phone = c.phone
+    LEFT JOIN customers c ON (v.customer_id = c.id OR v.customer_phone = c.phone) AND c.tenant_id = ?
+    WHERE v.tenant_id = ?
     ORDER BY v.created_at DESC
-    """)
+    """, (tenant_id, tenant_id))
     vehicles = [dict(row) for row in cursor.fetchall()]
     conn.close()
     
@@ -3509,7 +3562,8 @@ async def get_customer_history(request: Request, customer_id_or_phone: str):
 async def bank_accounts_page(request: Request):
     conn = db.get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM bank_accounts ORDER BY is_primary DESC, current_balance DESC")
+    tenant_id = get_current_tenant_id(request)
+    cursor.execute("SELECT * FROM bank_accounts WHERE tenant_id = ? ORDER BY is_primary DESC, current_balance DESC", (tenant_id,))
     accounts = [dict(row) for row in cursor.fetchall()]
     conn.close()
     
@@ -3524,6 +3578,7 @@ async def bank_accounts_page(request: Request):
 
 @app.post("/api/bank-accounts")
 async def add_bank_account(
+    request: Request,
     account_name: str = Form(...),
     bank_name: Optional[str] = Form(None),
     account_type: str = Form("BANK"),
@@ -3534,11 +3589,12 @@ async def add_bank_account(
 ):
     conn = db.get_db_connection()
     cursor = conn.cursor()
+    tenant_id = get_current_tenant_id(request)
     acc_id = f"bank_{uuid.uuid4().hex[:8]}"
     cursor.execute("""
-    INSERT INTO bank_accounts (id, account_name, bank_name, account_type, account_number, ifsc_code, upi_vpa, current_balance, is_primary, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, datetime('now'))
-    """, (acc_id, account_name, bank_name, account_type, account_number, ifsc_code, upi_vpa, current_balance))
+    INSERT INTO bank_accounts (id, tenant_id, account_name, bank_name, account_type, account_number, ifsc_code, upi_vpa, current_balance, is_primary, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, datetime('now'))
+    """, (acc_id, tenant_id, account_name, bank_name, account_type, account_number, ifsc_code, upi_vpa, current_balance))
     conn.commit()
     conn.close()
     return RedirectResponse(url="/bank-accounts", status_code=303)
@@ -3598,14 +3654,15 @@ async def ca_reports_page(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None
 ):
+    tenant_id = get_current_tenant_id(request)
     fy_dates = ca_reports.get_financial_year_dates(financial_year)
     s_date = start_date or fy_dates["start_date"]
     e_date = end_date or fy_dates["end_date"]
 
-    gstr1 = ca_reports.generate_gstr1_report(s_date, e_date)
-    pnl = ca_reports.generate_profit_and_loss_report(s_date, e_date)
-    valuation = ca_reports.generate_inventory_valuation_report()
-    collections = ca_reports.generate_daily_collection_register(s_date, e_date)
+    gstr1 = ca_reports.generate_gstr1_report(s_date, e_date, tenant_id=tenant_id)
+    pnl = ca_reports.generate_profit_and_loss_report(s_date, e_date, tenant_id=tenant_id)
+    valuation = ca_reports.generate_inventory_valuation_report(tenant_id=tenant_id)
+    collections = ca_reports.generate_daily_collection_register(s_date, e_date, tenant_id=tenant_id)
 
     return templates.TemplateResponse(
         request=request,
@@ -3623,9 +3680,10 @@ async def ca_reports_page(
     )
 
 @app.get("/api/ca-reports/export-gstr1-excel")
-async def export_ca_gstr1_excel(financial_year: Optional[str] = None):
+async def export_ca_gstr1_excel(request: Request, financial_year: Optional[str] = None):
+    tenant_id = get_current_tenant_id(request)
     fy_dates = ca_reports.get_financial_year_dates(financial_year)
-    excel_bytes = ca_reports.export_gstr1_excel(fy_dates["start_date"], fy_dates["end_date"])
+    excel_bytes = ca_reports.export_gstr1_excel(fy_dates["start_date"], fy_dates["end_date"], tenant_id=tenant_id)
     return Response(
         content=excel_bytes,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

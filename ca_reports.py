@@ -32,7 +32,7 @@ def get_financial_year_dates(fy_str: Optional[str] = None) -> Dict[str, str]:
         "financial_year": fy_label
     }
 
-def generate_gstr1_report(start_date: Optional[str] = None, end_date: Optional[str] = None, fy: Optional[str] = None) -> Dict[str, Any]:
+def generate_gstr1_report(start_date: Optional[str] = None, end_date: Optional[str] = None, fy: Optional[str] = None, tenant_id: str = "tenant_1") -> Dict[str, Any]:
     """Generate GSTR-1 Sales & Tax Audit Report with FY support (excluding cancelled bills)"""
     if fy and not start_date and not end_date:
         fy_dates = get_financial_year_dates(fy)
@@ -49,9 +49,9 @@ def generate_gstr1_report(start_date: Optional[str] = None, end_date: Optional[s
         i.discount_amount, i.grand_total, i.amount_paid, i.balance_due,
         i.payment_status, i.payment_mode
     FROM invoices i
-    WHERE (i.payment_status != 'CANCELLED' AND i.status != 'CANCELLED')
+    WHERE (i.payment_status != 'CANCELLED' AND i.status != 'CANCELLED') AND i.tenant_id = ?
     """
-    params = []
+    params = [tenant_id]
     if start_date:
         query += " AND date(i.invoice_date) >= date(?)"
         params.append(start_date)
@@ -83,9 +83,9 @@ def generate_gstr1_report(start_date: Optional[str] = None, end_date: Optional[s
         SUM(ii.total_price) as total_val
     FROM invoice_items ii
     JOIN invoices i ON ii.invoice_id = i.id
-    WHERE (i.payment_status != 'CANCELLED' AND i.status != 'CANCELLED')
+    WHERE (i.payment_status != 'CANCELLED' AND i.status != 'CANCELLED') AND i.tenant_id = ?
     """
-    hsn_params = []
+    hsn_params = [tenant_id]
     if start_date:
         hsn_query += " AND date(i.invoice_date) >= date(?)"
         hsn_params.append(start_date)
@@ -114,7 +114,7 @@ def generate_gstr1_report(start_date: Optional[str] = None, end_date: Optional[s
         "hsn_summary": hsn_summary,
     }
 
-def generate_profit_and_loss_report(start_date: Optional[str] = None, end_date: Optional[str] = None, fy: Optional[str] = None) -> Dict[str, Any]:
+def generate_profit_and_loss_report(start_date: Optional[str] = None, end_date: Optional[str] = None, fy: Optional[str] = None, tenant_id: str = "tenant_1") -> Dict[str, Any]:
     """Generate P&L Financial Statement with FY support, correct Taxable Revenue separation, and Wages"""
     if fy and not start_date and not end_date:
         fy_dates = get_financial_year_dates(fy)
@@ -133,9 +133,9 @@ def generate_profit_and_loss_report(start_date: Optional[str] = None, end_date: 
         COALESCE(SUM(tax_total), 0) as total_tax_collected,
         COALESCE(SUM(discount_amount), 0) as total_discounts
     FROM invoices
-    WHERE (payment_status != 'CANCELLED' AND status != 'CANCELLED')
+    WHERE (payment_status != 'CANCELLED' AND status != 'CANCELLED') AND tenant_id = ?
     """
-    params = []
+    params = [tenant_id]
     if start_date:
         inv_query += " AND date(invoice_date) >= date(?)"
         params.append(start_date)
@@ -152,9 +152,9 @@ def generate_profit_and_loss_report(start_date: Optional[str] = None, end_date: 
     FROM invoice_items ii
     JOIN invoices i ON ii.invoice_id = i.id
     LEFT JOIN inventory_items inv ON ii.item_id = inv.id
-    WHERE ii.item_type = 'PART' AND (i.payment_status != 'CANCELLED' AND i.status != 'CANCELLED')
+    WHERE ii.item_type = 'PART' AND (i.payment_status != 'CANCELLED' AND i.status != 'CANCELLED') AND i.tenant_id = ?
     """
-    cogs_params = []
+    cogs_params = [tenant_id]
     if start_date:
         cogs_query += " AND date(i.invoice_date) >= date(?)"
         cogs_params.append(start_date)
@@ -172,9 +172,9 @@ def generate_profit_and_loss_report(start_date: Optional[str] = None, end_date: 
         category,
         COALESCE(SUM(amount), 0) as category_total
     FROM expenses
-    WHERE 1=1
+    WHERE tenant_id = ?
     """
-    exp_params = []
+    exp_params = [tenant_id]
     if start_date:
         exp_query += " AND date(expense_date) >= date(?)"
         exp_params.append(start_date)
@@ -190,9 +190,9 @@ def generate_profit_and_loss_report(start_date: Optional[str] = None, end_date: 
     wage_query = """
     SELECT COALESCE(SUM(net_paid), 0) as total_wages
     FROM employee_wages
-    WHERE 1=1
+    WHERE tenant_id = ?
     """
-    wage_params = []
+    wage_params = [tenant_id]
     if start_date:
         wage_query += " AND date(payment_date) >= date(?)"
         wage_params.append(start_date)
@@ -240,7 +240,7 @@ def generate_profit_and_loss_report(start_date: Optional[str] = None, end_date: 
         "net_margin_pct": net_margin_pct,
     }
 
-def generate_daily_collection_register(start_date: Optional[str] = None, end_date: Optional[str] = None) -> Dict[str, Any]:
+def generate_daily_collection_register(start_date: Optional[str] = None, end_date: Optional[str] = None, tenant_id: str = "tenant_1") -> Dict[str, Any]:
     """Detailed Daily Collection Register breakdown by Cash, UPI, Bank, and Card from payments table"""
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -256,9 +256,9 @@ def generate_daily_collection_register(start_date: Optional[str] = None, end_dat
         COALESCE(SUM(p.amount), 0) as day_total,
         COUNT(DISTINCT p.id) as bill_count
     FROM payments p
-    WHERE 1=1
+    WHERE p.tenant_id = ?
     """
-    params = []
+    params = [tenant_id]
     if start_date:
         query += " AND date(p.payment_date) >= date(?)"
         params.append(start_date)
@@ -286,9 +286,9 @@ def generate_daily_collection_register(start_date: Optional[str] = None, end_dat
         p.notes
     FROM payments p
     LEFT JOIN invoices i ON p.invoice_id = i.id
-    WHERE p.amount > 0
+    WHERE p.amount > 0 AND p.tenant_id = ?
     """
-    dt_params = []
+    dt_params = [tenant_id]
     if start_date:
         dt_query += " AND date(p.payment_date) >= date(?)"
         dt_params.append(start_date)
@@ -311,7 +311,7 @@ def generate_daily_collection_register(start_date: Optional[str] = None, end_dat
         "total_card": sum(r["card_total"] for r in registers)
     }
 
-def generate_inventory_valuation_report() -> Dict[str, Any]:
+def generate_inventory_valuation_report(tenant_id: str = "tenant_1") -> Dict[str, Any]:
     """Stock Valuation Report for Balance Sheet"""
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -322,8 +322,9 @@ def generate_inventory_valuation_report() -> Dict[str, Any]:
         (stock_qty * cost_price) as total_cost_value,
         (stock_qty * selling_price) as total_retail_value
     FROM inventory_items
+    WHERE tenant_id = ?
     ORDER BY category, part_name
-    """)
+    """, (tenant_id,))
     items = [dict(row) for row in cursor.fetchall()]
     conn.close()
     
@@ -338,9 +339,9 @@ def generate_inventory_valuation_report() -> Dict[str, Any]:
         "items": items
     }
 
-def export_gstr1_excel(start_date: Optional[str] = None, end_date: Optional[str] = None, fy: Optional[str] = None) -> bytes:
+def export_gstr1_excel(start_date: Optional[str] = None, end_date: Optional[str] = None, fy: Optional[str] = None, tenant_id: str = "tenant_1") -> bytes:
     """Export GSTR-1 Sales Report to Excel (.xlsx) for CA"""
-    report = generate_gstr1_report(start_date, end_date, fy)
+    report = generate_gstr1_report(start_date, end_date, fy, tenant_id=tenant_id)
     
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
