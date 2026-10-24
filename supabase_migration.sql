@@ -45,6 +45,8 @@ BEGIN
     ) THEN 
         ALTER TABLE users DROP CONSTRAINT users_username_key; 
     END IF; 
+EXCEPTION WHEN OTHERS THEN
+    NULL;
 END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_tenant_username ON users (tenant_id, username);
@@ -76,10 +78,20 @@ BEGIN
     IF EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name = 'invoices_invoice_number_key' AND table_name = 'invoices') THEN
         ALTER TABLE invoices DROP CONSTRAINT invoices_invoice_number_key;
     END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name = 'customers_phone_key' AND table_name = 'customers') THEN
+        ALTER TABLE customers DROP CONSTRAINT customers_phone_key;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name = 'vehicles_reg_number_key' AND table_name = 'vehicles') THEN
+        ALTER TABLE vehicles DROP CONSTRAINT vehicles_reg_number_key;
+    END IF;
+EXCEPTION WHEN OTHERS THEN
+    NULL;
 END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_job_cards_tenant_job ON job_cards (tenant_id, job_number);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_tenant_inv ON invoices (tenant_id, invoice_number);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_tenant_phone ON customers (tenant_id, phone);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_vehicles_tenant_reg ON vehicles (tenant_id, reg_number);
 
 -- 6. Workshop Device Activations & WhatsApp OTP Table
 CREATE TABLE IF NOT EXISTS device_activations (
@@ -129,13 +141,26 @@ CREATE TABLE IF NOT EXISTS payments (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Safely copy rows from legacy invoice_payments if existed
+-- Safely copy rows dynamically from legacy invoice_payments if it existed
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'invoice_payments') THEN
-        INSERT INTO payments (id, tenant_id, invoice_id, amount, payment_mode, payment_date, notes, created_at)
-        SELECT id, COALESCE(tenant_id, 'tenant_1'), invoice_id, amount, payment_mode, payment_date, notes, created_at
-        FROM invoice_payments
-        ON CONFLICT (id) DO NOTHING;
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'invoice_payments' AND column_name = 'amount_paid'
+    ) THEN
+        EXECUTE 'INSERT INTO payments (id, tenant_id, invoice_id, amount, payment_mode, payment_date, notes, created_at)
+                 SELECT id, ''tenant_1'', invoice_id, amount_paid, payment_mode, payment_date, notes, created_at
+                 FROM invoice_payments
+                 ON CONFLICT (id) DO NOTHING';
+    ELSIF EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'invoice_payments' AND column_name = 'amount'
+    ) THEN
+        EXECUTE 'INSERT INTO payments (id, tenant_id, invoice_id, amount, payment_mode, payment_date, notes, created_at)
+                 SELECT id, ''tenant_1'', invoice_id, amount, payment_mode, payment_date, notes, created_at
+                 FROM invoice_payments
+                 ON CONFLICT (id) DO NOTHING';
     END IF;
+EXCEPTION WHEN OTHERS THEN
+    NULL;
 END $$;
