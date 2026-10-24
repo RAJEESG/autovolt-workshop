@@ -573,6 +573,13 @@ async def toggle_tenant_status(tenant_id: str = Form(...), new_status: str = For
     db.log_audit("TOGGLE_TENANT_STATUS", "tenants", tenant_id, f"Status changed to {new_status}", cursor=cursor)
     conn.commit()
     conn.close()
+
+    try:
+        import supabase_sync
+        supabase_sync.push_to_supabase("tenants", {"id": tenant_id, "status": new_status})
+    except Exception as e:
+        print(f"[Supabase Toggle Status] {e}")
+
     return RedirectResponse(url="/clients?msg=Workshop+status+updated!", status_code=303)
 
 # =========================================================
@@ -1308,6 +1315,29 @@ async def renew_subscription(
     db.log_audit("RENEW_SUBSCRIPTION", "subscriptions", sub_id, f"Renewed license for {tenant_name} until {end_str}", cursor=cursor)
     conn.commit()
     conn.close()
+
+    try:
+        import supabase_sync
+        supabase_sync.push_to_supabase("tenants", {
+            "id": tenant_id, "status": "ACTIVE", "subscription_plan": f"PRO_{billing_cycle}",
+            "subscription_start_date": start_str, "subscription_end_date": end_str
+        })
+        supabase_sync.push_to_supabase("subscriptions", {
+            "id": sub_id, "tenant_id": tenant_id, "plan_name": f"PRO_{billing_cycle}",
+            "start_date": start_str, "end_date": end_str, "is_active": 1,
+            "billing_cycle": billing_cycle, "price_paid": total_amount, "notes": "License Renewal"
+        })
+        supabase_sync.push_to_supabase("saas_vendor_invoices", {
+            "id": inv_id, "invoice_no": inv_no, "tenant_id": tenant_id, "tenant_name": tenant_name,
+            "invoice_date": datetime.now().strftime("%Y-%m-%d"), "plan_type": billing_cycle,
+            "subscription_start": start_str, "subscription_end": end_str,
+            "taxable_amount": taxable_amount, "cgst_rate": 9.0, "cgst_amount": cgst,
+            "sgst_rate": 9.0, "sgst_amount": sgst, "total_amount": total_amount,
+            "payment_status": "PAID", "payment_mode": payment_mode, "payment_ref": payment_ref or "UPI-PAID",
+            "notes": "SaaS License Renewal"
+        })
+    except Exception as e:
+        print(f"[Supabase Renewal Sync] {e}")
 
     return RedirectResponse(url=f"/subscriptions?tenant_id={tenant_id}&msg=License+renewed+until+{end_str}+and+invoice+generated!", status_code=303)
 

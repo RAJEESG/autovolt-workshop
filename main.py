@@ -342,14 +342,14 @@ async def handle_login(
     cursor = conn.cursor()
 
     clean_username = username.strip()
-    clean_code = (workshop_code or "").strip().upper()
+    clean_code = (workshop_code or "").strip()
 
     target_tenant_id = None
     if clean_code:
-        cursor.execute("SELECT id, name FROM tenants WHERE UPPER(client_code) = ? OR UPPER(id) = ?", (clean_code, clean_code))
+        cursor.execute("SELECT id, name FROM tenants WHERE UPPER(client_code) = UPPER(?) OR UPPER(id) = UPPER(?) OR id = ?", (clean_code, clean_code, clean_code))
         t_row = cursor.fetchone()
         if not t_row:
-            cursor.execute("SELECT id, tenant_id, name FROM workshop_profile WHERE UPPER(client_code) = ? OR UPPER(id) = ?", (clean_code, clean_code))
+            cursor.execute("SELECT id, tenant_id, name FROM workshop_profile WHERE UPPER(client_code) = UPPER(?) OR UPPER(id) = UPPER(?) OR id = ?", (clean_code, clean_code, clean_code))
             p_row = cursor.fetchone()
             if p_row:
                 target_tenant_id = p_row["tenant_id"] or p_row["id"]
@@ -357,6 +357,7 @@ async def handle_login(
             target_tenant_id = t_row["id"]
 
         if not target_tenant_id:
+            conn.close()
             try:
                 import supabase_sync
                 cloud_t = supabase_sync.fetch_and_cache_tenant_from_supabase(clean_code)
@@ -364,13 +365,15 @@ async def handle_login(
                     target_tenant_id = cloud_t.get("id")
             except Exception as e:
                 print(f"[Supabase Login Tenant Lookup] {e}")
+            conn = db.get_db_connection()
+            cursor = conn.cursor()
 
         if not target_tenant_id:
             conn.close()
             return templates.TemplateResponse(
                 request=request,
                 name="login.html",
-                context={"error": f"Workshop ID '{clean_code}' not found. Please verify with your workshop owner."}
+                context={"error": f"Workshop ID '{clean_code.upper()}' not found. Please verify with your workshop owner."}
             )
 
     if target_tenant_id:
@@ -443,33 +446,35 @@ async def handle_logout():
 
 @app.post("/api/device/request-otp")
 async def request_device_otp(workshop_code: str = Form(...)):
-    clean_code = (workshop_code or "").strip().upper()
+    clean_code = (workshop_code or "").strip()
     if not clean_code:
         return JSONResponse({"success": False, "error": "Workshop ID / Client Code is required."}, status_code=400)
 
     conn = db.get_db_connection()
     cursor = conn.cursor()
 
-    cursor.execute("SELECT * FROM tenants WHERE UPPER(client_code) = ? OR UPPER(id) = ?", (clean_code, clean_code))
+    cursor.execute("SELECT * FROM tenants WHERE UPPER(client_code) = UPPER(?) OR UPPER(id) = UPPER(?) OR id = ?", (clean_code, clean_code, clean_code))
     t_row = cursor.fetchone()
     if not t_row:
-        cursor.execute("SELECT * FROM workshop_profile WHERE UPPER(client_code) = ? OR UPPER(id) = ?", (clean_code, clean_code))
+        cursor.execute("SELECT * FROM workshop_profile WHERE UPPER(client_code) = UPPER(?) OR UPPER(id) = UPPER(?) OR id = ?", (clean_code, clean_code, clean_code))
         t_row = cursor.fetchone()
 
     # Cloud fallback check if not in local cache
     if not t_row:
+        conn.close()
         try:
             import supabase_sync
             cloud_t = supabase_sync.fetch_and_cache_tenant_from_supabase(clean_code)
             if cloud_t:
-                cursor.execute("SELECT * FROM tenants WHERE UPPER(client_code) = ? OR UPPER(id) = ?", (clean_code, clean_code))
-                t_row = cursor.fetchone()
+                t_row = cloud_t
         except Exception as e:
             print(f"[Supabase Sync Device Request] {e}")
+        conn = db.get_db_connection()
+        cursor = conn.cursor()
 
     if not t_row:
         conn.close()
-        return JSONResponse({"success": False, "error": f"Workshop ID '{clean_code}' not found. Please verify with your workshop owner."}, status_code=404)
+        return JSONResponse({"success": False, "error": f"Workshop ID '{clean_code.upper()}' not found. Please verify with your workshop owner."}, status_code=404)
 
     tenant = dict(t_row)
     phone = (tenant.get("whatsapp_mobile") or tenant.get("phone") or "").strip()
@@ -553,9 +558,9 @@ async def verify_device_otp(workshop_code: str = Form(...), otp_code: str = Form
 
     cursor.execute("""
     SELECT * FROM device_activations
-    WHERE UPPER(client_code) = ? AND otp_code = ? AND is_verified = 0 AND expires_at >= datetime('now')
+    WHERE (UPPER(client_code) = UPPER(?) OR UPPER(tenant_id) = UPPER(?)) AND otp_code = ? AND is_verified = 0 AND expires_at >= datetime('now')
     ORDER BY created_at DESC LIMIT 1
-    """, (clean_code, clean_otp))
+    """, (clean_code, clean_code, clean_otp))
     act = cursor.fetchone()
 
     # Cloud fallback if not in local table
@@ -564,7 +569,7 @@ async def verify_device_otp(workshop_code: str = Form(...), otp_code: str = Form
             import supabase_sync
             sp = supabase_sync.get_supabase()
             if sp:
-                res = sp.table("device_activations").select("*").eq("client_code", clean_code).eq("otp_code", clean_otp).eq("is_verified", 0).execute()
+                res = sp.table("device_activations").select("*").or_(f"client_code.ilike.{clean_code},tenant_id.ilike.{clean_code}").eq("otp_code", clean_otp).eq("is_verified", 0).execute()
                 rows = res.data or []
                 if rows:
                     act = rows[0]
@@ -584,7 +589,7 @@ async def verify_device_otp(workshop_code: str = Form(...), otp_code: str = Form
     conn.commit()
 
     # Get workshop details
-    cursor.execute("SELECT name FROM tenants WHERE UPPER(client_code) = ? OR UPPER(id) = ?", (clean_code, clean_code))
+    cursor.execute("SELECT name FROM tenants WHERE UPPER(client_code) = UPPER(?) OR UPPER(id) = UPPER(?) OR id = ?", (clean_code, clean_code, clean_code))
     t_row = cursor.fetchone()
     ws_name = t_row["name"] if t_row else clean_code
     conn.close()
