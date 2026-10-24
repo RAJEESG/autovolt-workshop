@@ -127,7 +127,7 @@
                     <a href="/api/admin/clients/{{ t.id }}/export-json" title="Download Full Raw JSON Dump (.json)" class="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-[11px] rounded-xl border border-slate-700 transition">
                         <span class="text-[10px] font-mono">JSON</span>
                     </a>
-                    <button onclick="openEditModal('{{ t.id }}', '{{ t.name }}', '{{ t.owner_name }}', '{{ t.phone }}', '{{ t.whatsapp_mobile }}', '{{ t.email }}', '{{ t.address | replace('\n', ' ') }}', '{{ t.gstin }}', '{{ t.logo_url }}', '{{ t.client_code or '' }}', '{{ t.upi_id }}', '{{ t.upi_payee_name }}', '{{ t.bank_name }}', '{{ t.bank_account_no }}', '{{ t.bank_ifsc }}', '{{ t.language }}', '{{ t.master_pin }}')" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-[11px] rounded-xl border border-slate-700 transition">
+                    <button onclick="openEditModal('{{ t.id }}', '{{ t.name }}', '{{ t.owner_name }}', '{{ t.phone }}', '{{ t.whatsapp_mobile }}', '{{ t.email }}', '{{ t.address | replace('\n', ' ') }}', '{{ t.gstin }}', '{{ t.logo_url }}', '{{ t.client_code or '' }}', '{{ t.upi_id }}', '{{ t.upi_payee_name }}', '{{ t.bank_name }}', '{{ t.bank_account_no }}', '{{ t.bank_ifsc }}', '{{ t.language }}', '{{ t.master_pin }}', '{{ t.gst_slabs or '' }}')" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-[11px] rounded-xl border border-slate-700 transition">
                         ✏️ Edit
                     </button>
                     <a href="/subscriptions?tenant_id={{ t.id }}" class="px-2.5 py-1.5 bg-hq-600 hover:bg-hq-500 text-white font-bold text-[11px] rounded-xl shadow transition">
@@ -411,23 +411,23 @@
                 <label class="block text-slate-300 font-bold mb-1.5">GST Slabs Available in Billing Dropdown *</label>
                 <div class="flex flex-wrap gap-4 p-3 bg-slate-950 rounded-xl border border-slate-800">
                     <label class="flex items-center gap-2 cursor-pointer text-slate-300">
-                        <input type="checkbox" name="gst_slabs" value="0" class="rounded bg-slate-800 border-slate-700 text-hq-600 focus:ring-hq-500">
+                        <input type="checkbox" name="gst_slabs" value="0" checked class="rounded bg-slate-800 border-slate-700 text-hq-600 focus:ring-hq-500">
                         <span>0%</span>
                     </label>
                     <label class="flex items-center gap-2 cursor-pointer text-slate-300">
-                        <input type="checkbox" name="gst_slabs" value="5" class="rounded bg-slate-800 border-slate-700 text-hq-600 focus:ring-hq-500">
+                        <input type="checkbox" name="gst_slabs" value="5" checked class="rounded bg-slate-800 border-slate-700 text-hq-600 focus:ring-hq-500">
                         <span>5%</span>
                     </label>
                     <label class="flex items-center gap-2 cursor-pointer text-slate-300">
-                        <input type="checkbox" name="gst_slabs" value="12" class="rounded bg-slate-800 border-slate-700 text-hq-600 focus:ring-hq-500">
+                        <input type="checkbox" name="gst_slabs" value="12" checked class="rounded bg-slate-800 border-slate-700 text-hq-600 focus:ring-hq-500">
                         <span>12%</span>
                     </label>
                     <label class="flex items-center gap-2 cursor-pointer text-slate-300">
-                        <input type="checkbox" name="gst_slabs" value="18" class="rounded bg-slate-800 border-slate-700 text-hq-600 focus:ring-hq-500">
+                        <input type="checkbox" name="gst_slabs" value="18" checked class="rounded bg-slate-800 border-slate-700 text-hq-600 focus:ring-hq-500">
                         <span>18%</span>
                     </label>
                     <label class="flex items-center gap-2 cursor-pointer text-slate-300">
-                        <input type="checkbox" name="gst_slabs" value="28" class="rounded bg-slate-800 border-slate-700 text-hq-600 focus:ring-hq-500">
+                        <input type="checkbox" name="gst_slabs" value="28" checked class="rounded bg-slate-800 border-slate-700 text-hq-600 focus:ring-hq-500">
                         <span>28%</span>
                     </label>
                 </div>
@@ -461,7 +461,7 @@
 </div>
 
 <script>
-function openEditModal(id, name, owner, phone, wa, email, addr, gstin, logo, clientCode, upi, upiName, bank, acc, ifsc, lang, pin) {
+function openEditModal(id, name, owner, phone, wa, email, addr, gstin, logo, clientCode, upi, upiName, bank, acc, ifsc, lang, pin, gstSlabsRaw) {
     document.getElementById('edit_tenant_id').value = id;
     document.getElementById('edit_name').value = name;
     document.getElementById('edit_client_code').value = clientCode || '';
@@ -478,6 +478,21 @@ function openEditModal(id, name, owner, phone, wa, email, addr, gstin, logo, cli
     document.getElementById('edit_bank_ifsc').value = ifsc || '';
     document.getElementById('edit_language').value = lang || 'en';
     document.getElementById('edit_master_pin').value = pin || '1234';
+
+    // Parse and set GST Slabs
+    const checkboxes = document.querySelectorAll('#edit-client-modal input[name="gst_slabs"]');
+    let slabs = ["0", "5", "12", "18", "28"];
+    if (gstSlabsRaw) {
+        try {
+            slabs = JSON.parse(gstSlabsRaw);
+            if (!Array.isArray(slabs)) slabs = ["0", "5", "12", "18", "28"];
+        } catch (e) {
+            slabs = ["0", "5", "12", "18", "28"];
+        }
+    }
+    checkboxes.forEach(cb => {
+        cb.checked = slabs.includes(cb.value);
+    });
 
     document.getElementById('edit-client-modal').classList.remove('hidden');
 }

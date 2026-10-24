@@ -1,5 +1,5 @@
 -- =========================================================
--- 🚀 AUTVOLT PRO: SAFE SUPABASE UPGRADE MIGRATION SCRIPT
+-- 🚀 AUTOVOLT PRO: SAFE SUPABASE UPGRADE MIGRATION SCRIPT
 -- RUN THIS IN SUPABASE SQL EDITOR FOR EXISTING DATABASES
 -- 100% Safe: Never deletes tables or data; checks existence first!
 -- =========================================================
@@ -93,3 +93,49 @@ CREATE TABLE IF NOT EXISTS device_activations (
     expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- 7. Job Cards Table Upgrades (Missing columns in old cloud schema)
+ALTER TABLE IF EXISTS job_cards ADD COLUMN IF NOT EXISTS complaints TEXT DEFAULT '[]';
+ALTER TABLE IF EXISTS job_cards ADD COLUMN IF NOT EXISTS vehicle_id TEXT;
+ALTER TABLE IF EXISTS job_cards ADD COLUMN IF NOT EXISTS custom_complaint_notes TEXT;
+ALTER TABLE IF EXISTS job_cards ADD COLUMN IF NOT EXISTS diagnosis_notes TEXT;
+ALTER TABLE IF EXISTS job_cards ADD COLUMN IF NOT EXISTS estimated_amount NUMERIC(10, 2) DEFAULT 0.0;
+ALTER TABLE IF EXISTS job_cards ADD COLUMN IF NOT EXISTS estimated_delivery_date TEXT;
+ALTER TABLE IF EXISTS job_cards ADD COLUMN IF NOT EXISTS total_labor NUMERIC(10, 2) DEFAULT 0.0;
+ALTER TABLE IF EXISTS job_cards ADD COLUMN IF NOT EXISTS total_parts NUMERIC(10, 2) DEFAULT 0.0;
+ALTER TABLE IF EXISTS job_cards ADD COLUMN IF NOT EXISTS grand_total NUMERIC(10, 2) DEFAULT 0.0;
+
+-- 8. Invoices Table Upgrades (Missing columns in old cloud schema)
+ALTER TABLE IF EXISTS invoices ADD COLUMN IF NOT EXISTS invoice_type TEXT DEFAULT 'JOB_SERVICE';
+ALTER TABLE IF EXISTS invoices ADD COLUMN IF NOT EXISTS job_number TEXT;
+ALTER TABLE IF EXISTS invoices ADD COLUMN IF NOT EXISTS taxable_subtotal NUMERIC(10, 2) DEFAULT 0.0;
+ALTER TABLE IF EXISTS invoices ADD COLUMN IF NOT EXISTS igst_total NUMERIC(10, 2) DEFAULT 0.0;
+ALTER TABLE IF EXISTS invoices ADD COLUMN IF NOT EXISTS round_off NUMERIC(10, 2) DEFAULT 0.0;
+ALTER TABLE IF EXISTS invoices ADD COLUMN IF NOT EXISTS is_interstate INTEGER DEFAULT 0;
+ALTER TABLE IF EXISTS invoices ADD COLUMN IF NOT EXISTS whatsapp_sent INTEGER DEFAULT 0;
+ALTER TABLE IF EXISTS invoices ADD COLUMN IF NOT EXISTS notes TEXT;
+ALTER TABLE IF EXISTS invoices ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE;
+
+-- 9. Payments Table (Unified Cash/Bank ledger table)
+CREATE TABLE IF NOT EXISTS payments (
+    id TEXT PRIMARY KEY DEFAULT ('pay_' || substr(md5(random()::text), 1, 8)),
+    tenant_id TEXT DEFAULT 'tenant_1',
+    invoice_id TEXT,
+    customer_id TEXT,
+    amount NUMERIC(10, 2) NOT NULL DEFAULT 0.0,
+    payment_mode TEXT DEFAULT 'UPI',
+    payment_date DATE DEFAULT CURRENT_DATE,
+    notes TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Safely copy rows from legacy invoice_payments if existed
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'invoice_payments') THEN
+        INSERT INTO payments (id, tenant_id, invoice_id, amount, payment_mode, payment_date, notes, created_at)
+        SELECT id, COALESCE(tenant_id, 'tenant_1'), invoice_id, amount, payment_mode, payment_date, notes, created_at
+        FROM invoice_payments
+        ON CONFLICT (id) DO NOTHING;
+    END IF;
+END $$;

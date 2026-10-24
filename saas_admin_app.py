@@ -262,6 +262,7 @@ async def clients_page(request: Request, msg: Optional[str] = None):
 
 @app.post("/api/admin/clients/create")
 async def create_client_workshop(
+    request: Request,
     name: str = Form(...),
     owner_name: str = Form(...),
     whatsapp_mobile: str = Form(...),
@@ -275,13 +276,19 @@ async def create_client_workshop(
     bank_name: Optional[str] = Form(None),
     bank_account_no: Optional[str] = Form(None),
     bank_ifsc: Optional[str] = Form(None),
-    gst_slabs: List[str] = Form(...),
     language: str = Form("en"),
     master_pin: str = Form("1234"),
     initial_username: str = Form(...),
     initial_password: str = Form(...),
     plan_type: str = Form("YEARLY")
 ):
+    form_data = await request.form()
+    slabs_raw = form_data.getlist("gst_slabs")
+    slabs_list = [str(s).strip() for s in slabs_raw if str(s).strip()]
+    if not slabs_list:
+        slabs_list = ["0", "5", "12", "18", "28"]
+    gst_slabs_json = json.dumps(slabs_list)
+
     conn = db.get_db_connection()
     cursor = conn.cursor()
 
@@ -294,8 +301,6 @@ async def create_client_workshop(
     cgst = base_price * 0.09
     sgst = base_price * 0.09
     total_price = base_price + cgst + sgst
-
-    gst_slabs_json = json.dumps(gst_slabs)
 
     clean_code = (client_code or "").strip().upper()
     if not clean_code:
@@ -381,6 +386,28 @@ async def create_client_workshop(
         start_date, expiry_date, base_price, cgst, sgst, total_price
     ))
 
+    # Auto-seed Default Cash Account & Bank Account for new Workshop
+    acc_cash_id = f"acc_{uuid.uuid4().hex[:8]}"
+    cursor.execute("""
+    INSERT INTO bank_accounts (id, tenant_id, account_name, account_type, current_balance, is_primary, created_at)
+    VALUES (?, ?, 'Daily Cash Register', 'CASH', 0.0, 1, datetime('now'))
+    """, (acc_cash_id, tenant_id))
+
+    acc_bank_id = None
+    if bank_name:
+        acc_bank_id = f"acc_{uuid.uuid4().hex[:8]}"
+        cursor.execute("""
+        INSERT INTO bank_accounts (id, tenant_id, account_name, bank_name, account_number, ifsc_code, upi_vpa, account_type, current_balance, is_primary, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'BANK', 0.0, 0, datetime('now'))
+        """, (acc_bank_id, tenant_id, f"{bank_name.strip()} Operating Account", bank_name.strip(), bank_account_no or "", bank_ifsc or "", upi_id.strip()))
+
+    # Auto-seed Lead Technician / Staff Member
+    tech_id = f"tech_{uuid.uuid4().hex[:8]}"
+    cursor.execute("""
+    INSERT INTO technicians (id, tenant_id, name, phone, role, status, created_at)
+    VALUES (?, ?, ?, ?, 'Lead Electrician', 'Active', datetime('now'))
+    """, (tech_id, tenant_id, owner_name.strip(), whatsapp_mobile.strip()))
+
     db.log_audit("ONBOARD_CLIENT_WORKSHOP", "tenants", tenant_id, f"Onboarded client garage {name} with {plan_type} plan", cursor=cursor)
     conn.commit()
     conn.close()
@@ -439,6 +466,7 @@ async def create_client_workshop(
 
 @app.post("/api/admin/clients/update")
 async def update_client_workshop(
+    request: Request,
     tenant_id: str = Form(...),
     name: str = Form(...),
     owner_name: str = Form(...),
@@ -453,14 +481,19 @@ async def update_client_workshop(
     bank_name: Optional[str] = Form(None),
     bank_account_no: Optional[str] = Form(None),
     bank_ifsc: Optional[str] = Form(None),
-    gst_slabs: List[str] = Form(...),
     language: str = Form("en"),
     master_pin: str = Form("1234")
 ):
+    form_data = await request.form()
+    slabs_raw = form_data.getlist("gst_slabs")
+    slabs_list = [str(s).strip() for s in slabs_raw if str(s).strip()]
+    if not slabs_list:
+        slabs_list = ["0", "5", "12", "18", "28"]
+    gst_slabs_json = json.dumps(slabs_list)
+
     conn = db.get_db_connection()
     cursor = conn.cursor()
 
-    gst_slabs_json = json.dumps(gst_slabs)
     clean_code = (client_code or "").strip().upper()
 
     cursor.execute("""

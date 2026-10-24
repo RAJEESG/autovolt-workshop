@@ -1046,15 +1046,16 @@ async def create_job_card(
         job_number = f"JOB-2026-{cnt:03d}"
     job_id = f"job_{uuid.uuid4().hex[:8]}"
     
+    clean_tech_id = assigned_technician_id.strip() if (assigned_technician_id and assigned_technician_id.strip()) else None
     tech_name = None
-    if assigned_technician_id:
-        cursor.execute("SELECT name FROM technicians WHERE id = ?", (assigned_technician_id,))
+    if clean_tech_id:
+        cursor.execute("SELECT name FROM technicians WHERE id = ?", (clean_tech_id,))
         t_row = cursor.fetchone()
         if t_row:
             tech_name = t_row["name"]
             
     now_ist = get_ist_now_str()
-    cursor.execute("SELECT id FROM customers WHERE phone = ?", (customer_phone.strip(),))
+    cursor.execute("SELECT id FROM customers WHERE phone = ? AND tenant_id = ?", (customer_phone.strip(), tenant_id))
     c_row = cursor.fetchone()
     if c_row:
         customer_id = c_row["id"]
@@ -1063,7 +1064,7 @@ async def create_job_card(
         customer_id = f"cust_{uuid.uuid4().hex[:8]}"
         cursor.execute("INSERT INTO customers (id, tenant_id, name, phone, created_at) VALUES (?, ?, ?, ?, ?)", (customer_id, tenant_id, customer_name, customer_phone, now_ist))
         
-    cursor.execute("SELECT id FROM vehicles WHERE reg_number = ?", (vehicle_reg_no.strip().upper(),))
+    cursor.execute("SELECT id FROM vehicles WHERE reg_number = ? AND tenant_id = ?", (vehicle_reg_no.strip().upper(), tenant_id))
     v_row = cursor.fetchone()
     if v_row:
         vehicle_id = v_row["id"]
@@ -1084,7 +1085,7 @@ async def create_job_card(
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RECEIVED', ?, ?, ?)
     """, (
         job_id, tenant_id, job_number, customer_id, customer_name, customer_phone, vehicle_id,
-        vehicle_reg_no.strip().upper(), vehicle_make_model, odometer, assigned_technician_id,
+        vehicle_reg_no.strip().upper(), vehicle_make_model, odometer, clean_tech_id,
         tech_name, complaints_json, custom_complaint_notes, now_ist
     ))
     
@@ -1965,12 +1966,12 @@ async def save_or_update_pos_invoice(request: Request, payload: Dict[str, Any], 
             """, (pay_id, inv_id, cust_id, amount_paid, payload.get("payment_mode", "UPI"), today_str, f"Initial payment for {inv_number}", now_ist))
 
             # Update bank account / cash register balance
-            cursor.execute("SELECT id FROM bank_accounts WHERE is_primary = 1 LIMIT 1")
+            cursor.execute("SELECT id FROM bank_accounts WHERE is_primary = 1 AND tenant_id = ? LIMIT 1", (tenant_id,))
             p_acc = cursor.fetchone()
             if p_acc:
                 cursor.execute("UPDATE bank_accounts SET current_balance = current_balance + ? WHERE id = ?", (amount_paid, p_acc["id"]))
             elif payload.get("payment_mode") == "CASH":
-                cursor.execute("UPDATE bank_accounts SET current_balance = current_balance + ? WHERE account_type = 'CASH' LIMIT 1", (amount_paid,))
+                cursor.execute("UPDATE bank_accounts SET current_balance = current_balance + ? WHERE account_type = 'CASH' AND tenant_id = ? LIMIT 1", (amount_paid, tenant_id))
 
         db.log_audit("CREATE_INVOICE", "invoices", inv_id, f"Created bill #{inv_number} (₹{grand_total:.2f}, Status: {payment_status})", cursor=cursor)
 

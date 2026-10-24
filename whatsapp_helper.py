@@ -3,10 +3,15 @@ import re
 import urllib.parse
 import requests
 from typing import Optional, Dict, Any
+from dotenv import load_dotenv
 
-META_WHATSAPP_TOKEN = (os.getenv("META_WHATSAPP_TOKEN") or os.getenv("WHATSAPP_TOKEN") or "").strip()
-META_PHONE_NUMBER_ID = (os.getenv("META_PHONE_NUMBER_ID") or os.getenv("PHONE_NUMBER_ID") or "").strip()
-META_OTP_TEMPLATE_NAME = os.getenv("META_OTP_TEMPLATE_NAME", "").strip()
+load_dotenv()
+
+def get_meta_credentials():
+    token = (os.getenv("META_WHATSAPP_TOKEN") or os.getenv("META_WA_TOKEN") or os.getenv("WHATSAPP_TOKEN") or "").strip()
+    phone_id = (os.getenv("META_PHONE_NUMBER_ID") or os.getenv("PHONE_NUMBER_ID") or "").strip()
+    template_name = (os.getenv("META_OTP_TEMPLATE_NAME") or "verify_otp_code").strip()
+    return token, phone_id, template_name
 
 def send_meta_whatsapp_otp(
     to_phone: str,
@@ -20,9 +25,8 @@ def send_meta_whatsapp_otp(
     Works seamlessly with existing Meta Business accounts (e.g. MoneyMate or AutoVolt).
     Falls back gracefully if Meta API credentials are not set or fail.
     """
-    token = META_WHATSAPP_TOKEN
-    phone_id = META_PHONE_NUMBER_ID
-    tpl = template_name or META_OTP_TEMPLATE_NAME
+    token, phone_id, env_tpl = get_meta_credentials()
+    tpl = template_name or env_tpl
     
     if not token or not phone_id:
         return {"success": False, "error": "Meta WhatsApp API credentials not configured in environment"}

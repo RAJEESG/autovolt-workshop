@@ -252,7 +252,9 @@ CREATE TABLE IF NOT EXISTS stock_logs (
 -- 14. Job Cards Table (Vehicle Service Book)
 CREATE TABLE IF NOT EXISTS job_cards (
     id TEXT PRIMARY KEY DEFAULT ('job_' || substr(md5(random()::text), 1, 8)),
-    job_number TEXT NOT NULL UNIQUE,
+    tenant_id TEXT DEFAULT 'tenant_1',
+    job_number TEXT NOT NULL,
+    vehicle_id TEXT,
     vehicle_reg_no TEXT NOT NULL,
     vehicle_make_model TEXT,
     customer_id TEXT,
@@ -260,17 +262,23 @@ CREATE TABLE IF NOT EXISTS job_cards (
     customer_phone TEXT NOT NULL,
     odometer INTEGER DEFAULT 0,
     fuel_level TEXT DEFAULT 'Half',
+    complaints TEXT DEFAULT '[]',
     complaint_checklist TEXT DEFAULT '[]',
     custom_complaint_notes TEXT,
     diagnosis_notes TEXT,
-    assigned_technician_id TEXT REFERENCES technicians(id) ON DELETE SET NULL,
+    assigned_technician_id TEXT,
     assigned_technician_name TEXT,
     status TEXT DEFAULT 'RECEIVED', -- RECEIVED, INSPECTION, IN_PROGRESS, COMPLETED, DELIVERED, CANCELLED
+    estimated_amount NUMERIC(10, 2) DEFAULT 0.0,
     estimated_cost NUMERIC(10, 2) DEFAULT 0.0,
+    total_labor NUMERIC(10, 2) DEFAULT 0.0,
+    total_parts NUMERIC(10, 2) DEFAULT 0.0,
+    grand_total NUMERIC(10, 2) DEFAULT 0.0,
     final_cost NUMERIC(10, 2) DEFAULT 0.0,
     invoice_id TEXT,
     inward_time TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     estimated_delivery TIMESTAMP WITH TIME ZONE,
+    estimated_delivery_date TEXT,
     completed_at TIMESTAMP WITH TIME ZONE,
     delivered_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -296,8 +304,11 @@ CREATE TABLE IF NOT EXISTS job_card_items (
 -- 16. Invoices Table (Tax Invoices)
 CREATE TABLE IF NOT EXISTS invoices (
     id TEXT PRIMARY KEY DEFAULT ('inv_' || substr(md5(random()::text), 1, 8)),
-    invoice_number TEXT NOT NULL UNIQUE,
+    tenant_id TEXT DEFAULT 'tenant_1',
+    invoice_number TEXT NOT NULL,
+    invoice_type TEXT DEFAULT 'JOB_SERVICE',
     job_card_id TEXT,
+    job_number TEXT,
     customer_id TEXT,
     customer_name TEXT NOT NULL,
     customer_phone TEXT NOT NULL,
@@ -308,20 +319,27 @@ CREATE TABLE IF NOT EXISTS invoices (
     subtotal_labor NUMERIC(10, 2) DEFAULT 0.0,
     subtotal_parts NUMERIC(10, 2) DEFAULT 0.0,
     discount_amount NUMERIC(10, 2) DEFAULT 0.0,
+    taxable_subtotal NUMERIC(10, 2) DEFAULT 0.0,
     taxable_amount NUMERIC(10, 2) DEFAULT 0.0,
     cgst_total NUMERIC(10, 2) DEFAULT 0.0,
     sgst_total NUMERIC(10, 2) DEFAULT 0.0,
+    igst_total NUMERIC(10, 2) DEFAULT 0.0,
     tax_total NUMERIC(10, 2) DEFAULT 0.0,
+    round_off NUMERIC(10, 2) DEFAULT 0.0,
     grand_total NUMERIC(10, 2) DEFAULT 0.0,
     amount_paid NUMERIC(10, 2) DEFAULT 0.0,
     balance_due NUMERIC(10, 2) DEFAULT 0.0,
     payment_mode TEXT DEFAULT 'UPI',
     payment_status TEXT DEFAULT 'PAID',
     payment_reference TEXT,
+    is_interstate INTEGER DEFAULT 0,
     upi_payment_link TEXT,
+    whatsapp_sent INTEGER DEFAULT 0,
+    notes TEXT,
     pdf_path TEXT,
     invoice_date DATE DEFAULT CURRENT_DATE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE
 );
 
 -- 17. Invoice Items Table
@@ -345,12 +363,26 @@ CREATE TABLE IF NOT EXISTS invoice_items (
 );
 
 -- 18. Invoice Payment Transactions (Khata Settlement)
+CREATE TABLE IF NOT EXISTS payments (
+    id TEXT PRIMARY KEY DEFAULT ('pay_' || substr(md5(random()::text), 1, 8)),
+    tenant_id TEXT DEFAULT 'tenant_1',
+    invoice_id TEXT,
+    customer_id TEXT,
+    amount NUMERIC(10, 2) NOT NULL DEFAULT 0.0,
+    payment_mode TEXT DEFAULT 'UPI',
+    payment_date DATE DEFAULT CURRENT_DATE,
+    notes TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Legacy compatibility alias
 CREATE TABLE IF NOT EXISTS invoice_payments (
     id TEXT PRIMARY KEY DEFAULT ('pay_' || substr(md5(random()::text), 1, 8)),
-    invoice_id TEXT REFERENCES invoices(id) ON DELETE CASCADE,
-    invoice_number TEXT NOT NULL,
+    tenant_id TEXT DEFAULT 'tenant_1',
+    invoice_id TEXT,
+    invoice_number TEXT,
     payment_date DATE DEFAULT CURRENT_DATE,
-    amount_paid NUMERIC(10, 2) NOT NULL,
+    amount_paid NUMERIC(10, 2) NOT NULL DEFAULT 0.0,
     payment_mode TEXT DEFAULT 'UPI',
     reference_no TEXT,
     notes TEXT,

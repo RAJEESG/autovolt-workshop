@@ -253,14 +253,16 @@ def init_db():
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS customers (
         id TEXT PRIMARY KEY,
+        tenant_id TEXT DEFAULT 'tenant_1',
         name TEXT NOT NULL,
-        phone TEXT NOT NULL UNIQUE,
+        phone TEXT NOT NULL,
         address TEXT,
         gstin TEXT,
         whatsapp_opt_in INTEGER DEFAULT 1,
         total_visits INTEGER DEFAULT 0,
         khata_balance REAL DEFAULT 0.0,
-        created_at TEXT
+        created_at TEXT,
+        UNIQUE(tenant_id, phone)
     );
     """)
 
@@ -268,7 +270,8 @@ def init_db():
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS vehicles (
         id TEXT PRIMARY KEY,
-        reg_number TEXT NOT NULL UNIQUE,
+        tenant_id TEXT DEFAULT 'tenant_1',
+        reg_number TEXT NOT NULL,
         customer_id TEXT,
         customer_name TEXT,
         customer_phone TEXT,
@@ -277,7 +280,8 @@ def init_db():
         fuel_type TEXT DEFAULT 'Diesel',
         odometer INTEGER DEFAULT 0,
         chassis_no TEXT,
-        created_at TEXT
+        created_at TEXT,
+        UNIQUE(tenant_id, reg_number)
     );
     """)
 
@@ -448,7 +452,8 @@ def init_db():
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS job_cards (
         id TEXT PRIMARY KEY,
-        job_number TEXT NOT NULL UNIQUE,
+        tenant_id TEXT DEFAULT 'tenant_1',
+        job_number TEXT NOT NULL,
         customer_id TEXT,
         customer_name TEXT NOT NULL,
         customer_phone TEXT NOT NULL,
@@ -469,7 +474,8 @@ def init_db():
         grand_total REAL DEFAULT 0.0,
         created_at TEXT,
         completed_at TEXT,
-        delivered_at TEXT
+        delivered_at TEXT,
+        UNIQUE(tenant_id, job_number)
     );
     """)
 
@@ -496,7 +502,8 @@ def init_db():
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS invoices (
         id TEXT PRIMARY KEY,
-        invoice_number TEXT NOT NULL UNIQUE,
+        tenant_id TEXT DEFAULT 'tenant_1',
+        invoice_number TEXT NOT NULL,
         invoice_date TEXT NOT NULL,
         invoice_type TEXT DEFAULT 'JOB_SERVICE',
         job_card_id TEXT,
@@ -514,8 +521,10 @@ def init_db():
         taxable_subtotal REAL DEFAULT 0.0,
         cgst_total REAL DEFAULT 0.0,
         sgst_total REAL DEFAULT 0.0,
+        igst_total REAL DEFAULT 0.0,
         tax_total REAL DEFAULT 0.0,
         discount_amount REAL DEFAULT 0.0,
+        round_off REAL DEFAULT 0.0,
         grand_total REAL DEFAULT 0.0,
         amount_paid REAL DEFAULT 0.0,
         balance_due REAL DEFAULT 0.0,
@@ -526,7 +535,10 @@ def init_db():
         upi_payment_link TEXT,
         whatsapp_sent INTEGER DEFAULT 0,
         notes TEXT,
-        created_at TEXT
+        is_interstate INTEGER DEFAULT 0,
+        created_at TEXT,
+        updated_at TEXT,
+        UNIQUE(tenant_id, invoice_number)
     );
     """)
 
@@ -707,6 +719,71 @@ def run_schema_migrations(cursor, conn):
             cursor.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
         except Exception:
             pass
+
+    # Ensure customers has tenant-isolated unique index instead of global phone index
+    try:
+        cursor.execute("PRAGMA index_list(customers)")
+        idx_list = cursor.fetchall()
+        for idx in idx_list:
+            # Check if index has only phone without tenant_id
+            cursor.execute(f"PRAGMA index_info({idx[1]})")
+            cols = [r[2] for r in cursor.fetchall()]
+            if cols == ['phone'] and idx[2] == 1: # Unique on phone alone
+                cursor.execute("CREATE TABLE IF NOT EXISTS customers_temp AS SELECT * FROM customers;")
+                cursor.execute("DROP TABLE customers;")
+                cursor.execute("""
+                CREATE TABLE customers (
+                    id TEXT PRIMARY KEY,
+                    tenant_id TEXT DEFAULT 'tenant_1',
+                    name TEXT NOT NULL,
+                    phone TEXT NOT NULL,
+                    address TEXT,
+                    gstin TEXT,
+                    whatsapp_opt_in INTEGER DEFAULT 1,
+                    total_visits INTEGER DEFAULT 0,
+                    khata_balance REAL DEFAULT 0.0,
+                    created_at TEXT,
+                    UNIQUE(tenant_id, phone)
+                );
+                """)
+                cursor.execute("INSERT OR IGNORE INTO customers SELECT * FROM customers_temp;")
+                cursor.execute("DROP TABLE customers_temp;")
+                break
+    except Exception as e:
+        pass
+
+    # Ensure vehicles has tenant-isolated unique index instead of global reg_number index
+    try:
+        cursor.execute("PRAGMA index_list(vehicles)")
+        idx_list = cursor.fetchall()
+        for idx in idx_list:
+            cursor.execute(f"PRAGMA index_info({idx[1]})")
+            cols = [r[2] for r in cursor.fetchall()]
+            if cols == ['reg_number'] and idx[2] == 1: # Unique on reg_number alone
+                cursor.execute("CREATE TABLE IF NOT EXISTS vehicles_temp AS SELECT * FROM vehicles;")
+                cursor.execute("DROP TABLE vehicles;")
+                cursor.execute("""
+                CREATE TABLE vehicles (
+                    id TEXT PRIMARY KEY,
+                    tenant_id TEXT DEFAULT 'tenant_1',
+                    reg_number TEXT NOT NULL,
+                    customer_id TEXT,
+                    customer_name TEXT,
+                    customer_phone TEXT,
+                    make_model TEXT NOT NULL,
+                    vehicle_type TEXT DEFAULT 'Car',
+                    fuel_type TEXT DEFAULT 'Diesel',
+                    odometer INTEGER DEFAULT 0,
+                    chassis_no TEXT,
+                    created_at TEXT,
+                    UNIQUE(tenant_id, reg_number)
+                );
+                """)
+                cursor.execute("INSERT OR IGNORE INTO vehicles SELECT * FROM vehicles_temp;")
+                cursor.execute("DROP TABLE vehicles_temp;")
+                break
+    except Exception as e:
+        pass
 
     # Ensure admin has whatsapp_mobile default
     try:
@@ -892,6 +969,25 @@ def seed_initial_data(cursor, conn):
         INSERT INTO purchase_bills (id, bill_number, supplier_id, supplier_name, bill_date, total_amount, payment_status, payment_mode, notes, created_at)
         VALUES ('pur_1', 'SUP-INV-8912', 'sup_001', 'Lucas TVS Kerala Agency', date('now', '-3 days'), 18500.0, 'PAID', 'BANK_TRANSFER', 'Bulk starter armatures and relays stock purchase', datetime('now', '-3 days'))
         """)
+
+    # Ensure every tenant has at least one cash register and one active technician
+    try:
+        cursor.execute("SELECT id, name, owner_name, phone FROM tenants")
+        for tid, tname, towner, tphone in cursor.fetchall():
+            cursor.execute("SELECT id FROM bank_accounts WHERE tenant_id = ?", (tid,))
+            if not cursor.fetchone():
+                cursor.execute("""
+                INSERT INTO bank_accounts (id, tenant_id, account_name, account_type, current_balance, is_primary, created_at)
+                VALUES (?, ?, 'Daily Cash Register', 'CASH', 0.0, 1, datetime('now'))
+                """, (f"acc_{uuid.uuid4().hex[:8]}", tid))
+            cursor.execute("SELECT id FROM technicians WHERE tenant_id = ?", (tid,))
+            if not cursor.fetchone():
+                cursor.execute("""
+                INSERT INTO technicians (id, tenant_id, name, phone, role, status, created_at)
+                VALUES (?, ?, ?, ?, 'Lead Electrician', 'Active', datetime('now'))
+                """, (f"tech_{uuid.uuid4().hex[:8]}", tid, towner or 'Senior Technician', tphone or '9999999999'))
+    except Exception as e:
+        print(f"[Init DB Tenant Seed Warning] {e}")
 
     conn.commit()
 
