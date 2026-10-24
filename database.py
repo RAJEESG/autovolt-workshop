@@ -292,7 +292,7 @@ def init_db():
         part_name TEXT NOT NULL,
         part_number TEXT DEFAULT '',
         sku TEXT,
-        barcode TEXT NOT NULL UNIQUE,
+        barcode TEXT DEFAULT '',
         category TEXT DEFAULT 'Relays & Fuses',
         stock_qty INTEGER DEFAULT 0,
         min_stock_alert INTEGER DEFAULT 5,
@@ -722,10 +722,10 @@ def run_schema_migrations(cursor, conn):
 
     # Ensure customers has tenant-isolated unique index instead of global phone index
     try:
+        cursor.execute("PRAGMA foreign_keys = OFF;")
         cursor.execute("PRAGMA index_list(customers)")
         idx_list = cursor.fetchall()
         for idx in idx_list:
-            # Check if index has only phone without tenant_id
             cursor.execute(f"PRAGMA index_info({idx[1]})")
             cols = [r[2] for r in cursor.fetchall()]
             if cols == ['phone'] and idx[2] == 1: # Unique on phone alone
@@ -751,9 +751,12 @@ def run_schema_migrations(cursor, conn):
                 break
     except Exception as e:
         pass
+    finally:
+        cursor.execute("PRAGMA foreign_keys = ON;")
 
     # Ensure vehicles has tenant-isolated unique index instead of global reg_number index
     try:
+        cursor.execute("PRAGMA foreign_keys = OFF;")
         cursor.execute("PRAGMA index_list(vehicles)")
         idx_list = cursor.fetchall()
         for idx in idx_list:
@@ -784,6 +787,55 @@ def run_schema_migrations(cursor, conn):
                 break
     except Exception as e:
         pass
+    finally:
+        cursor.execute("PRAGMA foreign_keys = ON;")
+
+    # Ensure inventory_items does not have global unique constraint on barcode
+    try:
+        cursor.execute("PRAGMA foreign_keys = OFF;")
+        cursor.execute("PRAGMA index_list(inventory_items)")
+        idx_list = cursor.fetchall()
+        for idx in idx_list:
+            cursor.execute(f"PRAGMA index_info({idx[1]})")
+            cols = [r[2] for r in cursor.fetchall()]
+            if cols == ['barcode'] and idx[2] == 1:
+                cursor.execute("CREATE TABLE IF NOT EXISTS inventory_items_temp AS SELECT * FROM inventory_items;")
+                cursor.execute("DROP TABLE inventory_items;")
+                cursor.execute("""
+                CREATE TABLE inventory_items (
+                    id TEXT PRIMARY KEY,
+                    tenant_id TEXT DEFAULT 'tenant_1',
+                    part_name TEXT NOT NULL,
+                    part_number TEXT DEFAULT '',
+                    sku TEXT,
+                    barcode TEXT DEFAULT '',
+                    category TEXT DEFAULT 'Relays & Fuses',
+                    stock_qty INTEGER DEFAULT 0,
+                    min_stock_alert INTEGER DEFAULT 5,
+                    cost_price REAL DEFAULT 0.0,
+                    selling_price REAL DEFAULT 0.0,
+                    tax_rate REAL DEFAULT 18.0,
+                    hsn_code TEXT DEFAULT '8536',
+                    unit TEXT DEFAULT 'pcs',
+                    warranty_months INTEGER DEFAULT 0,
+                    supplier_name TEXT,
+                    location_rack TEXT,
+                    position_bin TEXT DEFAULT '',
+                    rack_number TEXT DEFAULT '',
+                    buy_price REAL DEFAULT 0.0,
+                    sell_price REAL DEFAULT 0.0,
+                    quantity REAL DEFAULT 0.0,
+                    created_at TEXT,
+                    updated_at TEXT
+                );
+                """)
+                cursor.execute("INSERT OR IGNORE INTO inventory_items SELECT * FROM inventory_items_temp;")
+                cursor.execute("DROP TABLE inventory_items_temp;")
+                break
+    except Exception as e:
+        pass
+    finally:
+        cursor.execute("PRAGMA foreign_keys = ON;")
 
     # Ensure admin has whatsapp_mobile default
     try:

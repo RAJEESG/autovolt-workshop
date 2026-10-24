@@ -307,31 +307,29 @@ CREATE TABLE IF NOT EXISTS inventory_items (
     id TEXT PRIMARY KEY DEFAULT ('item_' || substr(md5(random()::text), 1, 8)),
     tenant_id TEXT DEFAULT 'tenant_1',
     part_name TEXT NOT NULL,
-    category TEXT DEFAULT 'Electrical',
     part_number TEXT DEFAULT '',
-    rack_number TEXT DEFAULT '',
-    position_bin TEXT DEFAULT '',
+    sku TEXT DEFAULT '',
     barcode TEXT DEFAULT '',
-    quantity NUMERIC(10, 2) DEFAULT 0.0,
-    min_stock NUMERIC(10, 2) DEFAULT 5.0,
+    category TEXT DEFAULT 'Relays & Fuses',
+    stock_qty INTEGER DEFAULT 0,
+    min_stock_alert INTEGER DEFAULT 5,
+    cost_price NUMERIC(10, 2) DEFAULT 0.0,
+    selling_price NUMERIC(10, 2) DEFAULT 0.0,
+    tax_rate NUMERIC(5, 2) DEFAULT 18.0,
+    hsn_code TEXT DEFAULT '8536',
+    unit TEXT DEFAULT 'pcs',
+    warranty_months INTEGER DEFAULT 0,
+    supplier_name TEXT DEFAULT '',
+    location_rack TEXT DEFAULT '',
+    position_bin TEXT DEFAULT '',
+    rack_number TEXT DEFAULT '',
     buy_price NUMERIC(10, 2) DEFAULT 0.0,
     sell_price NUMERIC(10, 2) DEFAULT 0.0,
-    tax_rate NUMERIC(5, 2) DEFAULT 18.0,
-    unit TEXT DEFAULT 'PCS',
+    quantity NUMERIC(10, 2) DEFAULT 0.0,
     notes TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
-
--- Safe migrations in case table was not dropped
-ALTER TABLE IF EXISTS inventory_items ADD COLUMN IF NOT EXISTS part_number TEXT DEFAULT '';
-ALTER TABLE IF EXISTS inventory_items ADD COLUMN IF NOT EXISTS rack_number TEXT DEFAULT '';
-ALTER TABLE IF EXISTS inventory_items ADD COLUMN IF NOT EXISTS position_bin TEXT DEFAULT '';
-ALTER TABLE IF EXISTS inventory_items ADD COLUMN IF NOT EXISTS buy_price NUMERIC(10, 2) DEFAULT 0.0;
-ALTER TABLE IF EXISTS inventory_items ADD COLUMN IF NOT EXISTS sell_price NUMERIC(10, 2) DEFAULT 0.0;
-ALTER TABLE IF EXISTS inventory_items ADD COLUMN IF NOT EXISTS quantity NUMERIC(10, 2) DEFAULT 0.0;
-ALTER TABLE IF EXISTS inventory_items ADD COLUMN IF NOT EXISTS min_stock NUMERIC(10, 2) DEFAULT 5.0;
-
 CREATE INDEX IF NOT EXISTS idx_inventory_tenant_barcode ON inventory_items (tenant_id, barcode);
 CREATE INDEX IF NOT EXISTS idx_inventory_tenant_partno ON inventory_items (tenant_id, part_number);
 
@@ -341,11 +339,15 @@ CREATE INDEX IF NOT EXISTS idx_inventory_tenant_partno ON inventory_items (tenan
 CREATE TABLE IF NOT EXISTS stock_logs (
     id TEXT PRIMARY KEY DEFAULT ('stk_' || substr(md5(random()::text), 1, 8)),
     tenant_id TEXT DEFAULT 'tenant_1',
-    item_id TEXT NOT NULL REFERENCES inventory_items(id) ON DELETE CASCADE,
-    change_qty NUMERIC(10, 2) NOT NULL,
-    new_qty NUMERIC(10, 2) NOT NULL,
-    reason TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    part_name TEXT,
+    barcode TEXT,
+    change_qty INTEGER NOT NULL,
+    new_stock_qty INTEGER NOT NULL DEFAULT 0,
+    action_type TEXT NOT NULL,
+    unit_cost NUMERIC(10, 2) DEFAULT 0.0,
     reference_id TEXT,
+    notes TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_stock_logs_tenant ON stock_logs (tenant_id, item_id);
@@ -385,6 +387,8 @@ CREATE TABLE IF NOT EXISTS purchase_bills (
     tax_amount NUMERIC(12, 2) DEFAULT 0.0,
     payment_status TEXT DEFAULT 'Unpaid',
     notes TEXT,
+    is_interstate INTEGER DEFAULT 0,
+    supplier_state TEXT DEFAULT 'Kerala (32)',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_purchase_bills_tenant ON purchase_bills (tenant_id, supplier_id);
@@ -478,25 +482,27 @@ CREATE TABLE IF NOT EXISTS job_cards (
     id TEXT PRIMARY KEY DEFAULT ('job_' || substr(md5(random()::text), 1, 8)),
     tenant_id TEXT DEFAULT 'tenant_1',
     job_number TEXT NOT NULL,
-    customer_id TEXT NOT NULL REFERENCES customers(id),
-    vehicle_id TEXT NOT NULL REFERENCES vehicles(id),
-    technician_id TEXT REFERENCES technicians(id),
-    status TEXT DEFAULT 'Open', -- Open, In Progress, Waiting Parts, Completed, Invoiced, Cancelled
-    odometer_reading INTEGER DEFAULT 0,
-    fuel_level TEXT DEFAULT '1/2',
-    customer_complaints TEXT,
-    diagnosed_issues TEXT,
-    advance_paid NUMERIC(10, 2) DEFAULT 0.0,
-    estimated_cost NUMERIC(10, 2) DEFAULT 0.0,
-    total_labour NUMERIC(10, 2) DEFAULT 0.0,
+    customer_id TEXT,
+    customer_name TEXT NOT NULL,
+    customer_phone TEXT NOT NULL,
+    vehicle_id TEXT,
+    vehicle_reg_no TEXT NOT NULL,
+    vehicle_make_model TEXT NOT NULL,
+    odometer INTEGER DEFAULT 0,
+    assigned_technician_id TEXT,
+    assigned_technician_name TEXT,
+    status TEXT DEFAULT 'RECEIVED',
+    complaints TEXT DEFAULT '[]',
+    custom_complaint_notes TEXT,
+    diagnosis_notes TEXT,
+    estimated_amount NUMERIC(10, 2) DEFAULT 0.0,
+    estimated_delivery_date TEXT,
+    total_labor NUMERIC(10, 2) DEFAULT 0.0,
     total_parts NUMERIC(10, 2) DEFAULT 0.0,
-    discount NUMERIC(10, 2) DEFAULT 0.0,
     grand_total NUMERIC(12, 2) DEFAULT 0.0,
-    is_tax_inclusive INTEGER DEFAULT 0,
-    gst_type TEXT DEFAULT 'INTRA_STATE',
-    notes TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    completed_at TIMESTAMP WITH TIME ZONE,
+    delivered_at TIMESTAMP WITH TIME ZONE
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_job_cards_tenant_job ON job_cards (tenant_id, UPPER(job_number));
 
@@ -507,38 +513,60 @@ CREATE TABLE IF NOT EXISTS job_items (
     id TEXT PRIMARY KEY DEFAULT ('jitem_' || substr(md5(random()::text), 1, 8)),
     tenant_id TEXT DEFAULT 'tenant_1',
     job_card_id TEXT NOT NULL REFERENCES job_cards(id) ON DELETE CASCADE,
-    item_type TEXT DEFAULT 'Part', -- Part, Labour
-    description TEXT NOT NULL,
-    quantity NUMERIC(10, 2) DEFAULT 1.0,
+    item_type TEXT DEFAULT 'LABOR', -- PART, LABOR
+    item_id TEXT,
+    barcode TEXT,
+    name TEXT NOT NULL,
+    hsn_code TEXT DEFAULT '9987',
+    quantity INTEGER DEFAULT 1,
     unit_price NUMERIC(10, 2) DEFAULT 0.0,
-    tax_rate NUMERIC(5, 2) DEFAULT 18.0,
+    tax_rate NUMERIC(5, 2) DEFAULT 0.0,
     total_price NUMERIC(12, 2) DEFAULT 0.0,
+    technician_id TEXT,
+    technician_name TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_job_items_job_card ON job_items (job_card_id);
 
 -- ==============================================================================
--- 26. INVOICES TABLE
+-- 26. INVOICES TABLE (POS & Service Invoices)
 -- ==============================================================================
 CREATE TABLE IF NOT EXISTS invoices (
     id TEXT PRIMARY KEY DEFAULT ('inv_' || substr(md5(random()::text), 1, 8)),
     tenant_id TEXT DEFAULT 'tenant_1',
     invoice_number TEXT NOT NULL,
-    job_card_id TEXT REFERENCES job_cards(id),
-    customer_id TEXT NOT NULL REFERENCES customers(id),
-    vehicle_id TEXT REFERENCES vehicles(id),
     invoice_date TEXT NOT NULL,
-    due_date TEXT,
-    subtotal NUMERIC(12, 2) DEFAULT 0.0,
-    discount NUMERIC(12, 2) DEFAULT 0.0,
-    tax_amount NUMERIC(12, 2) DEFAULT 0.0,
-    grand_total NUMERIC(12, 2) DEFAULT 0.0,
-    paid_amount NUMERIC(12, 2) DEFAULT 0.0,
-    balance_amount NUMERIC(12, 2) DEFAULT 0.0,
-    payment_status TEXT DEFAULT 'Unpaid', -- Paid, Partial, Unpaid
-    payment_mode TEXT DEFAULT 'Cash',
-    notes TEXT,
+    invoice_type TEXT DEFAULT 'COUNTER_SALE', -- JOB_SERVICE, COUNTER_SALE
+    job_card_id TEXT,
+    job_number TEXT,
+    customer_id TEXT,
+    customer_name TEXT NOT NULL,
+    customer_phone TEXT NOT NULL,
+    customer_address TEXT,
     customer_gstin TEXT,
+    vehicle_reg_no TEXT,
+    vehicle_make_model TEXT,
+    odometer INTEGER DEFAULT 0,
+    subtotal_labor NUMERIC(12, 2) DEFAULT 0.0,
+    subtotal_parts NUMERIC(12, 2) DEFAULT 0.0,
+    taxable_subtotal NUMERIC(12, 2) DEFAULT 0.0,
+    cgst_total NUMERIC(10, 2) DEFAULT 0.0,
+    sgst_total NUMERIC(10, 2) DEFAULT 0.0,
+    igst_total NUMERIC(10, 2) DEFAULT 0.0,
+    tax_total NUMERIC(12, 2) DEFAULT 0.0,
+    discount_amount NUMERIC(10, 2) DEFAULT 0.0,
+    round_off NUMERIC(6, 2) DEFAULT 0.0,
+    grand_total NUMERIC(12, 2) DEFAULT 0.0,
+    amount_paid NUMERIC(12, 2) DEFAULT 0.0,
+    balance_due NUMERIC(12, 2) DEFAULT 0.0,
+    payment_status TEXT DEFAULT 'PENDING',
+    payment_mode TEXT DEFAULT 'UPI',
+    bank_account_id TEXT,
+    upi_ref_no TEXT,
+    upi_payment_link TEXT,
+    whatsapp_sent INTEGER DEFAULT 0,
+    notes TEXT,
+    is_interstate INTEGER DEFAULT 0,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -551,50 +579,42 @@ CREATE TABLE IF NOT EXISTS invoice_items (
     id TEXT PRIMARY KEY DEFAULT ('item_' || substr(md5(random()::text), 1, 8)),
     tenant_id TEXT DEFAULT 'tenant_1',
     invoice_id TEXT NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
-    item_type TEXT DEFAULT 'Part', -- Part, Labour
-    description TEXT NOT NULL,
-    part_number TEXT DEFAULT '',
+    item_type TEXT DEFAULT 'PART', -- PART, LABOR
+    item_id TEXT,
+    barcode TEXT,
+    name TEXT NOT NULL,
     hsn_sac TEXT DEFAULT '8536',
-    quantity NUMERIC(10, 2) DEFAULT 1.0,
-    unit TEXT DEFAULT 'PCS',
+    quantity INTEGER DEFAULT 1,
     unit_price NUMERIC(10, 2) DEFAULT 0.0,
-    base_amount NUMERIC(12, 2) DEFAULT 0.0,
     tax_rate NUMERIC(5, 2) DEFAULT 18.0,
+    taxable_amount NUMERIC(12, 2) DEFAULT 0.0,
+    total_price NUMERIC(12, 2) DEFAULT 0.0,
+    unit TEXT DEFAULT 'pcs',
+    part_number TEXT DEFAULT '',
     cgst_rate NUMERIC(5, 2) DEFAULT 9.0,
-    cgst_amount NUMERIC(10, 2) DEFAULT 0.0,
     sgst_rate NUMERIC(5, 2) DEFAULT 9.0,
-    sgst_amount NUMERIC(10, 2) DEFAULT 0.0,
     igst_rate NUMERIC(5, 2) DEFAULT 0.0,
+    cgst_amount NUMERIC(10, 2) DEFAULT 0.0,
+    sgst_amount NUMERIC(10, 2) DEFAULT 0.0,
     igst_amount NUMERIC(10, 2) DEFAULT 0.0,
-    tax_amount NUMERIC(12, 2) DEFAULT 0.0,
-    total_amount NUMERIC(12, 2) DEFAULT 0.0,
+    technician_name TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
-
--- Safe migrations in case table was not dropped
-ALTER TABLE IF EXISTS invoice_items ADD COLUMN IF NOT EXISTS part_number TEXT DEFAULT '';
-ALTER TABLE IF EXISTS invoice_items ADD COLUMN IF NOT EXISTS base_amount NUMERIC(12, 2) DEFAULT 0.0;
-ALTER TABLE IF EXISTS invoice_items ADD COLUMN IF NOT EXISTS cgst_rate NUMERIC(5, 2) DEFAULT 9.0;
-ALTER TABLE IF EXISTS invoice_items ADD COLUMN IF NOT EXISTS cgst_amount NUMERIC(10, 2) DEFAULT 0.0;
-ALTER TABLE IF EXISTS invoice_items ADD COLUMN IF NOT EXISTS sgst_rate NUMERIC(5, 2) DEFAULT 9.0;
-ALTER TABLE IF EXISTS invoice_items ADD COLUMN IF NOT EXISTS sgst_amount NUMERIC(10, 2) DEFAULT 0.0;
-ALTER TABLE IF EXISTS invoice_items ADD COLUMN IF NOT EXISTS igst_rate NUMERIC(5, 2) DEFAULT 0.0;
-ALTER TABLE IF EXISTS invoice_items ADD COLUMN IF NOT EXISTS igst_amount NUMERIC(10, 2) DEFAULT 0.0;
-ALTER TABLE IF EXISTS invoice_items ADD COLUMN IF NOT EXISTS tax_amount NUMERIC(12, 2) DEFAULT 0.0;
-
 CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items (invoice_id);
 
 -- ==============================================================================
--- 28. INVOICE PAYMENTS TABLE
+-- 28. PAYMENTS TABLE
 -- ==============================================================================
 CREATE TABLE IF NOT EXISTS payments (
     id TEXT PRIMARY KEY DEFAULT ('pay_' || substr(md5(random()::text), 1, 8)),
     tenant_id TEXT DEFAULT 'tenant_1',
-    invoice_id TEXT NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
-    payment_date TEXT NOT NULL,
+    invoice_id TEXT REFERENCES invoices(id) ON DELETE CASCADE,
+    customer_id TEXT,
     amount NUMERIC(12, 2) NOT NULL,
-    payment_mode TEXT DEFAULT 'Cash',
-    reference_number TEXT,
+    payment_mode TEXT DEFAULT 'UPI',
+    bank_account_id TEXT,
+    reference_no TEXT,
+    payment_date TEXT,
     notes TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

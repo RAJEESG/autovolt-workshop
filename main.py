@@ -1351,8 +1351,9 @@ async def delete_job_card_with_pin(job_id: str, payload: Dict[str, Any]):
     return {"success": True}
 
 @app.get("/api/customers/dues-check")
-async def check_customer_dues(phone: Optional[str] = None, customer_name: Optional[str] = None, vehicle_reg_no: Optional[str] = None):
-    """Check if customer/vehicle has previous unpaid Khata dues or unpaid invoices"""
+async def check_customer_dues(request: Request, phone: Optional[str] = None, customer_name: Optional[str] = None, vehicle_reg_no: Optional[str] = None):
+    """Check if customer/vehicle has previous unpaid Khata dues or unpaid invoices, strictly isolated per workshop tenant"""
+    tenant_id = get_current_tenant_id(request)
     conn = db.get_db_connection()
     cursor = conn.cursor()
     
@@ -1360,28 +1361,31 @@ async def check_customer_dues(phone: Optional[str] = None, customer_name: Option
     cust = None
     unpaid_invoices = []
     
-    if phone and phone.strip():
-        cursor.execute("SELECT * FROM customers WHERE phone = ? LIMIT 1", (phone.strip(),))
+    clean_phone = (phone or "").strip()
+    clean_veh = (vehicle_reg_no or "").strip().upper()
+
+    if clean_phone:
+        cursor.execute("SELECT * FROM customers WHERE phone = ? AND tenant_id = ? LIMIT 1", (clean_phone, tenant_id))
         c_row = cursor.fetchone()
         if c_row:
             cust = dict(c_row)
             dues_amount += float(cust.get("khata_balance") or 0.0)
             
-        cursor.execute("SELECT * FROM invoices WHERE customer_phone = ? AND balance_due > 0 AND payment_status != 'CANCELLED'", (phone.strip(),))
+        cursor.execute("SELECT * FROM invoices WHERE customer_phone = ? AND tenant_id = ? AND balance_due > 0 AND payment_status != 'CANCELLED'", (clean_phone, tenant_id))
         unpaid_invoices = [dict(r) for r in cursor.fetchall()]
         
-    elif vehicle_reg_no and vehicle_reg_no.strip():
-        cursor.execute("SELECT * FROM vehicles WHERE reg_number = ? LIMIT 1", (vehicle_reg_no.strip().upper(),))
+    elif clean_veh:
+        cursor.execute("SELECT * FROM vehicles WHERE reg_number = ? AND tenant_id = ? LIMIT 1", (clean_veh, tenant_id))
         v_row = cursor.fetchone()
         if v_row and v_row.get("customer_phone"):
-            c_phone = v_row["customer_phone"]
-            cursor.execute("SELECT * FROM customers WHERE phone = ? LIMIT 1", (c_phone,))
+            c_phone = v_row["customer_phone"].strip()
+            cursor.execute("SELECT * FROM customers WHERE phone = ? AND tenant_id = ? LIMIT 1", (c_phone, tenant_id))
             c_row = cursor.fetchone()
             if c_row:
                 cust = dict(c_row)
                 dues_amount += float(cust.get("khata_balance") or 0.0)
                 
-            cursor.execute("SELECT * FROM invoices WHERE (vehicle_reg_no = ? OR customer_phone = ?) AND balance_due > 0 AND payment_status != 'CANCELLED'", (vehicle_reg_no.strip().upper(), c_phone))
+            cursor.execute("SELECT * FROM invoices WHERE (vehicle_reg_no = ? OR customer_phone = ?) AND tenant_id = ? AND balance_due > 0 AND payment_status != 'CANCELLED'", (clean_veh, c_phone, tenant_id))
             unpaid_invoices = [dict(r) for r in cursor.fetchall()]
 
     conn.close()
@@ -1849,187 +1853,199 @@ async def save_or_update_pos_invoice(request: Request, payload: Dict[str, Any], 
 
     tenant_id = get_current_tenant_id(request)
 
-    if cust_phone:
-        cursor.execute("SELECT id, khata_balance FROM customers WHERE phone = ? AND tenant_id = ?", (cust_phone, tenant_id))
-        c_row = cursor.fetchone()
-        if c_row:
-            cust_id = c_row["id"]
-            if balance_due > 0 and not editing_id:
-                cursor.execute("UPDATE customers SET total_visits = total_visits + 1, khata_balance = khata_balance + ? WHERE id = ?", (balance_due, cust_id))
+    try:
+        if cust_phone:
+            cursor.execute("SELECT id, khata_balance FROM customers WHERE phone = ? AND tenant_id = ?", (cust_phone, tenant_id))
+            c_row = cursor.fetchone()
+            if c_row:
+                cust_id = c_row["id"]
+                if balance_due > 0 and not editing_id:
+                    cursor.execute("UPDATE customers SET total_visits = total_visits + 1, khata_balance = khata_balance + ? WHERE id = ?", (balance_due, cust_id))
+                else:
+                    cursor.execute("UPDATE customers SET total_visits = total_visits + 1 WHERE id = ?", (cust_id,))
             else:
-                cursor.execute("UPDATE customers SET total_visits = total_visits + 1 WHERE id = ?", (cust_id,))
-        else:
-            cust_id = f"cust_{uuid.uuid4().hex[:8]}"
-            cursor.execute("""
-            INSERT INTO customers (id, tenant_id, name, phone, address, gstin, total_visits, khata_balance, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
-            """, (cust_id, tenant_id, cust_name, cust_phone, cust_addr, cust_gstin, balance_due, now_ist))
+                cust_id = f"cust_{uuid.uuid4().hex[:8]}"
+                cursor.execute("""
+                INSERT OR REPLACE INTO customers (id, tenant_id, name, phone, address, gstin, total_visits, khata_balance, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+                """, (cust_id, tenant_id, cust_name, cust_phone, cust_addr, cust_gstin, balance_due, now_ist))
 
-    veh_reg = (payload.get("vehicle_reg_no") or "").strip().upper()
-    if veh_reg:
-        cursor.execute("SELECT id FROM vehicles WHERE reg_number = ? AND tenant_id = ?", (veh_reg, tenant_id))
-        v_row = cursor.fetchone()
-        if not v_row:
-            v_id = f"veh_{uuid.uuid4().hex[:8]}"
-            cursor.execute("""
-            INSERT INTO vehicles (id, tenant_id, reg_number, customer_id, customer_name, customer_phone, make_model, odometer, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
-            """, (v_id, tenant_id, veh_reg, cust_id, cust_name, cust_phone, payload.get("vehicle_make_model", "General"), now_ist))
-    
-    if editing_id:
-        # --- UPDATE EXISTING INVOICE (Same invoice # and id preserved) ---
-        cursor.execute("SELECT * FROM invoices WHERE id = ?", (editing_id,))
-        old_inv = cursor.fetchone()
-        if not old_inv:
-            conn.close()
-            raise HTTPException(status_code=404, detail="Existing invoice not found to update")
-            
-        inv_number = old_inv["invoice_number"]
-        inv_id = editing_id
-        upi_link = generate_upi_link(vpa, workshop.get("name", "Auto Workshop"), pay_for_qr, f"Inv_{inv_number}")
+        veh_reg = (payload.get("vehicle_reg_no") or "").strip().upper()
+        if veh_reg:
+            cursor.execute("SELECT id FROM vehicles WHERE reg_number = ? AND tenant_id = ?", (veh_reg, tenant_id))
+            v_row = cursor.fetchone()
+            if not v_row:
+                v_id = f"veh_{uuid.uuid4().hex[:8]}"
+                cursor.execute("""
+                INSERT OR REPLACE INTO vehicles (id, tenant_id, reg_number, customer_id, customer_name, customer_phone, make_model, odometer, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
+                """, (v_id, tenant_id, veh_reg, cust_id, cust_name, cust_phone, payload.get("vehicle_make_model", "General"), now_ist))
         
-        # 1. Restore stock from previous invoice items
-        cursor.execute("SELECT * FROM invoice_items WHERE invoice_id = ?", (editing_id,))
-        old_items = cursor.fetchall()
-        for oi in old_items:
-            if oi["item_type"] == "PART" and oi["item_id"]:
-                cursor.execute("UPDATE inventory_items SET stock_qty = stock_qty + ? WHERE id = ?", (oi["quantity"], oi["item_id"]))
+        if editing_id:
+            # --- UPDATE EXISTING INVOICE (Same invoice # and id preserved) ---
+            cursor.execute("SELECT * FROM invoices WHERE id = ?", (editing_id,))
+            old_inv = cursor.fetchone()
+            if not old_inv:
+                conn.close()
+                raise HTTPException(status_code=404, detail="Existing invoice not found to update")
+                
+            inv_number = old_inv["invoice_number"]
+            inv_id = editing_id
+            upi_link = generate_upi_link(vpa, workshop.get("name", "Auto Workshop"), pay_for_qr, f"Inv_{inv_number}")
+            
+            # 1. Restore stock from previous invoice items
+            cursor.execute("SELECT * FROM invoice_items WHERE invoice_id = ?", (editing_id,))
+            old_items = cursor.fetchall()
+            for oi in old_items:
+                if oi["item_type"] == "PART" and oi["item_id"]:
+                    cursor.execute("UPDATE inventory_items SET stock_qty = stock_qty + ? WHERE id = ?", (oi["quantity"], oi["item_id"]))
+                    log_id = f"stk_{uuid.uuid4().hex[:8]}"
+                    cursor.execute("""
+                    INSERT INTO stock_logs (id, item_id, part_name, barcode, change_qty, new_stock_qty, action_type, reference_id, notes, created_at)
+                    VALUES (?, ?, ?, ?, ?, COALESCE((SELECT stock_qty FROM inventory_items WHERE id = ?), 0), 'EDIT_RESTORE', ?, ?, ?)
+                    """, (log_id, oi["item_id"], oi["name"], oi["barcode"], int(oi["quantity"]), oi["item_id"], inv_number, f"Restored during edit of {inv_number}", now_ist))
+            
+            # 2. Clear old items
+            cursor.execute("DELETE FROM invoice_items WHERE invoice_id = ?", (editing_id,))
+            
+            # 3. Update invoice record
+            cursor.execute("""
+            UPDATE invoices SET
+                customer_name = ?, customer_phone = ?, vehicle_reg_no = ?,
+                subtotal_labor = ?, subtotal_parts = ?, taxable_subtotal = ?,
+                cgst_total = ?, sgst_total = ?, igst_total = ?, tax_total = ?,
+                discount_amount = ?, round_off = ?, grand_total = ?, amount_paid = ?, balance_due = ?,
+                payment_status = ?, payment_mode = ?, is_interstate = ?,
+                upi_payment_link = ?, updated_at = ?
+            WHERE id = ?
+            """, (
+                cust_name, cust_phone,
+                veh_reg,
+                subtotal_labor, subtotal_parts, taxable_subtotal,
+                cgst_total, sgst_total, igst_total, total_tax,
+                discount, round_off, grand_total, amount_paid, balance_due,
+                payment_status, payload.get("payment_mode", "UPI"), is_interstate,
+                upi_link, now_ist, editing_id
+            ))
+            
+            # 4. Adjust customer khata balance if balance changed
+            old_bal = float(old_inv["balance_due"] or 0.0)
+            bal_diff = balance_due - old_bal
+            if bal_diff != 0 and cust_phone:
+                cursor.execute("UPDATE customers SET khata_balance = MAX(0, khata_balance + ?) WHERE phone = ? AND tenant_id = ?", (bal_diff, cust_phone, tenant_id))
+                
+            db.log_audit("EDIT_INVOICE", "invoices", editing_id, f"Updated bill #{inv_number} (New Total: ₹{grand_total:.2f}, Status: {payment_status})", cursor=cursor)
+        else:
+            # --- CREATE NEW INVOICE ---
+            cursor.execute("SELECT COUNT(*) FROM invoices WHERE tenant_id = ?", (tenant_id,))
+            cnt = cursor.fetchone()[0] + 1
+            inv_number = f"INV-2026-{cnt:03d}"
+            cursor.execute("SELECT id FROM invoices WHERE invoice_number = ? AND tenant_id = ?", (inv_number, tenant_id))
+            while cursor.fetchone():
+                cnt += 1
+                inv_number = f"INV-2026-{cnt:03d}"
+            inv_id = f"inv_{uuid.uuid4().hex[:8]}"
+            upi_link = generate_upi_link(vpa, workshop.get("name", "Auto Workshop"), pay_for_qr, f"Inv_{inv_number}")
+
+            cursor.execute("""
+            INSERT INTO invoices (
+                id, tenant_id, invoice_number, invoice_date, invoice_type, job_card_id, job_number,
+                customer_name, customer_phone, vehicle_reg_no,
+                subtotal_labor, subtotal_parts, taxable_subtotal,
+                cgst_total, sgst_total, igst_total, tax_total, discount_amount,
+                round_off, grand_total, amount_paid, balance_due, payment_status, payment_mode,
+                is_interstate, upi_payment_link, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                inv_id, tenant_id, inv_number, today_str, payload.get("invoice_type", "JOB_SERVICE" if job_card_id else "COUNTER_SALE"),
+                job_card_id, job_number,
+                cust_name, cust_phone,
+                veh_reg,
+                subtotal_labor, subtotal_parts, taxable_subtotal,
+                cgst_total, sgst_total, igst_total, total_tax, discount,
+                round_off, grand_total, amount_paid, balance_due, payment_status,
+                payload.get("payment_mode", "UPI"), is_interstate, upi_link, now_ist
+            ))
+
+            # Record payment if amount_paid > 0
+            if amount_paid > 0:
+                pay_id = f"pay_{uuid.uuid4().hex[:8]}"
+                cursor.execute("""
+                INSERT INTO payments (id, invoice_id, customer_id, amount, payment_mode, payment_date, notes, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (pay_id, inv_id, cust_id, amount_paid, payload.get("payment_mode", "UPI"), today_str, f"Initial payment for {inv_number}", now_ist))
+
+                # Update bank account / cash register balance
+                cursor.execute("SELECT id FROM bank_accounts WHERE is_primary = 1 AND tenant_id = ? LIMIT 1", (tenant_id,))
+                p_acc = cursor.fetchone()
+                if p_acc:
+                    cursor.execute("UPDATE bank_accounts SET current_balance = current_balance + ? WHERE id = ?", (amount_paid, p_acc["id"]))
+                elif payload.get("payment_mode") == "CASH":
+                    cursor.execute("UPDATE bank_accounts SET current_balance = current_balance + ? WHERE account_type = 'CASH' AND tenant_id = ? LIMIT 1", (amount_paid, tenant_id))
+
+            db.log_audit("CREATE_INVOICE", "invoices", inv_id, f"Created bill #{inv_number} (₹{grand_total:.2f}, Status: {payment_status})", cursor=cursor)
+
+        # Insert items and apply stock deductions
+        for i in items:
+            inv_item_id = f"ii_{uuid.uuid4().hex[:8]}"
+            u_price = float(i.get("unit_price") or 0.0)
+            u_qty = int(i.get("quantity") or 1)
+            line_base = u_price * u_qty
+            t_rate = float(i.get("tax_rate") or 0.0)
+            line_tax = line_base * (t_rate / 100.0)
+            line_total = line_base + line_tax
+
+            unit_str = str(i.get("unit") or ("hrs" if i.get("item_type") == "LABOR" else "pcs")).lower()
+            part_no = str(i.get("part_number") or "").strip()
+
+            if is_interstate:
+                c_rate, s_rate, i_rate = 0.0, 0.0, t_rate
+                c_amt, s_amt, i_amt = 0.0, 0.0, line_tax
+            else:
+                c_rate, s_rate, i_rate = (t_rate / 2.0), (t_rate / 2.0), 0.0
+                c_amt, s_amt, i_amt = (line_tax / 2.0), (line_tax / 2.0), 0.0
+
+            cursor.execute("""
+            INSERT INTO invoice_items (
+                id, invoice_id, item_type, item_id, barcode, name, hsn_sac,
+                quantity, unit_price, tax_rate, taxable_amount, total_price,
+                unit, part_number, cgst_rate, sgst_rate, igst_rate, cgst_amount, sgst_amount, igst_amount
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                inv_item_id, inv_id, i.get("item_type", "PART"), i.get("item_id"),
+                i.get("barcode"), i.get("name", "Item"), i.get("hsn_sac", "8536"),
+                u_qty, u_price, t_rate,
+                line_base, line_total,
+                unit_str, part_no, c_rate, s_rate, i_rate, c_amt, s_amt, i_amt
+            ))
+            
+            # Only deduct inventory for physical PART items!
+            if i.get("item_type") == "PART" and i.get("item_id") and not i.get("already_deducted"):
+                cursor.execute("UPDATE inventory_items SET stock_qty = MAX(0, stock_qty - ?) WHERE id = ?", (u_qty, i["item_id"]))
                 log_id = f"stk_{uuid.uuid4().hex[:8]}"
                 cursor.execute("""
                 INSERT INTO stock_logs (id, item_id, part_name, barcode, change_qty, new_stock_qty, action_type, reference_id, notes, created_at)
-                VALUES (?, ?, ?, ?, ?, (SELECT stock_qty FROM inventory_items WHERE id = ?), 'EDIT_RESTORE', ?, ?, ?)
-                """, (log_id, oi["item_id"], oi["name"], oi["barcode"], int(oi["quantity"]), oi["item_id"], inv_number, f"Restored during edit of {inv_number}", now_ist))
-        
-        # 2. Clear old items
-        cursor.execute("DELETE FROM invoice_items WHERE invoice_id = ?", (editing_id,))
-        
-        # 3. Update invoice record
-        cursor.execute("""
-        UPDATE invoices SET
-            customer_name = ?, customer_phone = ?, vehicle_reg_no = ?,
-            subtotal_labor = ?, subtotal_parts = ?, taxable_subtotal = ?,
-            cgst_total = ?, sgst_total = ?, igst_total = ?, tax_total = ?,
-            discount_amount = ?, round_off = ?, grand_total = ?, amount_paid = ?, balance_due = ?,
-            payment_status = ?, payment_mode = ?, is_interstate = ?,
-            upi_payment_link = ?, updated_at = ?
-        WHERE id = ?
-        """, (
-            cust_name, cust_phone,
-            veh_reg,
-            subtotal_labor, subtotal_parts, taxable_subtotal,
-            cgst_total, sgst_total, igst_total, total_tax,
-            discount, round_off, grand_total, amount_paid, balance_due,
-            payment_status, payload.get("payment_mode", "UPI"), is_interstate,
-            upi_link, now_ist, editing_id
-        ))
-        
-        # 4. Adjust customer khata balance if balance changed
-        old_bal = float(old_inv["balance_due"] or 0.0)
-        bal_diff = balance_due - old_bal
-        if bal_diff != 0 and cust_phone:
-            cursor.execute("UPDATE customers SET khata_balance = MAX(0, khata_balance + ?) WHERE phone = ?", (bal_diff, cust_phone))
-            
-        db.log_audit("EDIT_INVOICE", "invoices", editing_id, f"Updated bill #{inv_number} (New Total: ₹{grand_total:.2f}, Status: {payment_status})", cursor=cursor)
-    else:
-        # --- CREATE NEW INVOICE ---
-        cursor.execute("SELECT COUNT(*) FROM invoices")
-        cnt = cursor.fetchone()[0] + 1
-        inv_number = f"INV-2026-{cnt:03d}"
-        cursor.execute("SELECT id FROM invoices WHERE invoice_number = ?", (inv_number,))
-        while cursor.fetchone():
-            cnt += 1
-            inv_number = f"INV-2026-{cnt:03d}"
-        inv_id = f"inv_{uuid.uuid4().hex[:8]}"
-        upi_link = generate_upi_link(vpa, workshop.get("name", "Auto Workshop"), pay_for_qr, f"Inv_{inv_number}")
+                VALUES (?, ?, ?, ?, ?, COALESCE((SELECT stock_qty FROM inventory_items WHERE id = ?), 0), 'SALE_OUT', ?, ?, ?)
+                """, (log_id, i["item_id"], i.get("name"), i.get("barcode"), -u_qty, i["item_id"], inv_number, f"Billed in Invoice {inv_number}", now_ist))
+                
+        # If linked to job card, mark job card as COMPLETED
+        if job_card_id:
+            cursor.execute("UPDATE job_cards SET status = 'COMPLETED', completed_at = ? WHERE id = ?", (now_ist, job_card_id))
 
-        cursor.execute("""
-        INSERT INTO invoices (
-            id, tenant_id, invoice_number, invoice_date, invoice_type, job_card_id, job_number,
-            customer_name, customer_phone, vehicle_reg_no,
-            subtotal_labor, subtotal_parts, taxable_subtotal,
-            cgst_total, sgst_total, igst_total, tax_total, discount_amount,
-            round_off, grand_total, amount_paid, balance_due, payment_status, payment_mode,
-            is_interstate, upi_payment_link, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            inv_id, tenant_id, inv_number, today_str, payload.get("invoice_type", "JOB_SERVICE" if job_card_id else "COUNTER_SALE"),
-            job_card_id, job_number,
-            cust_name, cust_phone,
-            veh_reg,
-            subtotal_labor, subtotal_parts, taxable_subtotal,
-            cgst_total, sgst_total, igst_total, total_tax, discount,
-            round_off, grand_total, amount_paid, balance_due, payment_status,
-            payload.get("payment_mode", "UPI"), is_interstate, upi_link, now_ist
-        ))
-
-        # Record payment if amount_paid > 0
-        if amount_paid > 0:
-            pay_id = f"pay_{uuid.uuid4().hex[:8]}"
-            cursor.execute("""
-            INSERT INTO payments (id, invoice_id, customer_id, amount, payment_mode, payment_date, notes, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (pay_id, inv_id, cust_id, amount_paid, payload.get("payment_mode", "UPI"), today_str, f"Initial payment for {inv_number}", now_ist))
-
-            # Update bank account / cash register balance
-            cursor.execute("SELECT id FROM bank_accounts WHERE is_primary = 1 AND tenant_id = ? LIMIT 1", (tenant_id,))
-            p_acc = cursor.fetchone()
-            if p_acc:
-                cursor.execute("UPDATE bank_accounts SET current_balance = current_balance + ? WHERE id = ?", (amount_paid, p_acc["id"]))
-            elif payload.get("payment_mode") == "CASH":
-                cursor.execute("UPDATE bank_accounts SET current_balance = current_balance + ? WHERE account_type = 'CASH' AND tenant_id = ? LIMIT 1", (amount_paid, tenant_id))
-
-        db.log_audit("CREATE_INVOICE", "invoices", inv_id, f"Created bill #{inv_number} (₹{grand_total:.2f}, Status: {payment_status})", cursor=cursor)
-
-    # Insert items and apply stock deductions
-    for i in items:
-        inv_item_id = f"ii_{uuid.uuid4().hex[:8]}"
-        u_price = float(i.get("unit_price") or 0.0)
-        u_qty = int(i.get("quantity") or 1)
-        line_base = u_price * u_qty
-        t_rate = float(i.get("tax_rate") or 0.0)
-        line_tax = line_base * (t_rate / 100.0)
-        line_total = line_base + line_tax
-
-        unit_str = str(i.get("unit") or ("hrs" if i.get("item_type") == "LABOR" else "pcs")).lower()
-        part_no = str(i.get("part_number") or "").strip()
-
-        if is_interstate:
-            c_rate, s_rate, i_rate = 0.0, 0.0, t_rate
-            c_amt, s_amt, i_amt = 0.0, 0.0, line_tax
-        else:
-            c_rate, s_rate, i_rate = (t_rate / 2.0), (t_rate / 2.0), 0.0
-            c_amt, s_amt, i_amt = (line_tax / 2.0), (line_tax / 2.0), 0.0
-
-        cursor.execute("""
-        INSERT INTO invoice_items (
-            id, invoice_id, item_type, item_id, barcode, name, hsn_sac,
-            quantity, unit_price, tax_rate, taxable_amount, total_price,
-            unit, part_number, cgst_rate, sgst_rate, igst_rate, cgst_amount, sgst_amount, igst_amount
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            inv_item_id, inv_id, i.get("item_type", "PART"), i.get("item_id"),
-            i.get("barcode"), i.get("name", "Item"), i.get("hsn_sac", "8536"),
-            u_qty, u_price, t_rate,
-            line_base, line_total,
-            unit_str, part_no, c_rate, s_rate, i_rate, c_amt, s_amt, i_amt
-        ))
-        
-        # Only deduct inventory for physical PART items!
-        if i.get("item_type") == "PART" and i.get("item_id") and not i.get("already_deducted"):
-            cursor.execute("UPDATE inventory_items SET stock_qty = MAX(0, stock_qty - ?) WHERE id = ?", (u_qty, i["item_id"]))
-            log_id = f"stk_{uuid.uuid4().hex[:8]}"
-            cursor.execute("""
-            INSERT INTO stock_logs (id, item_id, part_name, barcode, change_qty, new_stock_qty, action_type, reference_id, notes, created_at)
-            VALUES (?, ?, ?, ?, ?, (SELECT stock_qty FROM inventory_items WHERE id = ?), 'SALE_OUT', ?, ?, ?)
-            """, (log_id, i["item_id"], i.get("name"), i.get("barcode"), -u_qty, i["item_id"], inv_number, f"Billed in Invoice {inv_number}", now_ist))
-            
-    # If linked to job card, mark job card as COMPLETED
-    if job_card_id:
-        cursor.execute("UPDATE job_cards SET status = 'COMPLETED', completed_at = ? WHERE id = ?", (now_ist, job_card_id))
-
-    conn.commit()
-    conn.close()
-    return {"success": True, "invoice_id": inv_id, "invoice_number": inv_number, "is_updated": bool(editing_id)}
+        conn.commit()
+        conn.close()
+        return {"success": True, "invoice_id": inv_id, "invoice_number": inv_number, "is_updated": bool(editing_id)}
+    except HTTPException:
+        conn.rollback()
+        conn.close()
+        raise
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        print(f"[POS Invoice Error] {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Bill generation error: {str(e)}")
 
 @app.post("/api/invoices/{invoice_id}/cancel")
 async def cancel_invoice_with_pin(invoice_id: str, payload: Dict[str, Any]):
@@ -2446,10 +2462,12 @@ async def import_inventory_excel(file: UploadFile = File(...)):
     return RedirectResponse(url="/inventory", status_code=303)
 
 @app.get("/api/inventory/scan/{barcode}")
-async def scan_barcode_lookup(barcode: str):
+async def scan_barcode_lookup(request: Request, barcode: str):
+    tenant_id = get_current_tenant_id(request)
     conn = db.get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM inventory_items WHERE barcode = ? OR sku = ?", (barcode.strip(), barcode.strip()))
+    clean_b = barcode.strip()
+    cursor.execute("SELECT * FROM inventory_items WHERE (barcode = ? OR sku = ? OR part_number = ?) AND tenant_id = ?", (clean_b, clean_b, clean_b, tenant_id))
     row = cursor.fetchone()
     conn.close()
     if not row:
@@ -3401,26 +3419,28 @@ async def customers_page(request: Request):
     )
 
 @app.get("/api/customers/{customer_id_or_phone}/history")
-async def get_customer_history(customer_id_or_phone: str):
+async def get_customer_history(request: Request, customer_id_or_phone: str):
+    tenant_id = get_current_tenant_id(request)
     conn = db.get_db_connection()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT * FROM customers WHERE id = ? OR phone = ? LIMIT 1", (customer_id_or_phone, customer_id_or_phone))
+    clean_val = customer_id_or_phone.strip()
+    cursor.execute("SELECT * FROM customers WHERE (id = ? OR phone = ?) AND tenant_id = ? LIMIT 1", (clean_val, clean_val, tenant_id))
     c_row = cursor.fetchone()
     
     veh_row = None
     if not c_row:
-        cursor.execute("SELECT * FROM vehicles WHERE reg_number = ? LIMIT 1", (customer_id_or_phone.strip().upper(),))
+        cursor.execute("SELECT * FROM vehicles WHERE reg_number = ? AND tenant_id = ? LIMIT 1", (clean_val.upper(), tenant_id))
         veh_row = cursor.fetchone()
-        if veh_row and veh_row["customer_phone"]:
-            cursor.execute("SELECT * FROM customers WHERE phone = ? LIMIT 1", (veh_row["customer_phone"],))
+        if veh_row and veh_row.get("customer_phone"):
+            cursor.execute("SELECT * FROM customers WHERE phone = ? AND tenant_id = ? LIMIT 1", (veh_row["customer_phone"], tenant_id))
             c_row = cursor.fetchone()
 
     customer = dict(c_row) if c_row else None
     
     vehicles = []
     if customer:
-        cursor.execute("SELECT * FROM vehicles WHERE customer_id = ? OR customer_phone = ?", (customer["id"], customer["phone"]))
+        cursor.execute("SELECT * FROM vehicles WHERE (customer_id = ? OR customer_phone = ?) AND tenant_id = ?", (customer["id"], customer["phone"], tenant_id))
         vehicles = [dict(r) for r in cursor.fetchall()]
     elif veh_row:
         vehicles = [dict(veh_row)]
@@ -3438,7 +3458,7 @@ async def get_customer_history(customer_id_or_phone: str):
     invoices = []
     if cust_phone or veh_regs:
         conditions = []
-        params = []
+        params = [tenant_id]
         if cust_phone:
             conditions.append("customer_phone = ?")
             params.append(cust_phone)
@@ -3448,10 +3468,10 @@ async def get_customer_history(customer_id_or_phone: str):
             params.extend(veh_regs)
         
         where_clause = " OR ".join(conditions)
-        cursor.execute(f"SELECT * FROM job_cards WHERE {where_clause} ORDER BY created_at DESC", tuple(params))
+        cursor.execute(f"SELECT * FROM job_cards WHERE tenant_id = ? AND ({where_clause}) ORDER BY created_at DESC", tuple(params))
         job_cards = [dict(r) for r in cursor.fetchall()]
 
-        cursor.execute(f"SELECT * FROM invoices WHERE {where_clause} ORDER BY created_at DESC", tuple(params))
+        cursor.execute(f"SELECT * FROM invoices WHERE tenant_id = ? AND ({where_clause}) ORDER BY created_at DESC", tuple(params))
         invoices = [dict(r) for r in cursor.fetchall()]
 
     for j in job_cards:
