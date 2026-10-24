@@ -10,10 +10,10 @@
 </head>
 <body class="bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 min-h-screen flex items-center justify-center p-4">
 
-    <div class="max-w-md w-full bg-slate-900/90 border border-slate-800 backdrop-blur-xl rounded-3xl p-8 shadow-2xl space-y-6">
-        <!-- Logo -->
-        <div class="text-center space-y-2">
-            <div class="w-14 h-14 rounded-2xl bg-gradient-to-tr from-amber-500 to-yellow-300 flex items-center justify-center text-slate-950 font-black text-2xl mx-auto shadow-lg shadow-amber-500/20">
+    <div class="max-w-md w-full bg-slate-900/90 border border-slate-800 backdrop-blur-xl rounded-3xl p-6 md:p-8 shadow-2xl space-y-6">
+        <!-- Brand Logo Header -->
+        <div class="text-center space-y-1.5">
+            <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-amber-500 to-yellow-300 flex items-center justify-center text-slate-950 font-black text-2xl mx-auto shadow-lg shadow-amber-500/20">
                 ⚡
             </div>
             <h1 class="text-2xl font-black text-white tracking-tight">AutoVolt Pro</h1>
@@ -21,7 +21,7 @@
         </div>
 
         {% if error %}
-        <div class="p-3 bg-rose-950/80 border border-rose-800/80 rounded-xl text-xs text-rose-300 font-medium text-center">
+        <div id="serverAlert" class="p-3 bg-rose-950/80 border border-rose-800/80 rounded-xl text-xs text-rose-300 font-medium text-center">
             ⚠️ {{ error }}
         </div>
         {% endif %}
@@ -32,55 +32,271 @@
         </div>
         {% endif %}
 
-        <form id="loginForm" action="/login" method="POST" class="space-y-4 text-xs font-medium">
-            <div>
-                <div class="flex items-center justify-between mb-1">
-                    <label class="block text-slate-300 font-bold">Workshop ID / Client Code</label>
-                    <span class="text-[10px] text-amber-400 font-mono">e.g. SPARK or KOCHI</span>
+        <div id="dynamicAlert" class="hidden p-3 rounded-xl text-xs font-medium text-center"></div>
+
+        <!-- ======================================================== -->
+        <!-- VIEW 1: REGULAR LOGIN (For Verified Devices) -->
+        <!-- ======================================================== -->
+        <div id="loginView" class="space-y-4">
+            <!-- Active Workshop Badge -->
+            <div id="workshopBadgeBox" class="p-3 bg-slate-950/70 border border-slate-800 rounded-2xl flex items-center justify-between">
+                <div class="flex items-center gap-2.5 overflow-hidden">
+                    <span class="w-7 h-7 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/30 flex items-center justify-center font-bold text-xs shrink-0">🔑</span>
+                    <div class="overflow-hidden">
+                        <span class="text-[10px] uppercase tracking-wider text-slate-400 block font-semibold leading-none">Registered Workshop</span>
+                        <span id="badgeWorkshopText" class="font-bold font-mono text-white text-xs truncate block mt-0.5">SPARK</span>
+                    </div>
                 </div>
-                <input type="text" id="workshop_code" name="workshop_code" placeholder="Enter Workshop ID (e.g. SPARK)" class="w-full px-4 py-2.5 rounded-xl bg-slate-800/80 border border-slate-700 text-white placeholder-slate-500 uppercase font-mono tracking-wider focus:outline-none focus:ring-2 focus:ring-amber-500 text-sm font-bold">
-                <span class="text-[10px] text-slate-400 mt-1 block">Saved automatically on this device</span>
+                <button type="button" onclick="showRegisterView()" class="px-2.5 py-1 text-[11px] font-semibold text-amber-400 hover:text-amber-300 bg-slate-800/80 hover:bg-slate-800 border border-slate-700 rounded-lg transition shrink-0">
+                    Change / Register
+                </button>
             </div>
 
-            <div>
-                <label class="block text-slate-300 font-bold mb-1">Username / Staff ID</label>
-                <input type="text" name="username" required autofocus placeholder="e.g. admin or staff" class="w-full px-4 py-2.5 rounded-xl bg-slate-800/80 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500 text-sm font-medium">
-            </div>
+            <form id="loginForm" action="/login" method="POST" class="space-y-4 text-xs font-medium">
+                <input type="hidden" id="login_workshop_code" name="workshop_code" value="">
 
-            <div>
-                <div class="flex items-center justify-between mb-1">
-                    <label class="text-slate-300 font-bold">Password</label>
-                    <a href="/forgot-password" class="text-amber-400 hover:underline text-[11px]">Forgot Password?</a>
+                <div>
+                    <label class="block text-slate-300 font-bold mb-1">Username / Staff ID</label>
+                    <input type="text" id="usernameInput" name="username" required autofocus placeholder="e.g. admin or staff" class="w-full px-4 py-2.5 rounded-xl bg-slate-800/80 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500 text-sm font-medium">
                 </div>
-                <input type="password" name="password" required placeholder="••••••••" class="w-full px-4 py-2.5 rounded-xl bg-slate-800/80 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500 text-sm font-medium">
+
+                <div>
+                    <div class="flex items-center justify-between mb-1">
+                        <label class="text-slate-300 font-bold">Password</label>
+                        <a href="/forgot-password" class="text-amber-400 hover:underline text-[11px]">Forgot Password?</a>
+                    </div>
+                    <input type="password" name="password" required placeholder="••••••••" class="w-full px-4 py-2.5 rounded-xl bg-slate-800/80 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500 text-sm font-medium">
+                </div>
+
+                <button type="submit" class="w-full py-3.5 bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-black text-sm rounded-2xl shadow-lg shadow-amber-500/20 transition transform active:scale-95 flex items-center justify-center gap-2">
+                    <span>Sign In to Workshop ⚡</span>
+                </button>
+            </form>
+        </div>
+
+        <!-- ======================================================== -->
+        <!-- VIEW 2: ONE-TIME DEVICE REGISTRATION (WHATSAPP OTP) -->
+        <!-- ======================================================== -->
+        <div id="registerView" class="hidden space-y-4">
+            <div class="p-3 bg-amber-950/30 border border-amber-800/40 rounded-2xl flex items-start gap-3">
+                <span class="text-amber-400 text-lg">📲</span>
+                <div class="text-xs space-y-0.5">
+                    <h3 class="font-bold text-amber-300">Device Activation Required</h3>
+                    <p class="text-slate-400 text-[11px]">Authorize this computer or mobile phone by entering your Workshop ID and verifying WhatsApp OTP.</p>
+                </div>
             </div>
 
-            <button type="submit" class="w-full py-3.5 bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-black text-sm rounded-2xl shadow-lg shadow-amber-500/20 transition transform active:scale-95 flex items-center justify-center gap-2">
-                <span>Sign In to Workshop ⚡</span>
-            </button>
-        </form>
+            <!-- Step 1: Request OTP -->
+            <div id="otpStep1" class="space-y-3 text-xs">
+                <div>
+                    <label class="block text-slate-300 font-bold mb-1">Enter Workshop Client ID *</label>
+                    <input type="text" id="reg_workshop_code" placeholder="e.g. SPARK, KOCHI, CALICUT" class="w-full px-4 py-2.5 rounded-xl bg-slate-800/80 border border-slate-700 text-white uppercase font-mono font-bold tracking-wider text-sm placeholder-slate-500 focus:ring-2 focus:ring-amber-500">
+                    <span class="text-[10px] text-slate-400 mt-1 block">Found on your onboarding certificate or SaaS HQ portal.</span>
+                </div>
 
-        <script>
-            // Auto-load & auto-save Workshop ID on this machine
-            const inputCode = document.getElementById('workshop_code');
-            const savedCode = localStorage.getItem('autovolt_workshop_code');
-            if (savedCode && inputCode) {
-                inputCode.value = savedCode;
-            }
-            document.getElementById('loginForm').addEventListener('submit', function() {
-                if (inputCode && inputCode.value.trim()) {
-                    localStorage.setItem('autovolt_workshop_code', inputCode.value.trim().toUpperCase());
-                }
-            });
-        </script>
+                <button type="button" id="btnRequestOtp" onclick="handleRequestOtp()" class="w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-emerald-600/20 transition flex items-center justify-center gap-2">
+                    <i data-lucide="message-circle" class="w-4 h-4"></i>
+                    <span>Send Verification OTP via WhatsApp 📲</span>
+                </button>
+            </div>
 
-        <div class="pt-4 border-t border-slate-800/80 text-center text-[11px] text-slate-500 space-y-1">
+            <!-- Step 2: Verify OTP -->
+            <div id="otpStep2" class="hidden space-y-3 text-xs">
+                <div class="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-1">
+                    <div class="flex items-center justify-between text-slate-400 text-[11px]">
+                        <span>OTP sent to owner:</span>
+                        <span id="targetPhoneMasked" class="font-mono text-emerald-400 font-bold">+91 98470XXXX5</span>
+                    </div>
+                    <div id="waLinkBox" class="pt-1 text-center hidden">
+                        <a id="waDirectLink" href="#" target="_blank" class="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 text-[11px] font-bold rounded-lg border border-emerald-500/40 transition">
+                            <i data-lucide="external-link" class="w-3.5 h-3.5"></i>
+                            <span>Open WhatsApp Directly</span>
+                        </a>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-slate-300 font-bold mb-1">Enter 6-Digit OTP Code *</label>
+                    <input type="text" id="reg_otp_code" maxlength="6" placeholder="123456" class="w-full px-4 py-2.5 text-center rounded-xl bg-slate-800/80 border border-slate-700 text-amber-400 font-mono font-black tracking-widest text-lg focus:ring-2 focus:ring-amber-500">
+                </div>
+
+                <button type="button" id="btnVerifyOtp" onclick="handleVerifyOtp()" class="w-full py-3 bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-amber-500/20 transition flex items-center justify-center gap-2">
+                    <i data-lucide="check-circle" class="w-4 h-4"></i>
+                    <span>Verify & Authorize Device ⚡</span>
+                </button>
+
+                <div class="flex items-center justify-between pt-1 text-[11px]">
+                    <button type="button" onclick="handleRequestOtp()" class="text-amber-400 hover:underline">Resend OTP</button>
+                    <button type="button" onclick="showLoginView()" class="text-slate-400 hover:underline">Back to Login</button>
+                </div>
+            </div>
+
+            <div class="text-center pt-2">
+                <button type="button" onclick="showLoginView()" class="text-slate-400 hover:text-slate-200 text-[11px] font-medium hover:underline">
+                    ← Cancel and return to Login
+                </button>
+            </div>
+        </div>
+
+        <div class="pt-3 border-t border-slate-800/80 text-center text-[11px] text-slate-500 space-y-1">
             <p class="flex items-center justify-center gap-1.5 text-slate-400">
                 <i data-lucide="shield-check" class="w-3.5 h-3.5 text-emerald-400"></i>
-                <span>Enterprise Grade 256-Bit Encrypted Session</span>
+                <span>Multi-Tenant Enterprise Security with One-Time Device OTP</span>
             </p>
         </div>
     </div>
+
+    <script>
+        function showAlert(msg, isSuccess = false) {
+            const el = document.getElementById('dynamicAlert');
+            el.className = `p-3 rounded-xl text-xs font-medium text-center ${isSuccess ? 'bg-emerald-950/80 border border-emerald-800 text-emerald-300' : 'bg-rose-950/80 border border-rose-800 text-rose-300'}`;
+            el.innerHTML = (isSuccess ? '✅ ' : '⚠️ ') + msg;
+            el.classList.remove('hidden');
+        }
+
+        function clearAlert() {
+            const el = document.getElementById('dynamicAlert');
+            el.classList.add('hidden');
+            el.innerHTML = '';
+        }
+
+        function showRegisterView() {
+            clearAlert();
+            document.getElementById('loginView').classList.add('hidden');
+            document.getElementById('registerView').classList.remove('hidden');
+            document.getElementById('otpStep1').classList.remove('hidden');
+            document.getElementById('otpStep2').classList.add('hidden');
+            
+            const saved = localStorage.getItem('autovolt_workshop_code') || '';
+            if (saved) {
+                document.getElementById('reg_workshop_code').value = saved;
+            }
+        }
+
+        function showLoginView(codeToUse) {
+            clearAlert();
+            const code = (codeToUse || localStorage.getItem('autovolt_workshop_code') || 'SPARK').toUpperCase();
+            document.getElementById('login_workshop_code').value = code;
+            document.getElementById('badgeWorkshopText').innerText = code;
+            document.getElementById('registerView').classList.add('hidden');
+            document.getElementById('loginView').classList.remove('hidden');
+            document.getElementById('usernameInput').focus();
+        }
+
+        // Initialize state on page load
+        (function initDeviceState() {
+            const isVerified = localStorage.getItem('autovolt_device_verified');
+            const savedCode = localStorage.getItem('autovolt_workshop_code');
+
+            if (isVerified === '1' && savedCode) {
+                showLoginView(savedCode);
+            } else if (savedCode) {
+                showLoginView(savedCode);
+            } else {
+                showRegisterView();
+            }
+        })();
+
+        // Step 1: Request OTP via WhatsApp
+        async function handleRequestOtp() {
+            clearAlert();
+            const inputCode = document.getElementById('reg_workshop_code').value.trim().toUpperCase();
+            if (!inputCode) {
+                showAlert("Please enter your Workshop Client ID (e.g. SPARK, KOCHI).");
+                return;
+            }
+
+            const btn = document.getElementById('btnRequestOtp');
+            btn.disabled = true;
+            btn.innerHTML = `<span class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"></span> Generating OTP...`;
+
+            try {
+                const formData = new FormData();
+                formData.append('workshop_code', inputCode);
+
+                const resp = await fetch('/api/device/request-otp', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await resp.json();
+
+                if (data.success) {
+                    document.getElementById('targetPhoneMasked').innerText = data.masked_phone || 'Workshop Owner WhatsApp';
+                    if (data.wa_url) {
+                        const waLink = document.getElementById('waDirectLink');
+                        waLink.href = data.wa_url;
+                        document.getElementById('waLinkBox').classList.remove('hidden');
+                    }
+                    document.getElementById('otpStep1').classList.add('hidden');
+                    document.getElementById('otpStep2').classList.remove('hidden');
+                    document.getElementById('reg_otp_code').focus();
+                    
+                    let successNotice = `OTP generated for ${data.workshop_name}!`;
+                    if (data.meta_sent) {
+                        successNotice += " Sent directly to owner's WhatsApp via Meta Cloud API.";
+                    } else {
+                        successNotice += " Click 'Open WhatsApp' or check owner's WhatsApp.";
+                    }
+                    showAlert(successNotice, true);
+                } else {
+                    showAlert(data.error || "Failed to generate OTP.");
+                }
+            } catch (err) {
+                showAlert("Connection error while requesting OTP. Please check server.");
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = `<i data-lucide="message-circle" class="w-4 h-4"></i><span>Send Verification OTP via WhatsApp 📲</span>`;
+                lucide.createIcons();
+            }
+        }
+
+        // Step 2: Verify OTP and lock device
+        async function handleVerifyOtp() {
+            clearAlert();
+            const inputCode = document.getElementById('reg_workshop_code').value.trim().toUpperCase();
+            const inputOtp = document.getElementById('reg_otp_code').value.trim();
+
+            if (!inputOtp || inputOtp.length < 4) {
+                showAlert("Please enter the complete 6-digit OTP code.");
+                return;
+            }
+
+            const btn = document.getElementById('btnVerifyOtp');
+            btn.disabled = true;
+            btn.innerHTML = `<span class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"></span> Verifying...`;
+
+            try {
+                const formData = new FormData();
+                formData.append('workshop_code', inputCode);
+                formData.append('otp_code', inputOtp);
+
+                const resp = await fetch('/api/device/verify-otp', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await resp.json();
+
+                if (data.success) {
+                    localStorage.setItem('autovolt_device_verified', '1');
+                    localStorage.setItem('autovolt_workshop_code', data.workshop_code || inputCode);
+
+                    showAlert(`Device successfully activated for ${data.workshop_name || inputCode}! You can now log in.`, true);
+
+                    setTimeout(() => {
+                        showLoginView(data.workshop_code || inputCode);
+                    }, 1200);
+                } else {
+                    showAlert(data.error || "Invalid OTP code.");
+                }
+            } catch (err) {
+                showAlert("Connection error while verifying OTP.");
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = `<i data-lucide="check-circle" class="w-4 h-4"></i><span>Verify & Authorize Device ⚡</span>`;
+                lucide.createIcons();
+            }
+        }
+    </script>
 
     <script>
         lucide.createIcons();

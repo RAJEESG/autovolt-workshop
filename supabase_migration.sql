@@ -80,3 +80,16 @@ END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_job_cards_tenant_job ON job_cards (tenant_id, job_number);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_tenant_inv ON invoices (tenant_id, invoice_number);
+
+-- 6. Workshop Device Activations & WhatsApp OTP Table
+CREATE TABLE IF NOT EXISTS device_activations (
+    id TEXT PRIMARY KEY DEFAULT ('act_' || substr(md5(random()::text), 1, 8)),
+    tenant_id TEXT NOT NULL,
+    client_code TEXT NOT NULL,
+    phone TEXT NOT NULL,
+    otp_code TEXT NOT NULL,
+    device_name TEXT DEFAULT 'Browser Terminal',
+    is_verified INTEGER DEFAULT 0,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);

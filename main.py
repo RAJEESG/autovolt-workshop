@@ -2,6 +2,7 @@ import os
 import io
 import json
 import uuid
+import re
 from datetime import datetime, date, timedelta
 from typing import Optional, List, Dict, Any
 
@@ -37,6 +38,15 @@ from auth_helper import (
 import otp_helper
 
 app = FastAPI(title="AutoVolt Pro — Auto Electrical Workshop Management", version="2.0.0")
+
+@app.on_event("startup")
+async def app_startup_sync():
+    """Sync tenants and users from Supabase Cloud on boot"""
+    try:
+        import supabase_sync
+        supabase_sync.sync_critical_from_supabase()
+    except Exception as e:
+        print(f"[Supabase Startup Sync] {e}")
 
 # Mount Static Files & Templates
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -201,7 +211,7 @@ async def auth_and_subscription_middleware(request: Request, call_next):
     # Exempt routes that should always remain accessible without login
     exempt_prefixes = [
         "/static", "/login", "/logout", "/forgot-password", "/verify-otp", "/reset-password",
-        "/subscription-expired", "/view", "/invoice"
+        "/subscription-expired", "/view", "/invoice", "/api/device"
     ]
     
     is_exempt = any(path.startswith(prefix) for prefix in exempt_prefixes)
@@ -347,6 +357,15 @@ async def handle_login(
             target_tenant_id = t_row["id"]
 
         if not target_tenant_id:
+            try:
+                import supabase_sync
+                cloud_t = supabase_sync.fetch_and_cache_tenant_from_supabase(clean_code)
+                if cloud_t:
+                    target_tenant_id = cloud_t.get("id")
+            except Exception as e:
+                print(f"[Supabase Login Tenant Lookup] {e}")
+
+        if not target_tenant_id:
             conn.close()
             return templates.TemplateResponse(
                 request=request,
@@ -360,6 +379,18 @@ async def handle_login(
     else:
         cursor.execute("SELECT * FROM users WHERE LOWER(username) = LOWER(?) AND status = 'ACTIVE'", (clean_username,))
         user_rows = cursor.fetchall()
+
+    if not user_rows:
+        try:
+            import supabase_sync
+            supabase_sync.sync_critical_from_supabase()
+            if target_tenant_id:
+                cursor.execute("SELECT * FROM users WHERE LOWER(username) = LOWER(?) AND tenant_id = ? AND status = 'ACTIVE'", (clean_username, target_tenant_id))
+            else:
+                cursor.execute("SELECT * FROM users WHERE LOWER(username) = LOWER(?) AND status = 'ACTIVE'", (clean_username,))
+            user_rows = cursor.fetchall()
+        except Exception as e:
+            print(f"[Supabase Login User Lookup] {e}")
 
     if not user_rows:
         conn.close()
@@ -404,6 +435,166 @@ async def handle_logout():
     response.delete_cookie("session_user")
     response.delete_cookie("session_last_active")
     return response
+
+# =========================================================
+# 📱 WORKSHOP DEVICE ACTIVATION & WHATSAPP OTP ENDPOINTS
+# One-time OTP device authorization for computers / phones
+# =========================================================
+
+@app.post("/api/device/request-otp")
+async def request_device_otp(workshop_code: str = Form(...)):
+    clean_code = (workshop_code or "").strip().upper()
+    if not clean_code:
+        return JSONResponse({"success": False, "error": "Workshop ID / Client Code is required."}, status_code=400)
+
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM tenants WHERE UPPER(client_code) = ? OR UPPER(id) = ?", (clean_code, clean_code))
+    t_row = cursor.fetchone()
+    if not t_row:
+        cursor.execute("SELECT * FROM workshop_profile WHERE UPPER(client_code) = ? OR UPPER(id) = ?", (clean_code, clean_code))
+        t_row = cursor.fetchone()
+
+    # Cloud fallback check if not in local cache
+    if not t_row:
+        try:
+            import supabase_sync
+            cloud_t = supabase_sync.fetch_and_cache_tenant_from_supabase(clean_code)
+            if cloud_t:
+                cursor.execute("SELECT * FROM tenants WHERE UPPER(client_code) = ? OR UPPER(id) = ?", (clean_code, clean_code))
+                t_row = cursor.fetchone()
+        except Exception as e:
+            print(f"[Supabase Sync Device Request] {e}")
+
+    if not t_row:
+        conn.close()
+        return JSONResponse({"success": False, "error": f"Workshop ID '{clean_code}' not found. Please verify with your workshop owner."}, status_code=404)
+
+    tenant = dict(t_row)
+    phone = (tenant.get("whatsapp_mobile") or tenant.get("phone") or "").strip()
+    if not phone:
+        conn.close()
+        return JSONResponse({"success": False, "error": "No WhatsApp mobile number registered for this workshop."}, status_code=400)
+
+    # Generate 6-digit OTP
+    otp_code = otp_helper.generate_numeric_otp(6)
+    act_id = f"act_{uuid.uuid4().hex[:8]}"
+    expires_at = (datetime.now() + timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M:%S")
+
+    # Invalidate previous unused OTPs for this client
+    cursor.execute("UPDATE device_activations SET is_verified = 2 WHERE client_code = ? AND is_verified = 0", (clean_code,))
+
+    # Store in SQLite
+    cursor.execute("""
+    INSERT INTO device_activations (id, tenant_id, client_code, phone, otp_code, device_name, is_verified, expires_at, created_at)
+    VALUES (?, ?, ?, ?, ?, 'Browser Terminal', 0, ?, datetime('now'))
+    """, (act_id, tenant.get("id"), clean_code, phone, otp_code, expires_at))
+    conn.commit()
+    conn.close()
+
+    # Push to Supabase Cloud if available
+    try:
+        import supabase_sync
+        supabase_sync.push_to_supabase("device_activations", {
+            "id": act_id, "tenant_id": tenant.get("id"), "client_code": clean_code,
+            "phone": phone, "otp_code": otp_code, "device_name": "Browser Terminal",
+            "is_verified": 0, "expires_at": expires_at, "created_at": datetime.now().isoformat()
+        })
+    except Exception as e:
+        print(f"[Supabase Device Push] {e}")
+
+    # 1. Attempt sending via Meta WhatsApp API (e.g. MoneyMate or AutoVolt Meta account)
+    import whatsapp_helper
+    meta_res = whatsapp_helper.send_meta_whatsapp_otp(
+        to_phone=phone,
+        otp_code=otp_code,
+        workshop_name=tenant.get("name", "AutoVolt Pro"),
+        client_code=clean_code
+    )
+
+    # 2. Build 1-Click WhatsApp direct link
+    wa_msg = (
+        f"🔐 *AutoVolt Pro - Workshop Device Registration*\n\n"
+        f"Workshop: *{tenant.get('name')}* ({clean_code})\n"
+        f"Your 6-digit Device Activation Code is: *{otp_code}*\n\n"
+        f"Enter this code on your computer or mobile browser to authorize this device. "
+        f"Valid for 15 minutes."
+    )
+    wa_url = whatsapp_helper.generate_wa_me_url(phone, wa_msg)
+
+    # Masked phone for UI display (e.g. +91 98470XXXX5)
+    digits_only = re.sub(r"\D", "", phone)
+    if len(digits_only) >= 10:
+        masked = f"+91 {digits_only[-10:-5]}XXXX{digits_only[-2:]}"
+    else:
+        masked = phone
+
+    return JSONResponse({
+        "success": True,
+        "workshop_name": tenant.get("name"),
+        "client_code": clean_code,
+        "masked_phone": masked,
+        "wa_url": wa_url,
+        "meta_sent": meta_res.get("success", False),
+        "dev_otp": otp_code  # convenient preview for workshop owner/developer
+    })
+
+@app.post("/api/device/verify-otp")
+async def verify_device_otp(workshop_code: str = Form(...), otp_code: str = Form(...)):
+    clean_code = (workshop_code or "").strip().upper()
+    clean_otp = (otp_code or "").strip()
+
+    if not clean_code or not clean_otp:
+        return JSONResponse({"success": False, "error": "Workshop ID and OTP are required."}, status_code=400)
+
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+    SELECT * FROM device_activations
+    WHERE UPPER(client_code) = ? AND otp_code = ? AND is_verified = 0 AND expires_at >= datetime('now')
+    ORDER BY created_at DESC LIMIT 1
+    """, (clean_code, clean_otp))
+    act = cursor.fetchone()
+
+    # Cloud fallback if not in local table
+    if not act:
+        try:
+            import supabase_sync
+            sp = supabase_sync.get_supabase()
+            if sp:
+                res = sp.table("device_activations").select("*").eq("client_code", clean_code).eq("otp_code", clean_otp).eq("is_verified", 0).execute()
+                rows = res.data or []
+                if rows:
+                    act = rows[0]
+                    cursor.execute("INSERT OR REPLACE INTO device_activations (id, tenant_id, client_code, phone, otp_code, is_verified, expires_at, created_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
+                                   (act["id"], act["tenant_id"], act["client_code"], act["phone"], act["otp_code"], act["expires_at"], act["created_at"]))
+                    conn.commit()
+        except Exception as e:
+            print(f"[Supabase Verify Device Fallback] {e}")
+
+    if not act:
+        conn.close()
+        return JSONResponse({"success": False, "error": "Invalid or expired OTP code. Please request a new OTP."}, status_code=400)
+
+    # Mark as verified
+    act_dict = dict(act)
+    cursor.execute("UPDATE device_activations SET is_verified = 1 WHERE id = ?", (act_dict["id"],))
+    conn.commit()
+
+    # Get workshop details
+    cursor.execute("SELECT name FROM tenants WHERE UPPER(client_code) = ? OR UPPER(id) = ?", (clean_code, clean_code))
+    t_row = cursor.fetchone()
+    ws_name = t_row["name"] if t_row else clean_code
+    conn.close()
+
+    return JSONResponse({
+        "success": True,
+        "message": f"Device registered successfully for {ws_name}!",
+        "workshop_code": clean_code,
+        "workshop_name": ws_name
+    })
 
 @app.get("/forgot-password", response_class=HTMLResponse)
 async def forgot_password_page(request: Request, error: Optional[str] = None):

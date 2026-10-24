@@ -4,8 +4,92 @@ import urllib.parse
 import requests
 from typing import Optional, Dict, Any
 
-META_WHATSAPP_TOKEN = os.getenv("META_WHATSAPP_TOKEN", "").strip()
-META_PHONE_NUMBER_ID = os.getenv("META_PHONE_NUMBER_ID", "").strip()
+META_WHATSAPP_TOKEN = (os.getenv("META_WHATSAPP_TOKEN") or os.getenv("WHATSAPP_TOKEN") or "").strip()
+META_PHONE_NUMBER_ID = (os.getenv("META_PHONE_NUMBER_ID") or os.getenv("PHONE_NUMBER_ID") or "").strip()
+META_OTP_TEMPLATE_NAME = os.getenv("META_OTP_TEMPLATE_NAME", "").strip()
+
+def send_meta_whatsapp_otp(
+    to_phone: str,
+    otp_code: str,
+    workshop_name: str = "AutoVolt Pro",
+    client_code: str = "",
+    template_name: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Send OTP verification message using Meta WhatsApp Cloud API.
+    Works seamlessly with existing Meta Business accounts (e.g. MoneyMate or AutoVolt).
+    Falls back gracefully if Meta API credentials are not set or fail.
+    """
+    token = META_WHATSAPP_TOKEN
+    phone_id = META_PHONE_NUMBER_ID
+    tpl = template_name or META_OTP_TEMPLATE_NAME
+    
+    if not token or not phone_id:
+        return {"success": False, "error": "Meta WhatsApp API credentials not configured in environment"}
+
+    clean_num = clean_phone_number(to_phone)
+    url = f"https://graph.facebook.com/v19.0/{phone_id}/messages"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    }
+
+    # If an approved Meta WhatsApp Authentication/Utility template is provided
+    if tpl:
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": clean_num,
+            "type": "template",
+            "template": {
+                "name": tpl,
+                "language": {"code": "en_US"},
+                "components": [
+                    {
+                        "type": "body",
+                        "parameters": [
+                            {"type": "text", "text": otp_code}
+                        ]
+                    },
+                    {
+                        "type": "button",
+                        "sub_type": "url",
+                        "index": "0",
+                        "parameters": [
+                            {"type": "text", "text": otp_code}
+                        ]
+                    }
+                ]
+            }
+        }
+    else:
+        # Standard WhatsApp Cloud API Text Message
+        ws_info = f" ({client_code})" if client_code else ""
+        msg_body = (
+            f"🔐 *{workshop_name}{ws_info} - Device Registration OTP*\n\n"
+            f"Your 6-digit Device Activation Code is: *{otp_code}*\n\n"
+            f"Enter this code on your workshop computer or mobile browser to authorize this device. "
+            f"Valid for 15 minutes. Do not share this code with anyone."
+        )
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": clean_num,
+            "type": "text",
+            "text": {"preview_url": False, "body": msg_body}
+        }
+
+    try:
+        resp = requests.post(url, headers=headers, json=payload, timeout=8)
+        data = resp.json()
+        if resp.status_code == 200 and "messages" in data:
+            return {"success": True, "message_id": data["messages"][0]["id"], "provider": "meta_api"}
+        else:
+            err_msg = data.get("error", {}).get("message", resp.text)
+            print(f"[Meta WhatsApp API Error] {err_msg}")
+            return {"success": False, "error": err_msg}
+    except Exception as e:
+        print(f"[Meta WhatsApp API Exception] {e}")
+        return {"success": False, "error": str(e)}
 
 def clean_phone_number(phone: str) -> str:
     """Normalize phone number to international format without plus or spaces (e.g. 919876543210)"""

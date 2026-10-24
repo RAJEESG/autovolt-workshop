@@ -458,6 +458,19 @@ CREATE TABLE IF NOT EXISTS activity_logs (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- 26. Workshop Device Activations & WhatsApp OTP
+CREATE TABLE IF NOT EXISTS device_activations (
+    id TEXT PRIMARY KEY DEFAULT ('act_' || substr(md5(random()::text), 1, 8)),
+    tenant_id TEXT NOT NULL,
+    client_code TEXT NOT NULL,
+    phone TEXT NOT NULL,
+    otp_code TEXT NOT NULL,
+    device_name TEXT DEFAULT 'Browser Terminal',
+    is_verified INTEGER DEFAULT 0,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 -- =========================================================
 -- 🔄 SAFE IDEMPOTENT MIGRATION FOR RUNNING SUPABASE DATABASES
 -- Safely checks, alters, and upgrades existing databases without

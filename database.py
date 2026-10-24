@@ -580,6 +580,21 @@ def init_db():
     );
     """)
 
+    # 25. Device Activation & WhatsApp OTP Verification Table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS device_activations (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        client_code TEXT NOT NULL,
+        phone TEXT NOT NULL,
+        otp_code TEXT NOT NULL,
+        device_name TEXT DEFAULT 'Browser Terminal',
+        is_verified INTEGER DEFAULT 0,
+        expires_at TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    """)
+
     run_schema_migrations(cursor, conn)
     conn.commit()
     seed_initial_data(cursor, conn)
@@ -592,6 +607,7 @@ def run_schema_migrations(cursor, conn):
         ("users", "tenant_id", "TEXT DEFAULT 'tenant_1'"),
         ("users", "otp_code", "TEXT"),
         ("users", "otp_expiry", "TEXT"),
+        ("tenants", "client_code", "TEXT DEFAULT ''"),
         ("tenants", "whatsapp_mobile", "TEXT"),
         ("tenants", "logo_url", "TEXT"),
         ("tenants", "upi_payee_name", "TEXT"),
@@ -600,6 +616,8 @@ def run_schema_migrations(cursor, conn):
         ("tenants", "subscription_plan", "TEXT DEFAULT 'PRO_ANNUAL'"),
         ("tenants", "subscription_start_date", "TEXT"),
         ("tenants", "price_paid", "REAL DEFAULT 0.0"),
+        ("workshop_profile", "client_code", "TEXT DEFAULT ''"),
+        ("workshop_profile", "tenant_id", "TEXT DEFAULT 'tenant_1'"),
         ("workshop_profile", "logo_url", "TEXT"),
         ("workshop_profile", "upi_payee_name", "TEXT"),
         ("workshop_profile", "gst_slabs", "TEXT DEFAULT '[\"0\", \"5\", \"12\", \"18\", \"28\"]'"),

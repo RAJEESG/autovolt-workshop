@@ -122,6 +122,15 @@ async def dashboard_page(request: Request):
     cursor.execute("SELECT * FROM tenants ORDER BY created_at DESC")
     tenants = [dict(row) for row in cursor.fetchall()]
 
+    if not tenants:
+        try:
+            import supabase_sync
+            supabase_sync.sync_critical_from_supabase()
+            cursor.execute("SELECT * FROM tenants ORDER BY created_at DESC")
+            tenants = [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            print(f"[Supabase Sync on Clients Page] {e}")
+
     today = datetime.now().date()
     today_str = today.strftime("%Y-%m-%d")
     thirty_days_later = (today + timedelta(days=30)).strftime("%Y-%m-%d")
@@ -210,6 +219,15 @@ async def clients_page(request: Request, msg: Optional[str] = None):
 
     cursor.execute("SELECT * FROM tenants ORDER BY created_at DESC")
     tenants = [dict(row) for row in cursor.fetchall()]
+
+    if not tenants:
+        try:
+            import supabase_sync
+            supabase_sync.sync_critical_from_supabase()
+            cursor.execute("SELECT * FROM tenants ORDER BY created_at DESC")
+            tenants = [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            print(f"[Supabase Sync on Clients Page] {e}")
 
     today = datetime.now().date()
     for t in tenants:
@@ -367,6 +385,56 @@ async def create_client_workshop(
     conn.commit()
     conn.close()
 
+    # Real-Time Cloud Sync: Push newly created workshop & admin credentials to Supabase
+    try:
+        import supabase_sync
+        supabase_sync.push_to_supabase("tenants", {
+            "id": tenant_id, "client_code": clean_code, "name": name.strip(),
+            "owner_name": owner_name.strip(), "phone": whatsapp_mobile.strip(),
+            "whatsapp_mobile": whatsapp_mobile.strip(), "email": email.strip() if email else "",
+            "address": address.strip(), "gstin": gstin.strip() if gstin else "",
+            "logo_url": logo_url.strip() if logo_url else "", "upi_id": upi_id.strip(),
+            "upi_payee_name": upi_payee_name.strip() if upi_payee_name else name.strip(),
+            "bank_name": bank_name.strip() if bank_name else "",
+            "bank_account_no": bank_account_no.strip() if bank_account_no else "",
+            "bank_ifsc": bank_ifsc.strip() if bank_ifsc else "", "bank_branch": "Main",
+            "gst_slabs": gst_slabs_json, "language": language, "master_pin": master_pin.strip(),
+            "status": "ACTIVE", "subscription_plan": plan_type, "subscription_start_date": start_date,
+            "subscription_end_date": expiry_date, "price_paid": total_price
+        })
+        supabase_sync.push_to_supabase("subscriptions", {
+            "id": sub_id, "tenant_id": tenant_id, "plan_name": f"PRO_{plan_type}",
+            "start_date": start_date, "end_date": expiry_date, "is_active": 1,
+            "billing_cycle": plan_type, "price_paid": total_price, "notes": "Initial Onboarding License"
+        })
+        supabase_sync.push_to_supabase("workshop_profile", {
+            "id": tenant_id, "tenant_id": tenant_id, "client_code": clean_code, "name": name.strip(),
+            "subtitle": "Automotive Electrical & Electronic Service Center",
+            "owner_name": owner_name.strip(), "phone": whatsapp_mobile.strip(),
+            "email": email.strip() if email else "", "address": address.strip(),
+            "gstin": gstin.strip() if gstin else "", "logo_url": logo_url.strip() if logo_url else "",
+            "upi_id": upi_id.strip(), "upi_payee_name": upi_payee_name.strip() if upi_payee_name else name.strip(),
+            "bank_name": bank_name.strip() if bank_name else "",
+            "bank_account_no": bank_account_no.strip() if bank_account_no else "",
+            "bank_ifsc": bank_ifsc.strip() if bank_ifsc else "", "bank_branch": "Main",
+            "gst_slabs": gst_slabs_json, "language": language, "master_pin": master_pin.strip()
+        })
+        supabase_sync.push_to_supabase("users", {
+            "id": user_id, "username": initial_username.strip(), "password_hash": pw_hash,
+            "full_name": owner_name.strip(), "role": "ADMIN",
+            "email": email.strip() if email else "", "phone": whatsapp_mobile.strip(),
+            "whatsapp_mobile": whatsapp_mobile.strip(), "tenant_id": tenant_id, "status": "ACTIVE"
+        })
+        supabase_sync.push_to_supabase("saas_vendor_invoices", {
+            "id": inv_id, "invoice_no": inv_no, "tenant_id": tenant_id, "tenant_name": name.strip(),
+            "invoice_date": start_date, "plan_type": plan_type, "subscription_start": start_date,
+            "subscription_end": expiry_date, "taxable_amount": base_price, "cgst_rate": 9.0,
+            "cgst_amount": cgst, "sgst_rate": 9.0, "sgst_amount": sgst, "total_amount": total_price,
+            "payment_status": "PAID", "payment_mode": "UPI", "notes": "Initial Workshop Setup License Invoice"
+        })
+    except Exception as e:
+        print(f"[Supabase Onboarding Sync] {e}")
+
     return RedirectResponse(url="/clients?msg=Workshop+successfully+onboarded+and+license+activated!", status_code=303)
 
 @app.post("/api/admin/clients/update")
@@ -433,6 +501,34 @@ async def update_client_workshop(
     db.log_audit("UPDATE_CLIENT_WORKSHOP", "tenants", tenant_id, f"Updated configuration for {name}", cursor=cursor)
     conn.commit()
     conn.close()
+
+    try:
+        import supabase_sync
+        supabase_sync.push_to_supabase("tenants", {
+            "id": tenant_id, "client_code": clean_code, "name": name.strip(),
+            "owner_name": owner_name.strip(), "phone": whatsapp_mobile.strip(),
+            "whatsapp_mobile": whatsapp_mobile.strip(), "email": email.strip() if email else "",
+            "address": address.strip(), "gstin": gstin.strip() if gstin else "",
+            "logo_url": logo_url.strip() if logo_url else "", "upi_id": upi_id.strip(),
+            "upi_payee_name": upi_payee_name.strip() if upi_payee_name else name.strip(),
+            "bank_name": bank_name.strip() if bank_name else "",
+            "bank_account_no": bank_account_no.strip() if bank_account_no else "",
+            "bank_ifsc": bank_ifsc.strip() if bank_ifsc else "",
+            "gst_slabs": gst_slabs_json, "language": language, "master_pin": master_pin.strip()
+        })
+        supabase_sync.push_to_supabase("workshop_profile", {
+            "id": tenant_id, "tenant_id": tenant_id, "client_code": clean_code, "name": name.strip(),
+            "owner_name": owner_name.strip(), "phone": whatsapp_mobile.strip(),
+            "email": email.strip() if email else "", "address": address.strip(),
+            "gstin": gstin.strip() if gstin else "", "logo_url": logo_url.strip() if logo_url else "",
+            "upi_id": upi_id.strip(), "upi_payee_name": upi_payee_name.strip() if upi_payee_name else name.strip(),
+            "bank_name": bank_name.strip() if bank_name else "",
+            "bank_account_no": bank_account_no.strip() if bank_account_no else "",
+            "bank_ifsc": bank_ifsc.strip() if bank_ifsc else "",
+            "gst_slabs": gst_slabs_json, "language": language, "master_pin": master_pin.strip()
+        })
+    except Exception as e:
+        print(f"[Supabase Client Update Sync] {e}")
 
     return RedirectResponse(url="/clients?msg=Workshop+configuration+updated+successfully!", status_code=303)
 
