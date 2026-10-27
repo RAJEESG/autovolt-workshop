@@ -42,6 +42,12 @@
             <button onclick="generateAndDownloadProforma('{{ job.id }}')" class="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl transition shadow flex items-center gap-1.5">
                 <span>📄 Proforma Estimate</span>
             </button>
+
+            <!-- Print Physical Job Sheet for Workshop Bay -->
+            <a href="/job-cards/{{ job.id }}/print" target="_blank" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded-xl transition shadow flex items-center gap-1.5" title="Print Job Card Sheet for Technician / Dashboard">
+                <i data-lucide="printer" class="w-4 h-4"></i>
+                <span>🖨️ Print Job Sheet</span>
+            </a>
             
             {% if linked_invoice %}
             <!-- View / Print existing Tax Invoice PDF -->

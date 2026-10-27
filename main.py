@@ -71,9 +71,27 @@ def to_json_filter(obj):
     except Exception:
         return json.dumps(obj, default=str)
 
+def format_currency_filter(val):
+    try:
+        if val is None or str(val).strip() == "":
+            return "0.00"
+        return f"{float(val):,.2f}"
+    except Exception:
+        return "0.00"
+
+def format_int_comma_filter(val):
+    try:
+        if val is None or str(val).strip() == "":
+            return "0"
+        return f"{int(float(val)):,}"
+    except Exception:
+        return "0"
+
 templates.env.filters["tojson"] = to_json_filter
 templates.env.filters["to_ist"] = format_dt_to_ist
 templates.env.filters["elapsed_ist"] = elapsed_time_ist
+templates.env.filters["currency"] = format_currency_filter
+templates.env.filters["int_comma"] = format_int_comma_filter
 
 # Enable CORS
 app.add_middleware(
@@ -1020,6 +1038,44 @@ async def job_detail_page(request: Request, job_id: str):
     )
 
 
+@app.get("/job-cards/{job_id}/print", response_class=HTMLResponse)
+async def print_job_sheet(request: Request, job_id: str):
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM job_cards WHERE id = ?", (job_id,))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Job Card not found")
+    job = dict(row)
+    
+    complaints_list = []
+    if job.get("complaints"):
+        try:
+            complaints_list = json.loads(job["complaints"])
+        except Exception:
+            complaints_list = [job["complaints"]]
+            
+    cursor.execute("SELECT * FROM job_items WHERE job_card_id = ?", (job_id,))
+    items = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    
+    raw_odo = job.get("odometer")
+    job["odometer_str"] = f"{int(raw_odo):,} km" if (raw_odo and str(raw_odo).strip().isdigit() and int(raw_odo) > 0) else ""
+    workshop = get_current_workshop(request=request, tenant_id=job.get("tenant_id"))
+    
+    return templates.TemplateResponse(
+        request=request,
+        name="print_job_sheet.html",
+        context={
+            "job": job,
+            "complaints": complaints_list,
+            "items": items,
+            "workshop": workshop
+        }
+    )
+
+
 @app.post("/api/job-cards")
 async def create_job_card(
     request: Request,
@@ -1537,7 +1593,7 @@ async def download_proforma_pdf(proforma_id: str):
     proforma["items"] = [dict(row) for row in cursor.fetchall()]
     conn.close()
     
-    workshop = get_current_workshop()
+    workshop = get_current_workshop(tenant_id=proforma.get("tenant_id"))
     pdf_bytes = generate_proforma_pdf_bytes(proforma, workshop)
     
     return Response(
@@ -2255,7 +2311,7 @@ async def download_invoice_pdf(invoice_id: str):
     invoice["items"] = [dict(row) for row in cursor.fetchall()]
     conn.close()
     
-    workshop = get_current_workshop()
+    workshop = get_current_workshop(tenant_id=invoice.get("tenant_id"))
     pdf_bytes = generate_invoice_pdf_bytes(invoice, workshop)
     
     return Response(
@@ -3864,6 +3920,7 @@ async def public_job_view(request: Request, job_id: str):
     )
 
 @app.get("/invoice/{invoice_id}/print", response_class=HTMLResponse)
+@app.get("/invoices/{invoice_id}/print", response_class=HTMLResponse)
 async def print_invoice_page(request: Request, invoice_id: str, format: Optional[str] = "a4"):
     if format == "pdf":
         return RedirectResponse(url=f"/api/invoices/{invoice_id}/pdf", status_code=303)
@@ -3883,8 +3940,25 @@ async def print_invoice_page(request: Request, invoice_id: str, format: Optional
 
     workshop = get_current_workshop(request=request, tenant_id=invoice.get("tenant_id"))
     vpa = workshop.get("upi_id", "sparkautoworkshop@okaxis")
-    grand_total = float(invoice.get("grand_total", 0.0))
-    balance_due = float(invoice.get("balance_due", 0.0))
+    
+    # Safe float & string conversions to prevent Jinja2 format crashes
+    invoice["subtotal_labor"] = float(invoice.get("subtotal_labor") or 0.0)
+    invoice["subtotal_parts"] = float(invoice.get("subtotal_parts") or 0.0)
+    invoice["tax_total"] = float(invoice.get("tax_total") or 0.0)
+    invoice["discount_amount"] = float(invoice.get("discount_amount") or 0.0)
+    invoice["grand_total"] = float(invoice.get("grand_total") or 0.0)
+    invoice["amount_paid"] = float(invoice.get("amount_paid") or 0.0)
+    invoice["balance_due"] = float(invoice.get("balance_due") or 0.0)
+    raw_odo = invoice.get("odometer")
+    invoice["odometer_str"] = f"{int(raw_odo):,} km" if (raw_odo and str(raw_odo).strip().isdigit() and int(raw_odo) > 0) else ""
+
+    for itm in items:
+        itm["unit_price"] = float(itm.get("unit_price") or 0.0)
+        itm["total_price"] = float(itm.get("total_price") or 0.0)
+        itm["tax_rate"] = float(itm.get("tax_rate") or 0.0)
+
+    grand_total = invoice["grand_total"]
+    balance_due = invoice["balance_due"]
     pay_amount = balance_due if balance_due > 0 else grand_total
     upi_link = invoice.get("upi_payment_link") or generate_upi_link(vpa, workshop.get("name", "Auto Workshop"), pay_amount, f"Inv_{invoice.get('invoice_number')}")
     upi_qr_url = generate_upi_qr_data_url(upi_link)

@@ -37,6 +37,16 @@ if os.path.exists(STATIC_DIR):
 
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
+def format_currency_filter(val):
+    try:
+        if val is None or str(val).strip() == "":
+            return "0.00"
+        return f"{float(val):,.2f}"
+    except Exception:
+        return "0.00"
+
+templates.env.filters["currency"] = format_currency_filter
+
 # =========================================================
 # 🔐 AUTHENTICATION MIDDLEWARE FOR SAAS MASTER VENDOR PORTAL
 # =========================================================

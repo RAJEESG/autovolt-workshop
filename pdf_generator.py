@@ -11,6 +11,22 @@ from reportlab.lib.units import inch, mm
 
 from upi_helper import generate_upi_link, generate_upi_qr_data_url
 
+def safe_float(val, default=0.0):
+    try:
+        if val is None or str(val).strip() == "":
+            return float(default)
+        return float(val)
+    except Exception:
+        return float(default)
+
+def safe_int(val, default=0):
+    try:
+        if val is None or str(val).strip() == "":
+            return int(default)
+        return int(float(val))
+    except Exception:
+        return int(default)
+
 def generate_invoice_pdf_bytes(invoice: Dict[str, Any], workshop: Dict[str, Any]) -> bytes:
     """
     Generate crisp, professional A4 PDF Tax Invoice with high-contrast visible headers,
@@ -121,6 +137,9 @@ def generate_invoice_pdf_bytes(invoice: Dict[str, Any], workshop: Dict[str, Any]
     story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor('#0284c7'), spaceAfter=6))
 
     # --- 2. CUSTOMER & VEHICLE INFO BOX ---
+    raw_odo = safe_int(invoice.get('odometer'))
+    odo_str = f"{raw_odo:,} km" if raw_odo > 0 else "N/A"
+
     info_data = [
         [
             Paragraph("<b>BILLED TO (CUSTOMER)</b>", section_heading),
@@ -128,7 +147,7 @@ def generate_invoice_pdf_bytes(invoice: Dict[str, Any], workshop: Dict[str, Any]
         ],
         [
             Paragraph(f"<b>Name:</b> {invoice.get('customer_name', 'Walk-in Customer')}<br/><b>Phone:</b> {invoice.get('customer_phone', 'N/A')}<br/><b>Address:</b> {invoice.get('customer_address') or 'N/A'}<br/><b>GSTIN:</b> {invoice.get('customer_gstin') or 'Unregistered / B2C'}", normal_cell),
-            Paragraph(f"<b>Reg Number:</b> <font color='#0284c7'><b>{invoice.get('vehicle_reg_no') or 'Counter Sale'}</b></font><br/><b>Make & Model:</b> {invoice.get('vehicle_make_model') or 'General'}<br/><b>Odometer:</b> {invoice.get('odometer', 0):,} km", normal_cell)
+            Paragraph(f"<b>Reg Number:</b> <font color='#0284c7'><b>{invoice.get('vehicle_reg_no') or 'Counter Sale'}</b></font><br/><b>Make & Model:</b> {invoice.get('vehicle_make_model') or 'General'}<br/><b>Odometer:</b> {odo_str}", normal_cell)
         ]
     ]
     info_table = Table(info_data, colWidths=[91 * mm, 91 * mm])
@@ -167,9 +186,9 @@ def generate_invoice_pdf_bytes(invoice: Dict[str, Any], workshop: Dict[str, Any]
             if part_no:
                 name_html += f"<br/><font size=6.5 color='#64748b'>Part No: {part_no}</font>"
 
-            unit_price = float(itm.get('unit_price', 0))
-            qty = float(itm.get('quantity', 1))
-            tax_rate = float(itm.get('tax_rate', 0))
+            unit_price = safe_float(itm.get('unit_price'), 0.0)
+            qty = safe_float(itm.get('quantity'), 1.0)
+            tax_rate = safe_float(itm.get('tax_rate'), 0.0)
             base_amount = unit_price * qty
             total_tax_amount = base_amount * (tax_rate / 100.0)
 
@@ -209,9 +228,9 @@ def generate_invoice_pdf_bytes(invoice: Dict[str, Any], workshop: Dict[str, Any]
             if part_no:
                 name_html += f"<br/><font size=6.5 color='#64748b'>Part No: {part_no}</font>"
 
-            unit_price = float(itm.get('unit_price', 0))
-            qty = float(itm.get('quantity', 1))
-            tax_rate = float(itm.get('tax_rate', 0))
+            unit_price = safe_float(itm.get('unit_price'), 0.0)
+            qty = safe_float(itm.get('quantity'), 1.0)
+            tax_rate = safe_float(itm.get('tax_rate'), 0.0)
             base_amount = unit_price * qty
             total_tax_amount = base_amount * (tax_rate / 100.0)
             line_total = base_amount + total_tax_amount
@@ -243,22 +262,27 @@ def generate_invoice_pdf_bytes(invoice: Dict[str, Any], workshop: Dict[str, Any]
 
     # --- 4. CALCULATION & BANK / UPI QR SECTION ---
     vpa = workshop.get("upi_id", "sparkautoworkshop@okaxis")
-    grand_total = float(invoice.get("grand_total", 0.0))
-    round_off = float(invoice.get("round_off", 0.0))
-    balance_due = float(invoice.get("balance_due", 0.0))
+    grand_total = safe_float(invoice.get("grand_total"))
+    round_off = safe_float(invoice.get("round_off"))
+    balance_due = safe_float(invoice.get("balance_due"))
     pay_amount = balance_due if balance_due > 0 else grand_total
     
     upi_link = invoice.get("upi_payment_link") or generate_upi_link(vpa, workshop.get("name", "Auto Workshop"), pay_amount, f"Inv_{invoice.get('invoice_number')}")
     
+    sub_labor = safe_float(invoice.get("subtotal_labor"))
+    sub_parts = safe_float(invoice.get("subtotal_parts"))
+    disc_amt = safe_float(invoice.get("discount_amount"))
+    amt_paid = safe_float(invoice.get("amount_paid"))
+
     summary_data = [
-        [Paragraph("Labor Subtotal:", normal_cell), Paragraph(f"Rs. {invoice.get('subtotal_labor', 0):,.2f}", right_cell)],
-        [Paragraph("Parts Subtotal:", normal_cell), Paragraph(f"Rs. {invoice.get('subtotal_parts', 0):,.2f}", right_cell)],
+        [Paragraph("Labor Subtotal:", normal_cell), Paragraph(f"Rs. {sub_labor:,.2f}", right_cell)],
+        [Paragraph("Parts Subtotal:", normal_cell), Paragraph(f"Rs. {sub_parts:,.2f}", right_cell)],
     ]
     
-    cgst = float(invoice.get("cgst_total") or 0.0)
-    sgst = float(invoice.get("sgst_total") or 0.0)
-    igst = float(invoice.get("igst_total") or 0.0)
-    tax_total = float(invoice.get("tax_total") or (cgst + sgst + igst))
+    cgst = safe_float(invoice.get("cgst_total"))
+    sgst = safe_float(invoice.get("sgst_total"))
+    igst = safe_float(invoice.get("igst_total"))
+    tax_total = safe_float(invoice.get("tax_total"), (cgst + sgst + igst))
     
     if is_interstate or igst > 0:
         summary_data.append([Paragraph("IGST Total (Inter-State):", normal_cell), Paragraph(f"Rs. {igst or tax_total:,.2f}", right_cell)])
@@ -271,15 +295,15 @@ def generate_invoice_pdf_bytes(invoice: Dict[str, Any], workshop: Dict[str, Any]
             summary_data.append([Paragraph("CGST Total (Central):", normal_cell), Paragraph(f"Rs. {half:,.2f}", right_cell)])
             summary_data.append([Paragraph("SGST Total (State):", normal_cell), Paragraph(f"Rs. {tax_total - half:,.2f}", right_cell)])
             
-    if invoice.get("discount_amount", 0) > 0:
-        summary_data.append([Paragraph("Discount:", normal_cell), Paragraph(f"- Rs. {invoice.get('discount_amount', 0):,.2f}", right_cell)])
+    if disc_amt > 0:
+        summary_data.append([Paragraph("Discount:", normal_cell), Paragraph(f"- Rs. {disc_amt:,.2f}", right_cell)])
         
     if round_off != 0.0:
         sign = "+" if round_off > 0 else ""
         summary_data.append([Paragraph("Round Off:", normal_cell), Paragraph(f"{sign}Rs. {round_off:,.2f}", right_cell)])
         
     summary_data.append([Paragraph("<b>Grand Total:</b>", bold_cell), Paragraph(f"<b>Rs. {grand_total:,.2f}</b>", right_bold)])
-    summary_data.append([Paragraph("Amount Paid:", normal_cell), Paragraph(f"Rs. {invoice.get('amount_paid', 0):,.2f}", right_cell)])
+    summary_data.append([Paragraph("Amount Paid:", normal_cell), Paragraph(f"Rs. {amt_paid:,.2f}", right_cell)])
     
     if invoice.get("payment_status") == "CANCELLED" or invoice.get("status") == "CANCELLED":
         summary_data.append([
@@ -412,6 +436,9 @@ def generate_proforma_pdf_bytes(proforma: Dict[str, Any], workshop: Dict[str, An
     story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor('#d97706'), spaceAfter=6))
 
     # --- 2. CUSTOMER & VEHICLE INFO BOX ---
+    raw_odo = safe_int(proforma.get('odometer'))
+    odo_str = f"{raw_odo:,} km" if raw_odo > 0 else "N/A"
+
     info_data = [
         [
             Paragraph("<b>ESTIMATE FOR (CUSTOMER)</b>", section_heading),
@@ -419,7 +446,7 @@ def generate_proforma_pdf_bytes(proforma: Dict[str, Any], workshop: Dict[str, An
         ],
         [
             Paragraph(f"<b>Name:</b> {proforma.get('customer_name', 'Walk-in Customer')}<br/><b>Phone:</b> {proforma.get('customer_phone', 'N/A')}<br/><b>Address:</b> {proforma.get('customer_address') or 'N/A'}<br/><b>GSTIN:</b> {proforma.get('customer_gstin') or 'Unregistered / B2C'}", normal_cell),
-            Paragraph(f"<b>Reg Number:</b> <font color='#0369a1'><b>{proforma.get('vehicle_reg_no') or 'Counter Sale'}</b></font><br/><b>Make & Model:</b> {proforma.get('vehicle_make_model') or 'General'}<br/><b>Odometer:</b> {proforma.get('odometer', 0):,} km", normal_cell)
+            Paragraph(f"<b>Reg Number:</b> <font color='#0369a1'><b>{proforma.get('vehicle_reg_no') or 'Counter Sale'}</b></font><br/><b>Make & Model:</b> {proforma.get('vehicle_make_model') or 'General'}<br/><b>Odometer:</b> {odo_str}", normal_cell)
         ]
     ]
     info_table = Table(info_data, colWidths=[91 * mm, 91 * mm])
@@ -453,9 +480,9 @@ def generate_proforma_pdf_bytes(proforma: Dict[str, Any], workshop: Dict[str, An
         if part_no:
             name_html += f"<br/><font size=6.5 color='#64748b'>Part No: {part_no}</font>"
 
-        unit_price = float(itm.get('unit_price', 0))
-        qty = float(itm.get('quantity', 1))
-        tax_rate = float(itm.get('tax_rate', 0))
+        unit_price = safe_float(itm.get('unit_price'), 0.0)
+        qty = safe_float(itm.get('quantity'), 1.0)
+        tax_rate = safe_float(itm.get('tax_rate'), 0.0)
         base_amount = unit_price * qty
         total_tax_amount = base_amount * (tax_rate / 100.0)
         line_total = base_amount + total_tax_amount
@@ -487,18 +514,23 @@ def generate_proforma_pdf_bytes(proforma: Dict[str, Any], workshop: Dict[str, An
 
     # --- 4. CALCULATION & PAYMENT QR SECTION ---
     vpa = workshop.get("upi_id", "sparkautoworkshop@okaxis")
-    grand_total = float(proforma.get("grand_total", 0.0))
-    round_off = float(proforma.get("round_off", 0.0))
+    grand_total = safe_float(proforma.get("grand_total"))
+    round_off = safe_float(proforma.get("round_off"))
     
     upi_link = proforma.get("upi_payment_link") or generate_upi_link(vpa, workshop.get("name", "Auto Workshop"), grand_total, f"Est_{doc_no}")
     
+    sub_labor = safe_float(proforma.get("subtotal_labor"))
+    sub_parts = safe_float(proforma.get("subtotal_parts"))
+    tax_tot = safe_float(proforma.get("tax_total"))
+    disc_amt = safe_float(proforma.get("discount_amount"))
+
     summary_data = [
-        [Paragraph("Labor Subtotal:", normal_cell), Paragraph(f"Rs. {proforma.get('subtotal_labor', 0):,.2f}", right_cell)],
-        [Paragraph("Parts Subtotal:", normal_cell), Paragraph(f"Rs. {proforma.get('subtotal_parts', 0):,.2f}", right_cell)],
-        [Paragraph("GST Total:", normal_cell), Paragraph(f"Rs. {proforma.get('tax_total', 0):,.2f}", right_cell)],
+        [Paragraph("Labor Subtotal:", normal_cell), Paragraph(f"Rs. {sub_labor:,.2f}", right_cell)],
+        [Paragraph("Parts Subtotal:", normal_cell), Paragraph(f"Rs. {sub_parts:,.2f}", right_cell)],
+        [Paragraph("GST Total:", normal_cell), Paragraph(f"Rs. {tax_tot:,.2f}", right_cell)],
     ]
-    if proforma.get("discount_amount", 0) > 0:
-        summary_data.append([Paragraph("Discount:", normal_cell), Paragraph(f"- Rs. {proforma.get('discount_amount', 0):,.2f}", right_cell)])
+    if disc_amt > 0:
+        summary_data.append([Paragraph("Discount:", normal_cell), Paragraph(f"- Rs. {disc_amt:,.2f}", right_cell)])
     if round_off != 0.0:
         sign = "+" if round_off > 0 else ""
         summary_data.append([Paragraph("Round Off:", normal_cell), Paragraph(f"{sign}Rs. {round_off:,.2f}", right_cell)])

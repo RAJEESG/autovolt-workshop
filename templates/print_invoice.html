@@ -55,24 +55,24 @@
                 <tr>
                     <td class="py-1">{{ itm.name }}</td>
                     <td class="py-1 text-center">{{ itm.quantity }}</td>
-                    <td class="py-1 text-right">₹{{ "{:,.2f}".format(itm.total_price) }}</td>
+                    <td class="py-1 text-right">₹{{ itm.total_price | currency }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
 
         <div class="py-2 border-t border-dashed border-slate-400 text-[10px] space-y-1">
-            <div class="flex justify-between"><span>Labor:</span><span>₹{{ "{:,.2f}".format(invoice.subtotal_labor) }}</span></div>
-            <div class="flex justify-between"><span>Parts:</span><span>₹{{ "{:,.2f}".format(invoice.subtotal_parts) }}</span></div>
-            {% if invoice.discount_amount > 0 %}
-            <div class="flex justify-between"><span>Discount:</span><span>- ₹{{ "{:,.2f}".format(invoice.discount_amount) }}</span></div>
+            <div class="flex justify-between"><span>Labor:</span><span>₹{{ invoice.subtotal_labor | currency }}</span></div>
+            <div class="flex justify-between"><span>Parts:</span><span>₹{{ invoice.subtotal_parts | currency }}</span></div>
+            {% if invoice.discount_amount and (invoice.discount_amount | float > 0) %}
+            <div class="flex justify-between"><span>Discount:</span><span>- ₹{{ invoice.discount_amount | currency }}</span></div>
             {% endif %}
             <div class="flex justify-between font-black text-xs pt-1 border-t border-slate-400">
-                <span>TOTAL:</span><span>₹{{ "{:,.2f}".format(invoice.grand_total) }}</span>
+                <span>TOTAL:</span><span>₹{{ invoice.grand_total | currency }}</span>
             </div>
-            <div class="flex justify-between"><span>Paid:</span><span>₹{{ "{:,.2f}".format(invoice.amount_paid) }}</span></div>
-            {% if invoice.balance_due > 0 %}
-            <div class="flex justify-between font-bold text-rose-600"><span>Due:</span><span>₹{{ "{:,.2f}".format(invoice.balance_due) }}</span></div>
+            <div class="flex justify-between"><span>Paid:</span><span>₹{{ invoice.amount_paid | currency }}</span></div>
+            {% if invoice.balance_due and (invoice.balance_due | float > 0) %}
+            <div class="flex justify-between font-bold text-rose-600"><span>Due:</span><span>₹{{ invoice.balance_due | currency }}</span></div>
             {% endif %}
         </div>
 
@@ -123,7 +123,7 @@
                 <span class="font-bold text-slate-400 uppercase tracking-wider text-[10px] block mb-1">Vehicle Info:</span>
                 <p class="font-mono font-bold text-primary-700 text-base">{{ invoice.vehicle_reg_no or 'Counter Sale' }}</p>
                 <p class="text-slate-700 font-semibold">{{ invoice.vehicle_make_model or '' }}</p>
-                {% if invoice.odometer %}<p class="text-slate-500">Odometer: {{ "{:,}".format(invoice.odometer) }} km</p>{% endif %}
+                {% if invoice.odometer_str %}<p class="text-slate-500">Odometer: {{ invoice.odometer_str }}</p>{% endif %}
             </div>
         </div>
 
@@ -150,9 +150,9 @@
                         <td class="py-2 px-3 font-semibold text-slate-900">{{ itm.name }}</td>
                         <td class="py-2 px-3 font-mono text-slate-500">{{ itm.hsn_sac }}</td>
                         <td class="py-2 px-3 text-center font-bold">{{ itm.quantity }}</td>
-                        <td class="py-2 px-3 text-right">₹{{ "{:,.2f}".format(itm.unit_price) }}</td>
+                        <td class="py-2 px-3 text-right">₹{{ itm.unit_price | currency }}</td>
                         <td class="py-2 px-3 text-right text-slate-500">{{ itm.tax_rate }}%</td>
-                        <td class="py-2 px-3 text-right font-bold text-slate-900">₹{{ "{:,.2f}".format(itm.total_price) }}</td>
+                        <td class="py-2 px-3 text-right font-bold text-slate-900">₹{{ itm.total_price | currency }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -172,20 +172,20 @@
 
             <!-- Calculation Box -->
             <div class="space-y-1.5 text-xs text-right">
-                <div class="flex justify-between"><span>Labor Subtotal:</span><span>₹{{ "{:,.2f}".format(invoice.subtotal_labor) }}</span></div>
-                <div class="flex justify-between"><span>Parts Subtotal:</span><span>₹{{ "{:,.2f}".format(invoice.subtotal_parts) }}</span></div>
-                {% if invoice.tax_total > 0 %}
-                <div class="flex justify-between text-slate-500"><span>GST Tax:</span><span>₹{{ "{:,.2f}".format(invoice.tax_total) }}</span></div>
+                <div class="flex justify-between"><span>Labor Subtotal:</span><span>₹{{ invoice.subtotal_labor | currency }}</span></div>
+                <div class="flex justify-between"><span>Parts Subtotal:</span><span>₹{{ invoice.subtotal_parts | currency }}</span></div>
+                {% if invoice.tax_total and (invoice.tax_total | float > 0) %}
+                <div class="flex justify-between text-slate-500"><span>GST Tax:</span><span>₹{{ invoice.tax_total | currency }}</span></div>
                 {% endif %}
-                {% if invoice.discount_amount > 0 %}
-                <div class="flex justify-between text-emerald-600 font-semibold"><span>Discount:</span><span>- ₹{{ "{:,.2f}".format(invoice.discount_amount) }}</span></div>
+                {% if invoice.discount_amount and (invoice.discount_amount | float > 0) %}
+                <div class="flex justify-between text-emerald-600 font-semibold"><span>Discount:</span><span>- ₹{{ invoice.discount_amount | currency }}</span></div>
                 {% endif %}
                 <div class="flex justify-between font-black text-base pt-2 border-t border-slate-300 text-slate-900">
-                    <span>Grand Total:</span><span class="text-primary-700">₹{{ "{:,.2f}".format(invoice.grand_total) }}</span>
+                    <span>Grand Total:</span><span class="text-primary-700">₹{{ invoice.grand_total | currency }}</span>
                 </div>
-                <div class="flex justify-between text-slate-600"><span>Amount Paid:</span><span>₹{{ "{:,.2f}".format(invoice.amount_paid) }}</span></div>
-                {% if invoice.balance_due > 0 %}
-                <div class="flex justify-between font-black text-rose-600 text-sm"><span>Balance Due:</span><span>₹{{ "{:,.2f}".format(invoice.balance_due) }}</span></div>
+                <div class="flex justify-between text-slate-600"><span>Amount Paid:</span><span>₹{{ invoice.amount_paid | currency }}</span></div>
+                {% if invoice.balance_due and (invoice.balance_due | float > 0) %}
+                <div class="flex justify-between font-black text-rose-600 text-sm"><span>Balance Due:</span><span>₹{{ invoice.balance_due | currency }}</span></div>
                 {% endif %}
             </div>
         </div>

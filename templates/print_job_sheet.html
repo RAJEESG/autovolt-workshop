@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Job Sheet #{{ job.job_number }} - {{ job.vehicle_reg_no }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @media print {
+            .no-print { display: none !important; }
+            body { background: white !important; padding: 0 !important; }
+            .print-card { box-shadow: none !important; border: 1px solid #cbd5e1 !important; border-radius: 0 !important; }
+        }
+    </style>
+</head>
+<body class="bg-slate-100 min-h-screen py-6 px-4 flex flex-col items-center font-sans text-slate-800">
+
+    <!-- Top Action Bar -->
+    <div class="no-print mb-6 flex items-center gap-3">
+        <button onclick="window.print()" class="px-5 py-2.5 bg-slate-900 text-white font-bold text-xs rounded-xl shadow-lg hover:bg-slate-800 transition flex items-center gap-1.5">
+            🖨️ Print Job Sheet
+        </button>
+        <button onclick="window.close()" class="px-4 py-2 bg-slate-200 text-slate-700 font-bold text-xs rounded-xl hover:bg-slate-300 transition">
+            Close
+        </button>
+    </div>
+
+    <!-- Printable Job Sheet Card -->
+    <div class="print-card bg-white p-8 rounded-2xl shadow-xl border border-slate-200 max-w-3xl w-full space-y-6 text-xs">
+        
+        <!-- Header -->
+        <div class="flex items-start justify-between border-b-2 border-amber-500 pb-4">
+            <div>
+                <h1 class="text-xl font-black text-slate-900 tracking-tight">{{ workshop.name }}</h1>
+                <p class="text-[11px] text-slate-600 font-medium">{{ workshop.subtitle }}</p>
+                <p class="text-[10px] text-slate-500 mt-0.5">{{ workshop.address }}</p>
+                <p class="text-[10px] text-slate-500">Phone: <b>{{ workshop.phone }}</b> {% if workshop.gstin %}| GSTIN: <b>{{ workshop.gstin }}</b>{% endif %}</p>
+            </div>
+            <div class="text-right">
+                <span class="inline-block px-2.5 py-1 bg-amber-100 text-amber-900 font-black rounded-lg text-xs tracking-wider">WORKSHOP JOB SHEET</span>
+                <p class="text-sm font-black text-slate-900 font-mono mt-1">#{{ job.job_number }}</p>
+                <p class="text-[10px] text-slate-500">Inward Date: <b>{{ job.created_at[:16] if job.created_at else '' }}</b></p>
+                <p class="text-[10px] text-slate-500">Status: <b class="uppercase">{{ job.status }}</b></p>
+            </div>
+        </div>
+
+        <!-- Vehicle & Customer Grid -->
+        <div class="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
+            <div>
+                <span class="font-bold text-slate-400 uppercase tracking-wider text-[9px] block mb-1">Vehicle Details:</span>
+                <p class="font-mono font-black text-lg text-primary-700">{{ job.vehicle_reg_no }}</p>
+                <p class="font-semibold text-slate-800 text-xs mt-0.5">{{ job.vehicle_make_model }}</p>
+                <p class="text-slate-500 mt-1">Odometer: <b>{{ job.odometer_str or 'N/A' }}</b></p>
+            </div>
+            <div>
+                <span class="font-bold text-slate-400 uppercase tracking-wider text-[9px] block mb-1">Customer Info:</span>
+                <p class="font-bold text-slate-900 text-sm">{{ job.customer_name }}</p>
+                <p class="text-slate-600 font-mono mt-0.5">Ph: <b>{{ job.customer_phone }}</b></p>
+                <p class="text-slate-500 mt-1">Assigned Tech: <b class="text-slate-800">🔧 {{ job.assigned_technician_name or 'Lead Electrician' }}</b></p>
+            </div>
+        </div>
+
+        <!-- Complaints & Customer Issues -->
+        <div class="space-y-2">
+            <h3 class="font-bold text-slate-900 uppercase tracking-wider text-[10px] border-b pb-1">Reported Complaints & Symptoms:</h3>
+            {% if complaints %}
+            <div class="flex flex-wrap gap-2">
+                {% for c in complaints %}
+                <span class="px-2.5 py-1 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 font-bold text-[11px]">
+                    ⚠️ {{ c }}
+                </span>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-slate-500 italic text-[11px]">General electrical checkup / diagnostics.</p>
+            {% endif %}
+
+            {% if job.custom_complaint_notes %}
+            <div class="p-2.5 bg-amber-50/60 rounded-lg border border-amber-200 text-[11px] text-slate-800 mt-2">
+                <b>Customer Notes:</b> {{ job.custom_complaint_notes }}
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Diagnosis & Technician Work Notes -->
+        <div class="space-y-2">
+            <h3 class="font-bold text-slate-900 uppercase tracking-wider text-[10px] border-b pb-1">Electrician Diagnosis & Technical Observations:</h3>
+            <div class="p-3 bg-slate-50 rounded-xl border border-dashed border-slate-300 min-h-[50px] text-[11px] text-slate-700">
+                {{ job.diagnosis_notes or 'Visual inspection pending / in progress by technician.' }}
+            </div>
+        </div>
+
+        <!-- Parts & Labor Logged -->
+        {% if items %}
+        <div class="space-y-2">
+            <h3 class="font-bold text-slate-900 uppercase tracking-wider text-[10px] border-b pb-1">Spares Fitted & Labor Charged:</h3>
+            <table class="w-full text-left border border-slate-200 rounded-lg overflow-hidden text-[11px]">
+                <thead class="bg-slate-100 font-bold text-slate-700">
+                    <tr>
+                        <th class="py-1.5 px-2">#</th>
+                        <th class="py-1.5 px-2">Type</th>
+                        <th class="py-1.5 px-2">Description</th>
+                        <th class="py-1.5 px-2 text-center">Qty</th>
+                        <th class="py-1.5 px-2 text-right">Rate</th>
+                        <th class="py-1.5 px-2 text-right">Total</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    {% for itm in items %}
+                    <tr>
+                        <td class="py-1.5 px-2 text-slate-400">{{ loop.index }}</td>
+                        <td class="py-1.5 px-2"><span class="px-1.5 py-0.5 rounded text-[9px] font-bold {% if itm.item_type == 'LABOR' %}bg-amber-100 text-amber-800{% else %}bg-blue-100 text-blue-800{% endif %}">{{ itm.item_type }}</span></td>
+                        <td class="py-1.5 px-2 font-medium">{{ itm.name }}</td>
+                        <td class="py-1.5 px-2 text-center font-bold">{{ itm.quantity }}</td>
+                        <td class="py-1.5 px-2 text-right">₹{{ itm.unit_price | currency }}</td>
+                        <td class="py-1.5 px-2 text-right font-bold">₹{{ itm.total_price | currency }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            <div class="flex justify-end gap-6 font-bold text-xs pt-1">
+                <span>Labor: ₹{{ (job.total_labor or 0) | currency }}</span>
+                <span>Parts: ₹{{ (job.total_parts or 0) | currency }}</span>
+                <span class="text-primary-700">Est. Total: ₹{{ (job.grand_total or 0) | currency }}</span>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Signatures Box -->
+        <div class="pt-8 border-t border-slate-300 grid grid-cols-2 gap-8 text-[11px] text-slate-600">
+            <div>
+                <div class="border-b border-dashed border-slate-400 pb-8"></div>
+                <p class="font-bold text-slate-800 mt-1">Customer Authorization Signature</p>
+                <p class="text-[9px] text-slate-400">I authorize the inspection & necessary electrical repairs.</p>
+            </div>
+            <div class="text-right">
+                <div class="border-b border-dashed border-slate-400 pb-8"></div>
+                <p class="font-bold text-slate-800 mt-1">Technician / Supervisor Signature</p>
+                <p class="text-[9px] text-slate-400">Vehicle checked and delivered in good working condition.</p>
+            </div>
+        </div>
+
+    </div>
+
+</body>
+</html>
