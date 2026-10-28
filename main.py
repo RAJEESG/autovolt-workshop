@@ -229,10 +229,16 @@ async def auth_and_subscription_middleware(request: Request, call_next):
     # Exempt routes that should always remain accessible without login
     exempt_prefixes = [
         "/static", "/login", "/logout", "/forgot-password", "/verify-otp", "/reset-password",
-        "/subscription-expired", "/view", "/invoice", "/api/device"
+        "/subscription-expired", "/view", "/invoice", "/api/device", "/health", "/ping"
     ]
     
     is_exempt = any(path.startswith(prefix) for prefix in exempt_prefixes)
+
+    # Gracefully handle Uptime monitors (UptimeRobot, Render Health checks, HEAD requests)
+    if request.method == "HEAD":
+        if path in ["/", "/health", "/ping", "/login"] or is_exempt:
+            return Response(status_code=200)
+    
     raw_cookie = request.cookies.get("session_user")
     session_user = verify_signed_session_cookie(raw_cookie)
     last_active_str = request.cookies.get("session_last_active")
@@ -338,10 +344,25 @@ def get_base_url(request: Optional[Request] = None) -> str:
 APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:8000")
 
 # =========================================================
+# 🩺 HEALTH & UPTIME MONITORING ENDPOINTS
+# =========================================================
+@app.api_route("/health", methods=["GET", "HEAD"])
+@app.api_route("/ping", methods=["GET", "HEAD"])
+async def workshop_health_check():
+    return JSONResponse(
+        status_code=200,
+        content={
+            "status": "ok",
+            "app": "AutoVolt Workshop Manager",
+            "timestamp": datetime.now().isoformat()
+        }
+    )
+
+# =========================================================
 # 🔐 AUTHENTICATION & WHATSAPP OTP PASSWORD RESET
 # =========================================================
 
-@app.get("/login", response_class=HTMLResponse)
+@app.api_route("/login", methods=["GET", "HEAD"], response_class=HTMLResponse)
 async def login_page(request: Request, error: Optional[str] = None, success_msg: Optional[str] = None):
     return templates.TemplateResponse(
         request=request,
@@ -835,7 +856,7 @@ async def update_master_pin(request: Request, master_pin: str = Form(...)):
 # 📊 MAIN DASHBOARD & JOB CARDS
 # =========================================================
 
-@app.get("/", response_class=HTMLResponse)
+@app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse)
 async def dashboard_page(request: Request):
     conn = db.get_db_connection()
     cursor = conn.cursor()
@@ -1154,6 +1175,21 @@ async def create_job_card(
     db.log_audit("CREATE_JOB_CARD", "job_cards", job_id, f"Job {job_number} for {vehicle_reg_no}", cursor=cursor)
     conn.commit()
     conn.close()
+
+    try:
+        import supabase_sync
+        supabase_sync.push_to_supabase("job_cards", {
+            "id": job_id, "tenant_id": tenant_id, "job_number": job_number,
+            "customer_id": customer_id, "customer_name": customer_name, "customer_phone": customer_phone,
+            "vehicle_id": vehicle_id, "vehicle_reg_no": vehicle_reg_no.strip().upper(),
+            "vehicle_make_model": vehicle_make_model, "odometer": odometer,
+            "assigned_technician_name": tech_name, "status": "RECEIVED",
+            "complaints": complaints_json, "custom_complaint_notes": custom_complaint_notes,
+            "created_at": now_ist
+        })
+    except Exception as e:
+        print(f"[Supabase Job Push Error] {e}")
+
     return RedirectResponse(url=f"/job-cards/{job_id}", status_code=303)
 
 @app.post("/api/job-cards/{job_id}/status")
@@ -2105,6 +2141,39 @@ async def save_or_update_pos_invoice(request: Request, payload: Dict[str, Any], 
 
         conn.commit()
         conn.close()
+
+        try:
+            import supabase_sync
+            supabase_sync.push_to_supabase("invoices", {
+                "id": inv_id,
+                "tenant_id": tenant_id,
+                "invoice_number": inv_number,
+                "invoice_date": today_str,
+                "invoice_type": payload.get("invoice_type", "JOB_SERVICE" if job_card_id else "COUNTER_SALE"),
+                "job_card_id": job_card_id,
+                "job_number": job_number,
+                "customer_name": cust_name,
+                "customer_phone": cust_phone,
+                "vehicle_reg_no": veh_reg,
+                "subtotal_labor": subtotal_labor,
+                "subtotal_parts": subtotal_parts,
+                "taxable_subtotal": taxable_subtotal,
+                "cgst_total": cgst_total,
+                "sgst_total": sgst_total,
+                "igst_total": igst_total,
+                "tax_total": total_tax,
+                "discount_amount": discount,
+                "round_off": round_off,
+                "grand_total": grand_total,
+                "amount_paid": amount_paid,
+                "balance_due": balance_due,
+                "payment_status": payment_status,
+                "payment_mode": payload.get("payment_mode", "UPI"),
+                "created_at": now_ist
+            })
+        except Exception as e:
+            print(f"[Supabase Invoice Push Error] {e}")
+
         return {"success": True, "invoice_id": inv_id, "invoice_number": inv_number, "is_updated": bool(editing_id)}
     except HTTPException:
         conn.rollback()

@@ -84,7 +84,7 @@ def sync_from_supabase_table(table_name: str, pkey: str = "id") -> int:
         return 0
 
 def sync_critical_from_supabase() -> Dict[str, int]:
-    """Pull tenants, users, workshop profiles, subscriptions, bank accounts from Supabase into SQLite"""
+    """Pull tenants, users, workshop profiles, subscriptions, invoices, and job cards from Supabase into SQLite"""
     tables = [
         ("tenants", "id"),
         ("workshop_profile", "id"),
@@ -92,11 +92,24 @@ def sync_critical_from_supabase() -> Dict[str, int]:
         ("subscriptions", "id"),
         ("saas_vendor_invoices", "id"),
         ("bank_accounts", "id"),
-        ("suppliers", "id")
+        ("suppliers", "id"),
+        ("technicians", "id"),
+        ("customers", "id"),
+        ("vehicles", "id"),
+        ("inventory_items", "id"),
+        ("job_cards", "id"),
+        ("job_items", "id"),
+        ("invoices", "id"),
+        ("invoice_items", "id"),
+        ("payments", "id"),
+        ("device_activations", "id")
     ]
     synced = {}
     for tbl, pkey in tables:
-        synced[tbl] = sync_from_supabase_table(tbl, pkey)
+        try:
+            synced[tbl] = sync_from_supabase_table(tbl, pkey)
+        except Exception as e:
+            print(f"[Supabase Sync Table {tbl}] {e}")
     return synced
 
 def fetch_and_cache_tenant_from_supabase(client_code_or_id: str) -> Optional[Dict[str, Any]]:

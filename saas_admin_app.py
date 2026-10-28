@@ -53,8 +53,13 @@ templates.env.filters["currency"] = format_currency_filter
 @app.middleware("http")
 async def vendor_auth_middleware(request: Request, call_next):
     path = request.url.path
-    exempt_prefixes = ["/static", "/login", "/logout"]
+    exempt_prefixes = ["/static", "/login", "/logout", "/health", "/ping"]
     is_exempt = any(path.startswith(p) for p in exempt_prefixes)
+    
+    # Gracefully handle Uptime monitors (UptimeRobot, Render Health checks, HEAD requests)
+    if request.method == "HEAD":
+        if path in ["/", "/health", "/ping", "/login"] or is_exempt:
+            return Response(status_code=200)
     
     raw_cookie = request.cookies.get("vendor_session")
     session_user = verify_signed_session_cookie(raw_cookie)
@@ -68,9 +73,24 @@ async def vendor_auth_middleware(request: Request, call_next):
     return response
 
 # =========================================================
+# 🩺 HEALTH & UPTIME MONITORING ENDPOINTS
+# =========================================================
+@app.api_route("/health", methods=["GET", "HEAD"])
+@app.api_route("/ping", methods=["GET", "HEAD"])
+async def health_check():
+    return JSONResponse(
+        status_code=200,
+        content={
+            "status": "ok",
+            "app": "AutoVolt Cloud HQ (SaaS Vendor Master)",
+            "timestamp": datetime.now().isoformat()
+        }
+    )
+
+# =========================================================
 # 🔑 LOGIN & LOGOUT
 # =========================================================
-@app.get("/login", response_class=HTMLResponse)
+@app.api_route("/login", methods=["GET", "HEAD"], response_class=HTMLResponse)
 async def login_page(request: Request, error: Optional[str] = None):
     return templates.TemplateResponse(
         request=request,
@@ -124,7 +144,7 @@ async def handle_logout():
 # =========================================================
 # 📊 SAAS MASTER DASHBOARD OVERVIEW
 # =========================================================
-@app.get("/", response_class=HTMLResponse)
+@app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse)
 async def dashboard_page(request: Request):
     conn = db.get_db_connection()
     cursor = conn.cursor()
