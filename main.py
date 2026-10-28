@@ -1629,14 +1629,20 @@ async def download_proforma_pdf(proforma_id: str):
     proforma["items"] = [dict(row) for row in cursor.fetchall()]
     conn.close()
     
-    workshop = get_current_workshop(tenant_id=proforma.get("tenant_id"))
-    pdf_bytes = generate_proforma_pdf_bytes(proforma, workshop)
-    
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f"inline; filename=Proforma_{proforma.get('invoice_number') or proforma_id}.pdf"}
-    )
+    try:
+        workshop = get_current_workshop(tenant_id=proforma.get("tenant_id"))
+        pdf_bytes = generate_proforma_pdf_bytes(proforma, workshop)
+        
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"inline; filename=Proforma_{proforma.get('invoice_number') or proforma_id}.pdf"}
+        )
+    except Exception as e:
+        print(f"[Proforma PDF Error] {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Proforma PDF generation failed: {str(e)}")
 
 
 @app.get("/api/job-cards/{job_id}/whatsapp-proforma-link")
@@ -2380,14 +2386,20 @@ async def download_invoice_pdf(invoice_id: str):
     invoice["items"] = [dict(row) for row in cursor.fetchall()]
     conn.close()
     
-    workshop = get_current_workshop(tenant_id=invoice.get("tenant_id"))
-    pdf_bytes = generate_invoice_pdf_bytes(invoice, workshop)
-    
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f"inline; filename=Invoice_{invoice['invoice_number']}.pdf"}
-    )
+    try:
+        workshop = get_current_workshop(tenant_id=invoice.get("tenant_id"))
+        pdf_bytes = generate_invoice_pdf_bytes(invoice, workshop)
+        
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"inline; filename=Invoice_{invoice['invoice_number']}.pdf"}
+        )
+    except Exception as e:
+        print(f"[Invoice PDF Error] {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"PDF generation failed: {str(e)}")
 
 @app.get("/api/invoices/{invoice_id}/whatsapp-link")
 async def get_invoice_whatsapp_link(request: Request, invoice_id: str):

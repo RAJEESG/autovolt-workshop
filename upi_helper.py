@@ -18,7 +18,7 @@ def generate_upi_link(vpa: str, payee_name: str, amount: float, transaction_note
     if not vpa:
         vpa = "sparkautoworkshop@okaxis"
     vpa = vpa.strip()
-    payee_name = payee_name.strip()
+    payee_name = str(payee_name or "Auto Workshop").strip()
     
     params = {
         "pa": vpa,

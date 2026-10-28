@@ -326,10 +326,15 @@ def generate_invoice_pdf_bytes(invoice: Dict[str, Any], workshop: Dict[str, Any]
     ]))
 
     # Bank Details Text & Dynamic UPI QR Image
+    b_name = workshop.get('bank_name') or 'State Bank of India'
+    b_acc = workshop.get('bank_account_no') or '39876543210'
+    b_ifsc = workshop.get('bank_ifsc') or 'SBIN0001234'
+    b_branch = workshop.get('bank_branch') or 'Main'
+
     bank_text = f"""<b>BANK & PAYMENT DETAILS FOR DIRECT SETTLEMENT</b><br/>
-    <b>Bank:</b> {workshop.get('bank_name', 'State Bank of India')}<br/>
-    <b>A/c No:</b> {workshop.get('bank_account_no', '39876543210')}<br/>
-    <b>IFSC:</b> {workshop.get('bank_ifsc', 'SBIN0001234')} | <b>Branch:</b> {workshop.get('bank_branch', 'Main')}<br/>
+    <b>Bank:</b> {b_name}<br/>
+    <b>A/c No:</b> {b_acc}<br/>
+    <b>IFSC:</b> {b_ifsc} | <b>Branch:</b> {b_branch}<br/>
     <b>UPI ID:</b> <font color='#0284c7'><b>{vpa}</b></font><br/>
     <font size=7 color='#64748b'>Scan UPI QR Code with GPay, PhonePe, or Paytm to Pay Instantly.</font>
     """
@@ -367,7 +372,8 @@ def generate_invoice_pdf_bytes(invoice: Dict[str, Any], workshop: Dict[str, Any]
     story.append(Spacer(1, 4 * mm))
 
     # --- 5. TERMS & SIGNATURE ---
-    terms_text = f"<b>Terms & Conditions:</b><br/>" + (workshop.get("terms", "1. Electrical parts warranty as per manufacturer policy.\n2. Goods once fitted cannot be returned.")).replace("\n", "<br/>")
+    raw_terms = workshop.get("terms") or "1. Electrical parts warranty as per manufacturer policy.\n2. Goods once fitted cannot be returned."
+    terms_text = f"<b>Terms & Conditions:</b><br/>" + str(raw_terms).replace("\n", "<br/>")
     terms_p = Paragraph(terms_text, ParagraphStyle('Terms', parent=styles['Normal'], fontSize=7.5, leading=10, textColor=colors.HexColor('#64748b')))
     
     sig_text = f"<br/><br/><b>For {workshop.get('name', 'SPARK AUTO ELECTRICALS')}</b><br/><font size=7 color='#64748b'>Authorized Signatory</font>"
@@ -550,10 +556,15 @@ def generate_proforma_pdf_bytes(proforma: Dict[str, Any], workshop: Dict[str, An
     ]))
 
     # Bank Details Text & Dynamic UPI QR Image
+    pb_name = workshop.get('bank_name') or 'State Bank of India'
+    pb_acc = workshop.get('bank_account_no') or '39876543210'
+    pb_ifsc = workshop.get('bank_ifsc') or 'SBIN0001234'
+    pb_branch = workshop.get('bank_branch') or 'Main'
+
     bank_text = f"""<b>BANK ACCOUNT & UPI QR FOR ESTIMATE SETTLEMENT</b><br/>
-    <b>Bank:</b> {workshop.get('bank_name', 'State Bank of India')}<br/>
-    <b>A/c No:</b> {workshop.get('bank_account_no', '39876543210')}<br/>
-    <b>IFSC:</b> {workshop.get('bank_ifsc', 'SBIN0001234')} | <b>Branch:</b> {workshop.get('bank_branch', 'Main')}<br/>
+    <b>Bank:</b> {pb_name}<br/>
+    <b>A/c No:</b> {pb_acc}<br/>
+    <b>IFSC:</b> {pb_ifsc} | <b>Branch:</b> {pb_branch}<br/>
     <b>UPI ID:</b> <font color='#0369a1'><b>{vpa}</b></font><br/>
     <font size=7 color='#b45309'>Scan QR Code with GPay, PhonePe or Paytm to Pay & Issue Tax Invoice.</font>
     """
